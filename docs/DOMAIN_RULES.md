@@ -162,6 +162,12 @@ This is a **human-in-the-loop learning mechanism**, not just a flag:
   outside [approvedMin, approvedMax]) are flagged — reason
   `OUT_OF_APPROVED_RANGE`. Entries within range, or older than the
   exception date, are not flagged again.
+- Confirmed against the VBA source comment in `MarkOutOfApprovedRange`:
+  entries with `added_date_serial <= 0` (no recorded catalog added-date)
+  are never flagged against an approved range, regardless of how far
+  outside the range their price is. The macro intentionally treats them as
+  "not new enough to check" to avoid false positives on data with missing
+  dates.
 - A row in `Price_Check_Log` can be approved by an estimator: setting
   `Approve=1` and running `ApproveMarkedPriceExceptions` (or selecting a
   row and running `ApproveCurrentPriceException`) creates or **widens** the
