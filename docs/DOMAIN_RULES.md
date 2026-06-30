@@ -162,12 +162,6 @@ This is a **human-in-the-loop learning mechanism**, not just a flag:
   outside [approvedMin, approvedMax]) are flagged — reason
   `OUT_OF_APPROVED_RANGE`. Entries within range, or older than the
   exception date, are not flagged again.
-- Confirmed against the VBA source comment in `MarkOutOfApprovedRange`:
-  entries with `added_date_serial <= 0` (no recorded catalog added-date)
-  are never flagged against an approved range, regardless of how far
-  outside the range their price is. The macro intentionally treats them as
-  "not new enough to check" to avoid false positives on data with missing
-  dates.
 - A row in `Price_Check_Log` can be approved by an estimator: setting
   `Approve=1` and running `ApproveMarkedPriceExceptions` (or selecting a
   row and running `ApproveCurrentPriceException`) creates or **widens** the
@@ -398,26 +392,76 @@ behavior for the database version — flagging rather than guessing:
 
 1. **Dedup is by filename only**, case-insensitive, not by file content
    hash or modified-date. Re-importing a corrected version of a file with
-   the same name will be silently skipped unless its FileLog row is
-   manually deleted first. Is filename-based dedup sufficient for the DB
-   version, or should it be content-hash-based?
-2. **No data validation at import time** — prices, codes, units are copied
-   raw. Should the DB import path validate/normalize at ingestion (catch
-   bad data early, at the cost of rejecting more files) or keep the
-   current "import everything, validate later at matching time" approach?
-3. **One task number per file, first-matching-sheet-only** — if a real
-   RNMC file ever has multiple distinct task tables across multiple
-   sheets, only the first is imported today. Worth confirming this
-   matches how source files are actually structured in practice before
-   assuming it's fine to keep.
-4. **Region from folder name is a strict operational dependency** — the
-   future "watched folder" needs documented, enforced subfolder-per-region
-   structure, or region data will be silently wrong (folder name still
-   gets used, just incorrectly) rather than failing loudly.
-5. **Failed imports require manual FileLog cleanup to retry** — worth
-   deciding whether the DB version should auto-retry failed files (e.g.
-   distinguishing "permanently bad file" from "transient error") rather
-   than requiring a manual log edit.
+### 9.6 Decisions for the DB-targeted ingestion module
+
+These were open questions during VBA review. Decisions below were made
+explicitly by the product owner and supersede the original VBA behavior
+where noted. Do not silently revert to VBA behavior, and do not silently
+reinterpret these decisions — they were clarified carefully after an
+earlier draft of this section got the dedup behavior wrong (see note in
+item 1).
+
+1. **Dedup: default behavior is SKIP, same as VBA. "Clean replace" is an
+   explicit, separate, user-triggered action — never automatic.**
+   - Normal repeated import runs (e.g. "I added more files to the watched
+     folder, run import again") must skip any filename already present in
+     the import log, exactly like the VBA macro does. This is the default
+     and most common path — re-running an import should never silently
+     re-process or duplicate files that were already successfully
+     imported.
+   - A SEPARATE, explicitly-invoked action — "force re-import this file"
+     — must exist for the rare case where a user knowingly corrected a
+     file and wants it re-processed. Only this explicit action triggers
+     "clean replace": delete all previously-imported catalog rows whose
+     `source_file` matches, then re-import. This requires `source_file`
+     to be a reliable, queryable attribute on every catalog row in the DB
+     schema (not just descriptive metadata), so "all rows from file X"
+     can be found and deleted atomically before the replacement insert.
+   - **Filename-based identity is per (region folder + filename), not
+     filename alone.** Two files with the same filename in two different
+     region subfolders (e.g. `region1/rnmc.xlsx` and `region2/rnmc.xlsx`)
+     are different files and must be tracked/deduped independently — the
+     import log key must include the region folder, not just the
+     filename, to avoid one region's file shadowing another's.
+   - Content-hash-based dedup was considered and explicitly rejected as
+     unnecessary; identity is filename+region-folder, with explicit user
+     action required for any re-processing.
+2. **Validate at ingestion time, and produce an import log/report.** Unlike
+   the VBA macro (raw copy, validation deferred entirely to matching
+   time), the DB ingestion path must check each row at import (missing
+   price, missing/unparseable code, missing unit, etc.) and record
+   per-row validation outcomes — this becomes the basis of an import log
+   shown in the future web UI, so a user can see exactly which rows in
+   which file were rejected or are incomplete, not just a silent row
+   count. Rows that fail validation should still be logged (with the
+   specific reason), not silently dropped without a trace — the log is
+   the point.
+3. **Region from immediate parent folder name is confirmed as the correct,
+   permanent convention** — real files are always organized as
+   `<root>/<RegionName>/file.xlsx`. This VBA behavior is kept as-is, not
+   just as a stopgap. The DB ingestion module can rely on this folder
+   structure being consistent and should treat a file found outside any
+   region subfolder (e.g. directly in `<root>/`) as a data-quality error
+   to surface, not silently default a region.
+4. **One task number per file, first-matching-sheet-only is CONFIRMED
+   correct and final** — real RNMC files always have exactly one task per
+   file. The existing VBA assumption (single task number, first matching
+   worksheet) is accurate and should be kept as-is in the Python port, no
+   multi-sheet/multi-task handling is needed.
+5. **Failed imports: no auto-retry, no transient/permanent distinction —
+   matches VBA behavior. A fast manual single-file (re-)import path is a
+   required feature, not an afterthought.** There are no known real cases
+   of transient failures (e.g. file briefly locked, network drive
+   briefly unavailable) that would resolve themselves without touching
+   the file — so the system does not need to guess or distinguish error
+   types. A file that fails import is logged as failed and is NOT
+   retried automatically on subsequent folder-walk runs, same as VBA.
+   Recovery is always manual: the user fixes the file (or it was a
+   transient issue that's now resolved) and explicitly re-imports just
+   that one file — this must be a quick, low-friction action in the
+   future UI (e.g. a "retry this file" button next to its failed-import
+   log entry), not a multi-step manual process. This reuses the same
+   "force re-import" mechanism from item 1.
 
 ### 9.7 Implication for the planned database
 
@@ -427,6 +471,9 @@ to a database table (e.g. `catalog_items`) instead of an Excel sheet range
 is a natural fit — the folder-walk, header-detection, and row-mapping
 logic carry over largely unchanged; only the write target changes. The
 "logged files" dedup dictionary becomes a query against an
-`imported_files` table instead of reading a sheet column. The open
-questions in §9.6 should be resolved as explicit decisions during that
-port, not inherited silently.
+`imported_files` table, keyed by (region folder, filename) per §9.6 item
+1 — normal runs query-and-skip, exactly like VBA; only the explicit
+"force re-import" action drives a delete-then-reinsert. All five
+originally-open questions from the VBA review now have explicit product
+decisions (§9.6 items 1-5) — `core/ingest.py` can be built directly
+against this section without further clarification needed.
