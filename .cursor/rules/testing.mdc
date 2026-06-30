@@ -1,0 +1,13 @@
+# Testing Rule
+
+Every function in core/ must have a pytest test.
+
+Tests must use realistic examples — ideally derived from actual BOQ/macro
+fixture files in tests/fixtures/, not invented edge cases unless the real
+data doesn't cover something important.
+
+When fixing a bug: write a failing test that reproduces it first, then fix
+the code, then confirm the test passes.
+
+Do not change matching or pricing logic without updating or adding tests
+that cover the change.

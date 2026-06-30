@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Real client data — never commit actual client BOQ/price files,
+# only anonymized fixtures explicitly added to tests/fixtures/
+data/real/
+*.xlsx.bak
+
+# Cursor local
+.cursor/cache/

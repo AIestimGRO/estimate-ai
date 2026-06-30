@@ -1,0 +1,16 @@
+# Project Rule
+
+Before doing anything, read docs/AGENTS.md, docs/DOMAIN_RULES.md and
+docs/MVP.md in this repo. Treat them as binding instructions, not background.
+
+This project is currently Phase 0: a local Python library that ports
+existing VBA macro logic (see reference/vba_original/, original source,
+read-only) for construction price matching into tested code. No web
+server, no database, no Docker — see docs/MVP.md for exact scope and
+porting order.
+
+Never invent construction pricing rules or prices. docs/DOMAIN_RULES.md
+was extracted from real working macros, not designed speculatively — if a
+rule there seems unclear or wrong, ask rather than guessing or "improving"
+it silently. When porting a function, check reference/vba_original/ for
+exact original behavior if DOMAIN_RULES.md is ambiguous.
