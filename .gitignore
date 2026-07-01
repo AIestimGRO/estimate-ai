@@ -14,7 +14,12 @@ Thumbs.db
 # Real client data — never commit actual client BOQ/price files,
 # only anonymized fixtures explicitly added to tests/fixtures/
 data/real/
+data/*.xls
+data/*.xlsx
 *.xlsx.bak
+
+# Stray pytest cache directory variant created in some sandboxes
+pytest-cache-files-*/
 
 # Cursor local
 .cursor/cache/

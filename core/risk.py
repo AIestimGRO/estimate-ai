@@ -10,6 +10,10 @@ REASON_NONE = "none"
 REASON_RATIO_EXCEEDED = "RATIO_EXCEEDED"
 REASON_OUT_OF_APPROVED_RANGE = "OUT_OF_APPROVED_RANGE"
 
+DEM_KEY_DEM = "DEM"
+DEM_KEY_NO_DEM = "NO_DEM"
+DEM_KEY_FILTER_OFF = "DEM_FILTER_OFF"
+
 
 @dataclass(frozen=True)
 class GesnException:
@@ -31,6 +35,25 @@ class RiskResult:
     min_entry: CatalogEntry | None = None
     max_entry: CatalogEntry | None = None
     ratio: float = 0
+
+
+def build_dem_key(source_has_demolition: bool, demontazh_filter_enabled: bool) -> str:
+    """Build the demolition dimension of an exception key.
+
+    Ports GetDemKey from Module6, DOMAIN_RULES.md section 5.2.
+    """
+    if not demontazh_filter_enabled:
+        return DEM_KEY_FILTER_OFF
+    return DEM_KEY_DEM if source_has_demolition else DEM_KEY_NO_DEM
+
+
+def build_gesn_exception_key(unit_key: str, code_key: str, dem_key: str) -> str:
+    """Build the approved-range lookup key `unit||code||DEM_FLAG`.
+
+    Ports GetGesnExceptionKey from Module6, DOMAIN_RULES.md section 5.2.
+    Expects an already-normalized unit and code (NormUnit/NormCode).
+    """
+    return f"{unit_key.strip()}||{code_key.strip()}||{dem_key.strip().upper()}"
 
 
 def CheckPriceRisk(
