@@ -57,6 +57,20 @@ re-import action, which must be fast/low-friction in the future UI.
 `core/ingest.py` can be built directly against DOMAIN_RULES.md §9.6
 without further clarification needed.
 
+Implementation note: `force_reimport=True` results from `core/ingest.py`
+do not delete or replace anything by themselves. The module only parses
+files and reports `IngestFileResult`; the future database/persistence
+layer must perform the explicit "delete old rows for this file, then
+insert new rows" operation. This is intentional storage-agnostic design,
+not a missing feature in `core/ingest.py`.
+
+Also, both fully failed files (`failed=True`) and successfully processed
+files are added to the imported key set, so a fresh normal `ingest_folder`
+call can only report `skipped=True` for either case. Distinguishing
+"skipped because already successfully imported" from "skipped because it
+failed before" must come from a future import log/history table, not from
+this module's return value alone.
+
 ## Process note
 
 This file exists because deferring a decision should not mean forgetting
