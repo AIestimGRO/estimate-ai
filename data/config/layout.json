@@ -1,0 +1,58 @@
+{
+  "header_scan": {
+    "max_rows": 50,
+    "max_cols": 60,
+    "min_matched_fields": 2
+  },
+  "data_scan": {
+    "max_blank_run": 5
+  },
+  "field_priority": ["base_price", "unit", "work_name", "code"],
+  "fields": {
+    "base_price": {
+      "mode": "contains",
+      "patterns": [
+        "цена за ед",
+        "цена за единиц",
+        "стоимость за ед",
+        "стоимость за единиц",
+        "базовая цена",
+        "цена за 1"
+      ]
+    },
+    "unit": {
+      "mode": "contains",
+      "patterns": [
+        "ед изм",
+        "единица измер",
+        "единицы измер"
+      ]
+    },
+    "work_name": {
+      "mode": "startswith",
+      "patterns": [
+        "наименование работ",
+        "наименование",
+        "работы"
+      ]
+    },
+    "code": {
+      "mode": "contains",
+      "patterns": [
+        "обоснование",
+        "шифр",
+        "код"
+      ]
+    }
+  },
+  "coefficient": {
+    "region_label": {
+      "mode": "contains",
+      "patterns": ["регион"]
+    },
+    "coefficient_label": {
+      "mode": "contains",
+      "patterns": ["коэффициент", "коэфф"]
+    }
+  }
+}

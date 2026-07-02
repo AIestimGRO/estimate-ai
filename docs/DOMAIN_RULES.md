@@ -477,3 +477,86 @@ logic carry over largely unchanged; only the write target changes. The
 originally-open questions from the VBA review now have explicit product
 decisions (§9.6 items 1-5) — `core/ingest.py` can be built directly
 against this section without further clarification needed.
+
+## 10. Flexible layout resolution (decided extension, NOT a VBA port)
+
+> Status: this is a deliberate, product-owner-approved extension beyond the
+> original macros, decided 2026-07. The VBA reads fixed, user-configured
+> column numbers (§1 `LoadSettings`) and a single marker-based header scan.
+> The Python service additionally resolves where each logical field lives by
+> matching header text against a config-driven synonym dictionary, so it can
+> process files that do not exactly match the template. This is new behavior,
+> flagged here per AGENTS.md rule 7 — it does not change any matching or
+> pricing math, only how columns/rows are located on a worksheet.
+
+Implemented in `core/layout.py`; synonym dictionaries live in
+`data/config/layout.json` (Russian header wording stays in config, never in
+code — AGENTS.md rule 3). Matching is exact/substring against a fixed
+dictionary only — deterministic and testable, no fuzzy/semantic matching
+(consistent with §8).
+
+### 10.1 Resolution priority (per field)
+
+1. **Explicit pin** — caller-provided column override wins outright.
+2. **Detection** — header text matches a field synonym (equals / startswith /
+   contains, per the config `mode`).
+3. **Template default** — the historical fixed column (Settings), used for
+   *optional* fields only.
+4. **Missing** — nothing resolved.
+
+**Required fields (code, unit, base price) never fall back to a template
+default.** If a required field is neither pinned nor detected, the layout is
+reported as not resolvable (`missing_required` non-empty), which the caller
+surfaces as a "key data not found" result rather than silently guessing.
+
+### 10.2 Header-row location
+
+The header row is located by scanning the first N rows (config
+`header_scan.max_rows`) and picking the row with the most detected fields;
+ties keep the first (smallest-index) row; a minimum number of matched fields
+is required (`header_scan.min_matched_fields`). Explicit pins do not help
+locate the header row (scoring counts detected fields only).
+
+Header-text normalization here (`_normalize_header_text`) is intentionally
+looser than and separate from `NormUnit`/`NormCode` (see §9.2 for the same
+"header normalization is its own thing" note).
+
+### 10.3 Current scope and deferred rules
+
+Implemented in `core/layout.py`:
+
+- **Column detection** for `work_name` / `unit` / `code` / `base_price`
+  (R6-R9), with a minimal header-row locator, the required-fields hard-stop
+  (R20), and a human-readable resolution report (R19).
+- **Regional coefficient by label** (R16, `resolve_regional_coefficient`):
+  primary pattern is a "Region" label with a "Coefficient" label directly
+  below it, region name to the right of the region label and the numeric
+  coefficient to the right of the coefficient label; fallbacks are a
+  standalone coefficient label with a number to its right, then a
+  caller-provided explicit value, then the default `1.0`. This replaces the
+  VBA's single fixed coefficient cell (§6) as the primary source, keeping
+  the fixed cell only as an explicit fallback.
+- **Average-column placement** (R12, `resolve_average_placement`): the
+  average price is written into the column immediately right of the detected
+  base price; if that neighbour already holds data, a new column is inserted
+  there. This function only decides the target column and whether an insert
+  is needed; the Excel writer performs the actual insert/shift.
+- **Sheet selection** (R1, `rank_sheets` / `select_sheets`): every worksheet
+  is scored by how well its layout resolves. A single sheet is used
+  automatically; when several sheets qualify, the result flags
+  `needs_user_choice` and lists candidates (intended for the web flow where
+  the user picks one or more sheets as buttons); an explicit selection by
+  title is also supported. The sheet may be named anything — selection is by
+  content, not by a fixed name/order.
+- **Blank-row-tolerant data range** (R5, partial, `data_row_numbers`): body
+  rows are read tolerating isolated blank rows — the scan skips blank rows
+  (all key columns empty) and stops only after `data_scan.max_blank_run`
+  consecutive blank rows, so one or two stray empty rows inside the table do
+  not truncate the read. Fully-empty columns in the body are irrelevant
+  because only the resolved key columns are inspected.
+
+Still deferred (agreed, not yet built) — tracked in `docs/OPEN_ITEMS.md`:
+richer header detection incl. merged-cell/sub-header handling (R2-R4),
+total/summary-row skipping (rest of R5), section/quantity detection
+(R10-R11), analog-column placement in the first free column (R13), and
+tolerant number/code parsing at detection time (R17-R18).

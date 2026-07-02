@@ -121,6 +121,39 @@ After the local pipeline works:
 
 5. Add import dashboard and approval UI.
 
+## Multi-source analogs (future phase, registered 2026-07)
+
+Beyond the historical RNMC price catalog, analogs will be drawn from two
+additional sources and shown in the **leading analog columns**, ahead of the
+exact-match catalog analogs. This is a decided product direction, sequenced
+**after** the deterministic exact-match core is proven on real data — it must
+not weaken or bypass the base exact-match conditions (see DOMAIN_RULES.md §8
+and AGENTS.md rule 8). Semantic/AI results are non-deterministic and must be
+isolated behind a separate, cache-backed layer so any run stays reproducible
+from stored results; the core matching/pricing path stays deterministic.
+
+Sources and their reserved columns (left to right):
+
+1. **TKP database** (technical-commercial proposals) — semantic search for
+   the closest proposal to the estimate work item, not contradicting the
+   base search conditions. Reserved columns:
+   - price for this work from the TKP source,
+   - the matched work name from the TKP source,
+   - match percentage between the original and the pulled name.
+2. **Internet AI agent** — finds the most relevant price for the work from
+   open web sources. Reserved columns:
+   - the recommended price,
+   - a link to the resource the price came from.
+3. **Historical RNMC catalog** — the existing exact-match analogs (today's
+   pipeline) follow after the reserved source columns above.
+
+Open decisions before building this are tracked in `docs/OPEN_ITEMS.md`
+("Multi-source analogs") — e.g. whether a TKP price feeds the recommended
+average, the similarity metric/threshold, provenance/staleness of internet
+prices, reserved-column ordering/configurability, and the determinism
+boundary. Do not implement any of this before those decisions are made and
+the deterministic core is signed off.
+
 ## Later Enhancements
 
 - Persistent RNMC catalog database.
@@ -130,7 +163,9 @@ After the local pipeline works:
 - Better Excel output formatting.
 - User roles/authentication.
 - Region-aware analytics if explicitly approved.
-- Fuzzy/semantic matching only after exact rule-based matching is proven.
+- Fuzzy/semantic matching only after exact rule-based matching is proven
+  (see "Multi-source analogs" above for the TKP semantic + internet-agent
+  sources).
 
 ## Working Rules
 
