@@ -88,15 +88,19 @@ intentionally deferred, to keep each step small:
   minimal "row with most detected fields" locator exists today.
 - **R5 (remainder)** — total/summary-row skipping ("итого"/"всего", via a
   config dictionary). The blank-row tolerance part of R5 is done.
-- **R1 (web UI)** — the library already exposes `needs_user_choice` +
-  candidates; the actual multi-sheet selection buttons are a web-layer
-  concern, built when the web UI is built.
+- **R1 (web UI)** — DONE. `app/web/` (FastAPI + uvicorn) renders the
+  multi-sheet choice as buttons and forces the selection by title; the
+  service layer (`app/services/read_estimate.py`) raises `MultipleSheetsError`
+  with candidates and accepts `selected_sheet_title`.
 - **R10** — quantity column detection (for future qty-aware output).
-- **R11** — section column detection, and creating one when absent.
-- **R13** — analog columns placed in the first free column after the data
-  block, instead of a fixed template column. Must reserve the leading
-  analog slots for the additional sources below (see "Multi-source
-  analogs").
+- **R11** — section column detection, and creating one when absent. Until
+  then the detected-layout WA write skips the section code (the template
+  write still fills it); only template files get the section column.
+- **R13** — full version deferred. A minimal "R13-lite" exists: for a
+  detected (non-template) layout the writer places analogs in the first free
+  column after the used range (`max_column + 1`, past the average column).
+  The full rule must reserve the leading analog slots for the additional
+  sources below (see "Multi-source analogs"), which R13-lite does not.
 - **R17/R18** — tolerant numeric parsing (spaces, nbsp, comma decimal,
   currency suffixes) and tolerant code parsing at detection time.
 - **Blue task-colour highlight** (DOMAIN_RULES.md §4 step 5 / §6) — the

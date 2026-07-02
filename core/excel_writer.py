@@ -1,14 +1,17 @@
 """Write a matching run result back into a copy of the estimate workbook.
 
 Pure Excel output primitive (symmetric to core/excel_io.py): given a source
-estimate file, the structured run result, and the physical worksheet row for
-each result row, it writes analog columns, the average-price formula, the
-section code, the `/KR` code suffix, cell colouring, and a risk-check log
-sheet into a *copy* of the workbook. The source file is never modified.
+estimate file, the structured run result, the physical worksheet row for each
+result row, and an explicit column plan, it writes analog columns, the
+average-price formula, the section code, the `/KR` code suffix, cell
+colouring, and a risk-check log sheet into a *copy* of the workbook. The
+source file is never modified.
 
 Ports the output side-effects of ProcessSmeta (Module4), DOMAIN_RULES.md
 section 6, and uses the average-column placement rule from core/layout.py
-(R12). This module makes no matching or pricing decisions of its own.
+(R12). It makes no matching or pricing decisions of its own. The column plan
+is supplied by the caller so both the fixed template layout and a detected
+layout (Step 4c) can be written correctly.
 """
 
 from dataclasses import dataclass
@@ -20,7 +23,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.services.run_matching import EstimateRowResult, MatchingRunResult
-from core.excel_io import Settings, find_estimate_sheet
+from core.excel_io import find_estimate_sheet
 from core.layout import resolve_average_placement
 from core.risk import REASON_RATIO_EXCEEDED
 
@@ -42,6 +45,21 @@ _RISK_LOG_HEADER = (
 
 
 @dataclass(frozen=True)
+class WriterColumns:
+    """Where the writer should place each output on the worksheet.
+
+    `section` may be None to skip writing the section code (e.g. when no
+    section column is known). `analog_start` may be None to place analogs in
+    the first free column after the existing used range (R13-lite).
+    """
+
+    base_price: int
+    code: int
+    section: int | None
+    analog_start: int | None
+
+
+@dataclass(frozen=True)
 class WriteReport:
     """Summary of what the writer produced."""
 
@@ -59,27 +77,34 @@ def write_run_result(
     result: MatchingRunResult,
     row_numbers: list[int],
     *,
-    settings: Settings | None = None,
+    columns: WriterColumns,
     regional_coefficient: float = 1.0,
+    sheet_title: str | None = None,
 ) -> WriteReport:
     """Write `result` into a copy of the estimate workbook at `output_path`."""
     if len(row_numbers) != len(result.rows):
         raise ValueError("row_numbers length must match result.rows length")
 
-    active_settings = Settings() if settings is None else settings
     workbook = load_workbook(source_path, data_only=False)
 
     try:
-        worksheet = find_estimate_sheet(workbook, active_settings)
+        if sheet_title is not None:
+            worksheet = workbook[sheet_title]
+        else:
+            worksheet = find_estimate_sheet(workbook)
 
-        placement = _plan_average_column(worksheet, active_settings, row_numbers)
-        columns = _plan_output_columns(active_settings, placement)
+        placement = _plan_average_column(worksheet, columns.base_price, row_numbers)
+        if columns.analog_start is None:
+            analog_start_base = max(worksheet.max_column + 1, placement.column + 1)
+        else:
+            analog_start_base = columns.analog_start
+        output_columns = _plan_output_columns(columns, placement, analog_start_base)
         if placement.needs_insert:
             worksheet.insert_cols(placement.column)
 
         written_rows = 0
         for row_number, row in zip(row_numbers, result.rows):
-            if _write_row(worksheet, row_number, row, columns, regional_coefficient):
+            if _write_row(worksheet, row_number, row, output_columns, regional_coefficient):
                 written_rows += 1
 
         risk_log_rows = _write_risk_log(workbook, result, row_numbers, regional_coefficient)
@@ -94,8 +119,8 @@ def write_run_result(
         output_path=destination,
         written_rows=written_rows,
         inserted_average_column=placement.needs_insert,
-        average_column=columns.average,
-        analog_start_column=columns.analog_start,
+        average_column=output_columns.average,
+        analog_start_column=output_columns.analog_start,
         risk_log_rows=risk_log_rows,
     )
 
@@ -105,36 +130,38 @@ class _OutputColumns:
     base_price: int
     average: int
     code_kr: int
-    section: int
+    section: int | None
     analog_start: int
 
 
 def _plan_average_column(
     worksheet: Worksheet,
-    settings: Settings,
+    base_price_column: int,
     row_numbers: list[int],
 ):
-    neighbour = settings.col_f + 1
+    neighbour = base_price_column + 1
     occupied: set[int] = set()
     for row_number in row_numbers:
         if worksheet.cell(row=row_number, column=neighbour).value not in (None, ""):
             occupied.add(neighbour)
             break
-    return resolve_average_placement(settings.col_f, occupied)
+    return resolve_average_placement(base_price_column, occupied)
 
 
-def _plan_output_columns(settings: Settings, placement) -> _OutputColumns:
+def _plan_output_columns(columns: WriterColumns, placement, analog_start_base: int) -> _OutputColumns:
     def shifted(column: int) -> int:
         if placement.needs_insert and column >= placement.column:
             return column + 1
         return column
 
+    section = None if columns.section is None else shifted(columns.section)
+
     return _OutputColumns(
-        base_price=settings.col_f,
+        base_price=columns.base_price,
         average=placement.column,
-        code_kr=shifted(settings.col_kr),
-        section=shifted(settings.col_section),
-        analog_start=shifted(settings.col_analog_start),
+        code_kr=shifted(columns.code),
+        section=section,
+        analog_start=shifted(analog_start_base),
     )
 
 
@@ -145,7 +172,7 @@ def _write_row(
     columns: _OutputColumns,
     coefficient: float,
 ) -> bool:
-    if row.section_code:
+    if columns.section is not None and row.section_code:
         worksheet.cell(row=row_number, column=columns.section).value = row.section_code
 
     if not row.has_analogs:
@@ -154,8 +181,7 @@ def _write_row(
     analog_count = len(row.analogs)
     for offset, analog in enumerate(row.analogs):
         column = columns.analog_start + offset
-        cell = worksheet.cell(row=row_number, column=column)
-        cell.value = analog.entry.price * coefficient
+        worksheet.cell(row=row_number, column=column).value = analog.entry.price * coefficient
 
     _apply_colours(worksheet, row_number, row, columns.analog_start)
 

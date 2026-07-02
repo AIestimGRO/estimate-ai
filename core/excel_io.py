@@ -9,6 +9,7 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from core.catalog import CatalogRow
+from core.layout import DEFAULT_MAX_BLANK_RUN, data_row_numbers
 from core.matching import EstimateRow
 from core.normalize import NormCode, NormUnit
 
@@ -148,6 +149,61 @@ def find_estimate_sheet(
 ) -> Worksheet:
     """Locate the estimate worksheet (name contains the estimate marker)."""
     return _find_sheet_by_part(workbook.worksheets, ESTIMATE_SHEET_PART)
+
+
+def read_estimate_rows_from_worksheet(
+    worksheet: Worksheet,
+    settings: Settings | None = None,
+) -> list[tuple[int, EstimateRow]]:
+    """Template read of an already-open worksheet (fixed Settings columns)."""
+    active_settings = Settings() if settings is None else settings
+    return _collect_estimate_rows(worksheet, active_settings)
+
+
+def read_estimate_rows_by_columns(
+    worksheet: Worksheet,
+    *,
+    header_row: int,
+    code_column: int,
+    unit_column: int,
+    work_name_column: int,
+    base_price_column: int,
+    max_blank_run: int = DEFAULT_MAX_BLANK_RUN,
+) -> list[tuple[int, EstimateRow]]:
+    """Read estimate rows using explicitly resolved columns (flexible path).
+
+    Body rows are scanned tolerating isolated blank rows (data_row_numbers,
+    R5); each row is still validated as a working estimate row.
+    """
+    key_columns = [code_column, unit_column, base_price_column]
+    rows: list[tuple[int, EstimateRow]] = []
+
+    for row_number in data_row_numbers(
+        worksheet,
+        header_row + 1,
+        key_columns,
+        max_blank_run=max_blank_run,
+    ):
+        code = _cell_value(worksheet, row_number, code_column)
+        unit = _cell_value(worksheet, row_number, unit_column)
+        base_price = _cell_value(worksheet, row_number, base_price_column)
+
+        if not _is_working_estimate_row(code, unit, base_price):
+            continue
+
+        rows.append(
+            (
+                row_number,
+                EstimateRow(
+                    code=code,
+                    unit=unit,
+                    work_name=_cell_value(worksheet, row_number, work_name_column),
+                    base_price=base_price,
+                ),
+            )
+        )
+
+    return rows
 
 
 def _find_sheet_by_part(worksheets: list[Worksheet], part: str) -> Worksheet:

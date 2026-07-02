@@ -37,6 +37,17 @@ Implemented modules:
 - `core/pricing.py` — average price formula and regional coefficient.
 - `core/excel_io.py` — read catalog and estimate Excel rows.
 - `core/ingest.py` — folder-walk RNMC ingestion into plain Python structures.
+- `core/layout.py` — deterministic flexible layout resolution (sheet/columns/
+  regional coefficient/average placement, R1/R5/R6-R9/R12/R16/R19/R20).
+- `core/excel_writer.py` — write a run result (analogs, average formula, `/KR`,
+  section, colours, risk log) into a `WA` copy via an explicit column plan.
+- `app/services/run_matching.py` — one end-to-end matching run over rows.
+- `app/services/read_estimate.py` — Step 4c flexible read (sheet selection,
+  template-or-detected columns, clear "key data not found"/multi-sheet errors).
+- `app/services/write_result.py` — read + resolve coefficient + match + write.
+- `app/web/` — local web UI over the pipeline (FastAPI + uvicorn). Run with
+  `python -m app.web`. This is a thin HTTP layer (`app/web/app.py` routes,
+  `app/web/rendering.py` HTML); all logic stays in the tested core/services.
 
 Important docs:
 
