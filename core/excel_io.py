@@ -84,40 +84,70 @@ def read_estimate_rows(
     settings: Settings | None = None,
 ) -> list[EstimateRow]:
     """Read raw working estimate rows from the estimate sheet."""
+    return [row for _, row in read_estimate_rows_with_positions(workbook_path, settings)]
+
+
+def read_estimate_rows_with_positions(
+    workbook_path: str | Path,
+    settings: Settings | None = None,
+) -> list[tuple[int, EstimateRow]]:
+    """Read working estimate rows tagged with their physical worksheet row.
+
+    The physical row number is needed by the Excel writer to write results
+    back onto the exact source row; matching itself stays position-agnostic.
+    """
     active_settings = Settings() if settings is None else settings
     workbook = load_workbook(workbook_path, data_only=False)
 
     try:
-        worksheet = _find_sheet_by_part(workbook.worksheets, ESTIMATE_SHEET_PART)
-        header_row = _detect_estimate_header_row(worksheet, active_settings)
-        if header_row == 0:
-            return []
+        worksheet = find_estimate_sheet(workbook, active_settings)
+        return _collect_estimate_rows(worksheet, active_settings)
+    finally:
+        workbook.close()
 
-        rows: list[EstimateRow] = []
-        for row_number in range(header_row + 2, worksheet.max_row + 1):
-            code = _cell_value(worksheet, row_number, active_settings.col_search)
-            unit = _cell_value(worksheet, row_number, active_settings.col_smeta_unit)
-            base_price = _cell_value(worksheet, row_number, active_settings.col_f)
 
-            if not _is_working_estimate_row(code, unit, base_price):
-                continue
+def _collect_estimate_rows(
+    worksheet: Worksheet,
+    settings: Settings,
+) -> list[tuple[int, EstimateRow]]:
+    header_row = _detect_estimate_header_row(worksheet, settings)
+    if header_row == 0:
+        return []
 
-            rows.append(
+    rows: list[tuple[int, EstimateRow]] = []
+    for row_number in range(header_row + 2, worksheet.max_row + 1):
+        code = _cell_value(worksheet, row_number, settings.col_search)
+        unit = _cell_value(worksheet, row_number, settings.col_smeta_unit)
+        base_price = _cell_value(worksheet, row_number, settings.col_f)
+
+        if not _is_working_estimate_row(code, unit, base_price):
+            continue
+
+        rows.append(
+            (
+                row_number,
                 EstimateRow(
                     code=code,
                     unit=unit,
                     work_name=_cell_value(
                         worksheet,
                         row_number,
-                        active_settings.col_smeta_work_name,
+                        settings.col_smeta_work_name,
                     ),
                     base_price=base_price,
-                )
+                ),
             )
+        )
 
-        return rows
-    finally:
-        workbook.close()
+    return rows
+
+
+def find_estimate_sheet(
+    workbook: Any,
+    settings: Settings | None = None,
+) -> Worksheet:
+    """Locate the estimate worksheet (name contains the estimate marker)."""
+    return _find_sheet_by_part(workbook.worksheets, ESTIMATE_SHEET_PART)
 
 
 def _find_sheet_by_part(worksheets: list[Worksheet], part: str) -> Worksheet:
