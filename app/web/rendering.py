@@ -34,7 +34,9 @@ body {
   width: 100%; max-width: 520px; background: #fff; border-radius: 16px;
   padding: 32px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
 }
+.card.wide { max-width: 900px; }
 h1 { margin: 0 0 4px; font-size: 24px; }
+h2.section { margin: 0 0 10px; font-size: 16px; color: #334155; }
 .sub { margin: 0 0 24px; color: #64748b; }
 label { display: block; margin-bottom: 16px; font-weight: 600; font-size: 14px; }
 input[type=file], input[type=text] {
@@ -71,6 +73,16 @@ button:hover { background: #4338ca; }
 }
 .notice { margin-top: 16px; padding: 12px; border-radius: 10px;
   background: #fef2f2; color: #b91c1c; font-size: 14px; }
+.preview-wrap { max-height: 380px; overflow: auto; border: 1px solid #e2e8f0;
+  border-radius: 10px; margin-bottom: 20px; }
+table.preview { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.preview th, table.preview td {
+  padding: 7px 10px; border-bottom: 1px solid #f1f5f9; text-align: left;
+  white-space: nowrap; }
+table.preview th { position: sticky; top: 0; background: #f8fafc; color: #475569;
+  font-weight: 600; }
+table.preview td.risk { color: #b91c1c; text-align: center; font-weight: 700; }
+.muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
 """
 
 
@@ -79,6 +91,7 @@ def render(template_name: str, **context: str) -> str:
     context.setdefault("styles", STYLES)
     context.setdefault("message", "")
     context.setdefault("detail", "")
+    context.setdefault("preview", "")
     return Template(text).safe_substitute(context)
 
 
@@ -105,6 +118,51 @@ def render_choice(token: str, candidates: list[str]) -> str:
     return render("choose_sheet.html", sheet_buttons=buttons)
 
 
+PREVIEW_ROW_LIMIT = 200
+
+
+def _fmt_number(value: object) -> str:
+    if isinstance(value, bool):
+        return html.escape(str(value))
+    if isinstance(value, (int, float)):
+        return f"{value:g}"
+    return html.escape("" if value is None else str(value))
+
+
+def _render_preview(rows: list) -> str:
+    header = (
+        "<tr><th>#</th><th>\u041a\u043e\u0434</th><th>\u0415\u0434.</th>"
+        "<th>\u0411\u0430\u0437. \u0446\u0435\u043d\u0430</th>"
+        "<th>\u0420\u0435\u043a\u043e\u043c. \u0446\u0435\u043d\u0430</th>"
+        "<th>\u0410\u043d\u0430\u043b\u043e\u0433\u043e\u0432</th>"
+        "<th>\u0420\u0438\u0441\u043a</th></tr>"
+    )
+    body = []
+    for row in rows[:PREVIEW_ROW_LIMIT]:
+        estimate_row = row.estimate_row
+        risk_mark = "\u26a0" if row.risk_result.is_flagged else ""
+        body.append(
+            "<tr>"
+            f"<td>{row.row_index}</td>"
+            f"<td>{html.escape('' if estimate_row.code is None else str(estimate_row.code))}</td>"
+            f"<td>{html.escape('' if estimate_row.unit is None else str(estimate_row.unit))}</td>"
+            f"<td>{_fmt_number(estimate_row.base_price)}</td>"
+            f"<td>{_fmt_number(row.recommended_price)}</td>"
+            f"<td>{len(row.analogs)}</td>"
+            f'<td class="risk">{risk_mark}</td>'
+            "</tr>"
+        )
+
+    table = f'<table class="preview">{header}{"".join(body)}</table>'
+    if len(rows) > PREVIEW_ROW_LIMIT:
+        table += (
+            f'<p class="muted">\u043f\u043e\u043a\u0430\u0437\u0430\u043d\u044b '
+            f"\u043f\u0435\u0440\u0432\u044b\u0435 {PREVIEW_ROW_LIMIT} \u0438\u0437 {len(rows)} "
+            "\u0441\u0442\u0440\u043e\u043a</p>"
+        )
+    return table
+
+
 def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> str:
     result = outcome.result
     method_label = READ_METHOD_LABELS.get(outcome.read_method, outcome.read_method)
@@ -124,6 +182,7 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
     return render(
         "result.html",
         stats=stats,
+        preview=_render_preview(result.rows),
         download_url=f"/download?token={quote(token)}",
         filename=html.escape(output_name),
     )

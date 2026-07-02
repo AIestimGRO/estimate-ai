@@ -109,6 +109,8 @@ def test_full_run_and_download(client):
     page = client.post("/run", files=files, data={"coefficient": ""})
 
     assert page.status_code == 200
+    assert '<table class="preview">' in page.text
+    assert CODE in page.text
     match = re.search(r'href="(/download\?token=[0-9a-f]+)"', page.text)
     assert match is not None
 
