@@ -7,13 +7,16 @@
   "data_scan": {
     "max_blank_run": 5
   },
-  "field_priority": ["base_price", "unit", "work_name", "code"],
+  "field_priority": ["base_price", "unit", "work_name", "section", "code"],
   "fields": {
     "base_price": {
       "mode": "contains",
       "patterns": [
+        "цена единицы работ",
+        "цена единицы",
         "цена за ед",
         "цена за единиц",
+        "стоимость единицы",
         "стоимость за ед",
         "стоимость за единиц",
         "базовая цена",
@@ -36,9 +39,17 @@
         "работы"
       ]
     },
+    "section": {
+      "mode": "contains",
+      "patterns": [
+        "код раздела"
+      ]
+    },
     "code": {
       "mode": "contains",
       "patterns": [
+        "перечень гэсн",
+        "перечень",
         "обоснование",
         "шифр",
         "код"

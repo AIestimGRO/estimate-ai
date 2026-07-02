@@ -130,7 +130,7 @@ def _resolve_coefficient(
     if explicit is not None:
         return explicit, "explicit"
 
-    workbook = load_workbook(estimate_path, data_only=False)
+    workbook = load_workbook(estimate_path, data_only=True)
     try:
         worksheet = workbook[sheet_title]
         resolution = resolve_regional_coefficient(worksheet, config)

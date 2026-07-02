@@ -101,7 +101,7 @@ def load_estimate(
     active_settings = Settings() if settings is None else settings
     layout_config = load_layout_config() if config is None else config
 
-    workbook = load_workbook(estimate_path, data_only=False)
+    workbook = load_workbook(estimate_path, data_only=True)
     try:
         worksheet, title = _choose_sheet(
             workbook,
@@ -114,6 +114,38 @@ def load_estimate(
             layout_config,
             default_columns=default_columns(active_settings),
         )
+
+        # Detected-first: when the header is confidently resolved, read by the
+        # detected columns (exact header row + blank-row-tolerant stop). This
+        # is more precise than the marker-based template on real files, whose
+        # 'Perechen GESN/FER...' header would trip the marker scan. The fixed
+        # template read stays as a fallback for marker-only files that have no
+        # text header to detect.
+        if layout.ok and layout.header_row > 0:
+            work_name_column = _resolved_or(
+                layout, FIELD_WORK_NAME, active_settings.col_smeta_work_name
+            )
+            detected_rows = read_estimate_rows_by_columns(
+                worksheet,
+                header_row=layout.header_row,
+                code_column=layout.column(FIELD_CODE),
+                unit_column=layout.column(FIELD_UNIT),
+                work_name_column=work_name_column,
+                base_price_column=layout.column(FIELD_BASE_PRICE),
+                max_blank_run=layout_config.max_blank_run,
+            )
+            if detected_rows:
+                return EstimateData(
+                    sheet_title=title,
+                    positioned_rows=detected_rows,
+                    header_row=layout.header_row,
+                    code_column=layout.column(FIELD_CODE),
+                    unit_column=layout.column(FIELD_UNIT),
+                    work_name_column=work_name_column,
+                    base_price_column=layout.column(FIELD_BASE_PRICE),
+                    method=METHOD_DETECTED,
+                    layout=layout,
+                )
 
         template_rows = read_estimate_rows_from_worksheet(worksheet, active_settings)
         if template_rows:
@@ -128,33 +160,6 @@ def load_estimate(
                 method=METHOD_TEMPLATE,
                 layout=layout,
             )
-
-        if layout.ok and layout.header_row > 0:
-            detected_rows = read_estimate_rows_by_columns(
-                worksheet,
-                header_row=layout.header_row,
-                code_column=layout.column(FIELD_CODE),
-                unit_column=layout.column(FIELD_UNIT),
-                work_name_column=_resolved_or(
-                    layout, FIELD_WORK_NAME, active_settings.col_smeta_work_name
-                ),
-                base_price_column=layout.column(FIELD_BASE_PRICE),
-                max_blank_run=layout_config.max_blank_run,
-            )
-            if detected_rows:
-                return EstimateData(
-                    sheet_title=title,
-                    positioned_rows=detected_rows,
-                    header_row=layout.header_row,
-                    code_column=layout.column(FIELD_CODE),
-                    unit_column=layout.column(FIELD_UNIT),
-                    work_name_column=_resolved_or(
-                        layout, FIELD_WORK_NAME, active_settings.col_smeta_work_name
-                    ),
-                    base_price_column=layout.column(FIELD_BASE_PRICE),
-                    method=METHOD_DETECTED,
-                    layout=layout,
-                )
 
         raise KeyDataNotFoundError(title, format_layout_report(layout))
     finally:

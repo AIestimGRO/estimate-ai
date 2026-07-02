@@ -18,15 +18,16 @@
    "file processed, zero matching rows found," and right now both look
    identical from the caller's side.
 
-2. **Formula cells are read as formula text, not computed values.**
-   Workbooks are loaded with `data_only=False`. If real catalog/estimate
-   files turn out to have formula-driven price/code/date cells (rather
-   than static values), those cells will currently be read as formula
-   strings (e.g. `"=B4*1.2"`), which will fail numeric/date parsing
-   downstream rather than reading the actual computed number. Needs
-   `data_only=True` (requires the file to have been saved by Excel with
-   cached values) or another fallback strategy — not yet handled, only
-   relevant if/when real files turn out to use formulas in these columns.
+2. **Formula cells are read as formula text, not computed values. —
+   RESOLVED (2026-07).** Confirmed on real files: price cells are formulas
+   like `=4937.682*(Дефлятор!$E$2)`. Reading now loads values with
+   `data_only=True` (`read_catalog_rows`, `read_estimate_rows_with_positions`,
+   `load_estimate`, and coefficient resolution), so formula cells resolve to
+   the numbers Excel cached on save. The Excel *writer* keeps
+   `data_only=False` to preserve formulas in the output copy.
+   Caveat: `data_only=True` relies on the file having been saved by Excel with
+   cached values; a workbook produced by a script without cached values would
+   return `None` for formula cells.
 
 ## From catalog.py (still open, lower priority — noted earlier)
 
@@ -86,16 +87,26 @@ intentionally deferred, to keep each step small:
 - **R2/R3/R4** — richer header detection: full label-set matching,
   sub-header/units-row skipping, merged-cell header reading. Only a
   minimal "row with most detected fields" locator exists today.
+- **R4 (partial done)** — the column-enumeration row under the header (bare
+  integers `1 2 3 ...`) is now skipped in the detected reader (a code cell
+  that is a bare integer is treated as a header artefact). Full sub-header /
+  units-row handling is still open.
 - **R5 (remainder)** — total/summary-row skipping ("итого"/"всего", via a
-  config dictionary). The blank-row tolerance part of R5 is done.
+  config dictionary). The blank-row tolerance part of R5 is done. Note: on
+  large real files the detected read can run long (e.g. ~1000+ rows) if
+  lower analog-detail sub-tables are separated by fewer than `max_blank_run`
+  blank rows; total/section-boundary handling here needs a decision.
 - **R1 (web UI)** — DONE. `app/web/` (FastAPI + uvicorn) renders the
   multi-sheet choice as buttons and forces the selection by title; the
   service layer (`app/services/read_estimate.py`) raises `MultipleSheetsError`
   with candidates and accepts `selected_sheet_title`.
 - **R10** — quantity column detection (for future qty-aware output).
-- **R11** — section column detection, and creating one when absent. Until
-  then the detected-layout WA write skips the section code (the template
-  write still fills it); only template files get the section column.
+- **R11 (detection done, write pending)** — the section column
+  ('Код раздела') is now detected as a `section` field in `layout.json`, which
+  also stops 'Код раздела' from being grabbed as the code column. Writing the
+  section code for a detected (non-template) layout is still pending, so the
+  detected-layout WA write currently skips the section code (template write
+  still fills it). Creating a section column when absent is also still open.
 - **R13** — full version deferred. A minimal "R13-lite" exists: for a
   detected (non-template) layout the writer places analogs in the first free
   column after the used range (`max_column + 1`, past the average column).

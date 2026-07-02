@@ -137,6 +137,26 @@ def test_multiple_resolvable_sheets_require_choice(tmp_path):
     assert set(info.value.candidates) == {SHEET_A, SHEET_B}
 
 
+def test_load_estimate_reads_cached_values(tmp_path, monkeypatch):
+    # Guards the formula fix: reading must use data_only=True so formula-driven
+    # price cells resolve to the numbers Excel cached (OPEN_ITEMS #2).
+    import app.services.read_estimate as read_estimate_module
+
+    captured = {}
+    real_load = read_estimate_module.load_workbook
+
+    def spy(path, **kwargs):
+        captured["data_only"] = kwargs.get("data_only")
+        return real_load(path, **kwargs)
+
+    monkeypatch.setattr(read_estimate_module, "load_workbook", spy)
+
+    estimate = _template_estimate(tmp_path / "estimate.xlsx")
+    load_estimate(estimate)
+
+    assert captured["data_only"] is True
+
+
 def test_selected_sheet_title_forces_choice(tmp_path):
     workbook = Workbook()
     first = workbook.active

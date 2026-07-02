@@ -46,9 +46,14 @@ def read_catalog_rows(
     workbook_path: str | Path,
     settings: Settings | None = None,
 ) -> list[CatalogRow]:
-    """Read raw catalog rows from the catalog sheet."""
+    """Read raw catalog rows from the catalog sheet.
+
+    Uses ``data_only=True`` so formula-driven price/date cells resolve to the
+    values Excel cached on save (real files store prices as formulas), instead
+    of returning the formula text (OPEN_ITEMS #2).
+    """
     active_settings = Settings() if settings is None else settings
-    workbook = load_workbook(workbook_path, data_only=False)
+    workbook = load_workbook(workbook_path, data_only=True)
 
     try:
         worksheet = _find_sheet_by_part(workbook.worksheets, CATALOG_SHEET_PART)
@@ -96,9 +101,11 @@ def read_estimate_rows_with_positions(
 
     The physical row number is needed by the Excel writer to write results
     back onto the exact source row; matching itself stays position-agnostic.
+    Values are read with ``data_only=True`` so formula prices resolve to their
+    cached numbers (OPEN_ITEMS #2).
     """
     active_settings = Settings() if settings is None else settings
-    workbook = load_workbook(workbook_path, data_only=False)
+    workbook = load_workbook(workbook_path, data_only=True)
 
     try:
         worksheet = find_estimate_sheet(workbook, active_settings)
@@ -189,6 +196,12 @@ def read_estimate_rows_by_columns(
         base_price = _cell_value(worksheet, row_number, base_price_column)
 
         if not _is_working_estimate_row(code, unit, base_price):
+            continue
+
+        # Skip the column-enumeration row under the header (e.g. "1 2 3 ...").
+        # Real codes always contain letters/dashes, so a bare integer in the
+        # code cell is a header artefact, not a work item (R4-lite).
+        if str(code).strip().isdigit():
             continue
 
         rows.append(
