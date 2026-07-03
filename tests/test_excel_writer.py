@@ -4,7 +4,8 @@ from openpyxl import Workbook, load_workbook
 
 from app.services.run_matching import KR_END
 from app.services.write_result import run_and_write
-from core.excel_writer import PROBLEM_FILL, RISK_LOG_SHEET
+from core.excel_writer import PROBLEM_FILL, RISK_LOG_SHEET, TASK_FILL
+from core.exclusions import TaskColorEntry
 from core.risk import REASON_RATIO_EXCEEDED
 
 METER = "\u043c"
@@ -18,9 +19,15 @@ CATALOG_TITLE = "\u041a\u0430\u0442\u0430\u043b\u043e\u0433"
 
 RED_RGB = "FFFFC7CE"
 GREY_RGB = "FFD9D9D9"
+BLUE_RGB = "FFDDEBF7"
 
 
-def _make_catalog_file(path: Path, prices: list[tuple[str, float]]) -> Path:
+def _make_catalog_file(
+    path: Path,
+    prices: list[tuple[str, float]],
+    *,
+    region: str = "",
+) -> Path:
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = CATALOG_TITLE
@@ -31,6 +38,8 @@ def _make_catalog_file(path: Path, prices: list[tuple[str, float]]) -> Path:
         worksheet.cell(row=row, column=4).value = METER
         worksheet.cell(row=row, column=7).value = price
         worksheet.cell(row=row, column=14).value = CODE
+        if region:
+            worksheet.cell(row=row, column=16).value = region
     workbook.save(path)
     workbook.close()
     return path
@@ -76,6 +85,8 @@ def test_writes_analogs_formula_kr_and_section(tmp_path: Path) -> None:
         sheet = workbook[ESTIMATE_TITLE]
         assert sheet.cell(row=9, column=16).value == 100
         assert sheet.cell(row=9, column=17).value == 120
+        assert sheet.cell(row=7, column=16).value == "task-1"
+        assert sheet.cell(row=7, column=17).value == "task-2"
         assert sheet.cell(row=9, column=7).value == (
             "=MAX(F9, IFERROR(AVERAGE(F9, P9:Q9), F9))"
         )
@@ -187,5 +198,44 @@ def test_average_column_inserted_when_neighbour_occupied(tmp_path: Path) -> None
         )
         assert str(sheet.cell(row=9, column=15).value).endswith(KR_END)
         assert sheet.cell(row=9, column=16).value == "01"
+    finally:
+        workbook.close()
+
+
+def test_analog_headers_include_task_number_and_region(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("task-1", 100), ("task-2", 120)],
+        region=REGION_NAME,
+    )
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    output = tmp_path / "out.xlsx"
+
+    run_and_write(catalog, estimate, output)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=7, column=16).value == "task-1"
+        assert sheet.cell(row=8, column=16).value == REGION_NAME
+        assert sheet.cell(row=7, column=17).value == "task-2"
+        assert sheet.cell(row=8, column=17).value == REGION_NAME
+    finally:
+        workbook.close()
+
+
+def test_task_color_list_tints_analog_column_blue(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100), ("task-2", 120)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    output = tmp_path / "out.xlsx"
+    colors = [TaskColorEntry(enabled=True, task_number="task-1")]
+
+    run_and_write(catalog, estimate, output, task_color_entries=colors)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=9, column=16).fill.start_color.rgb == BLUE_RGB
+        assert sheet.cell(row=9, column=17).fill.start_color.rgb != BLUE_RGB
     finally:
         workbook.close()

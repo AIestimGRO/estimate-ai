@@ -18,19 +18,28 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.services.run_matching import EstimateRowResult, MatchingRunResult
 from core.excel_io import find_estimate_sheet
+from core.exclusions import TaskColorEntry, is_task_marked
 from core.layout import resolve_average_placement
 from core.risk import REASON_RATIO_EXCEEDED
 
 RISK_LOG_SHEET = "Price_Check_Log"
 
+# Module4_updated.bas RGB fills
+HEADER_FILL = PatternFill(start_color="FFD9E1F2", end_color="FFD9E1F2", fill_type="solid")
+TASK_FILL = PatternFill(start_color="FFDDEBF7", end_color="FFDDEBF7", fill_type="solid")
 DUP_FILL = PatternFill(start_color="FFD9D9D9", end_color="FFD9D9D9", fill_type="solid")
 PROBLEM_FILL = PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
+
+PRICE_NUMBER_FORMAT = "#,##0.00"
+HEADER_FONT = Font(bold=True, size=9)
+REGION_FONT = Font(italic=True, size=9)
+AVG_FONT = Font(bold=True)
 
 _RISK_LOG_HEADER = (
     "estimate_row",
@@ -46,17 +55,14 @@ _RISK_LOG_HEADER = (
 
 @dataclass(frozen=True)
 class WriterColumns:
-    """Where the writer should place each output on the worksheet.
-
-    `section` may be None to skip writing the section code (e.g. when no
-    section column is known). `analog_start` may be None to place analogs in
-    the first free column after the existing used range (R13-lite).
-    """
+    """Where the writer should place each output on the worksheet."""
 
     base_price: int
     code: int
+    code_kr: int
     section: int | None
     analog_start: int | None
+    header_row: int = 0
 
 
 @dataclass(frozen=True)
@@ -68,7 +74,27 @@ class WriteReport:
     inserted_average_column: bool
     average_column: int
     analog_start_column: int
+    analog_column_count: int
     risk_log_rows: int
+
+
+@dataclass(frozen=True)
+class AnalogColumnDef:
+    """One global analog output column (task header + region sub-header)."""
+
+    column: int
+    task_id: str
+    price_position: int
+    region: str
+
+
+@dataclass(frozen=True)
+class GlobalAnalogPlan:
+    """Stable (task_id, price_position) -> column map for the whole run."""
+
+    by_key: dict[tuple[str, int], int]
+    columns: tuple[AnalogColumnDef, ...]
+    last_column: int
 
 
 def write_run_result(
@@ -80,11 +106,13 @@ def write_run_result(
     columns: WriterColumns,
     regional_coefficient: float = 1.0,
     sheet_title: str | None = None,
+    task_color_entries: list[TaskColorEntry] | None = None,
 ) -> WriteReport:
     """Write `result` into a copy of the estimate workbook at `output_path`."""
     if len(row_numbers) != len(result.rows):
         raise ValueError("row_numbers length must match result.rows length")
 
+    task_colors = [] if task_color_entries is None else task_color_entries
     workbook = load_workbook(source_path, data_only=False)
 
     try:
@@ -94,17 +122,44 @@ def write_run_result(
             worksheet = find_estimate_sheet(workbook)
 
         placement = _plan_average_column(worksheet, columns.base_price, row_numbers)
-        if columns.analog_start is None:
-            analog_start_base = max(worksheet.max_column + 1, placement.column + 1)
-        else:
-            analog_start_base = columns.analog_start
+        analog_start_base = (
+            max(worksheet.max_column + 1, placement.column + 1)
+            if columns.analog_start is None
+            else columns.analog_start
+        )
         output_columns = _plan_output_columns(columns, placement, analog_start_base)
         if placement.needs_insert:
             worksheet.insert_cols(placement.column)
 
+        analog_plan = _build_global_analog_plan(result, output_columns.analog_start)
+        last_data_row = max(row_numbers) if row_numbers else output_columns.analog_start
+        if analog_plan.columns:
+            _clear_analog_block(
+                worksheet,
+                columns.header_row or output_columns.analog_start,
+                last_data_row,
+                output_columns.analog_start,
+                analog_plan.last_column,
+            )
+            _write_analog_headers(
+                worksheet,
+                columns.header_row,
+                analog_plan,
+                last_data_row,
+                task_colors,
+            )
+
         written_rows = 0
         for row_number, row in zip(row_numbers, result.rows):
-            if _write_row(worksheet, row_number, row, output_columns, regional_coefficient):
+            if _write_row(
+                worksheet,
+                row_number,
+                row,
+                output_columns,
+                analog_plan,
+                regional_coefficient,
+                task_colors,
+            ):
                 written_rows += 1
 
         risk_log_rows = _write_risk_log(workbook, result, row_numbers, regional_coefficient)
@@ -121,6 +176,7 @@ def write_run_result(
         inserted_average_column=placement.needs_insert,
         average_column=output_columns.average,
         analog_start_column=output_columns.analog_start,
+        analog_column_count=len(analog_plan.columns),
         risk_log_rows=risk_log_rows,
     )
 
@@ -159,10 +215,84 @@ def _plan_output_columns(columns: WriterColumns, placement, analog_start_base: i
     return _OutputColumns(
         base_price=columns.base_price,
         average=placement.column,
-        code_kr=shifted(columns.code),
+        code_kr=shifted(columns.code_kr),
         section=section,
         analog_start=shifted(analog_start_base),
     )
+
+
+def _build_global_analog_plan(
+    result: MatchingRunResult,
+    analog_start: int,
+) -> GlobalAnalogPlan:
+    """Assign one worksheet column per (task_id, price_position) pair (Module4 step 2)."""
+    by_key: dict[tuple[str, int], int] = {}
+    column_defs: list[AnalogColumnDef] = []
+    next_column = analog_start
+
+    for row in result.rows:
+        for analog in row.analogs:
+            key = (analog.task_id, analog.price_position)
+            if key in by_key:
+                continue
+            by_key[key] = next_column
+            column_defs.append(
+                AnalogColumnDef(
+                    column=next_column,
+                    task_id=analog.task_id,
+                    price_position=analog.price_position,
+                    region=analog.entry.region,
+                )
+            )
+            next_column += 1
+
+    last_column = next_column - 1 if column_defs else analog_start - 1
+    return GlobalAnalogPlan(by_key=by_key, columns=tuple(column_defs), last_column=last_column)
+
+
+def _clear_analog_block(
+    worksheet: Worksheet,
+    header_row: int,
+    last_row: int,
+    first_col: int,
+    last_col: int,
+) -> None:
+    start_row = header_row if header_row > 0 else 1
+    for row in range(start_row, last_row + 1):
+        for column in range(first_col, last_col + 1):
+            cell = worksheet.cell(row=row, column=column)
+            cell.value = None
+            cell.fill = PatternFill()
+
+
+def _write_analog_headers(
+    worksheet: Worksheet,
+    header_row: int,
+    plan: GlobalAnalogPlan,
+    last_data_row: int,
+    task_colors: list[TaskColorEntry],
+) -> None:
+    if header_row <= 0 or not plan.columns:
+        return
+
+    region_row = header_row + 1
+    for column_def in plan.columns:
+        column = column_def.column
+        task_cell = worksheet.cell(row=header_row, column=column)
+        task_cell.value = column_def.task_id
+        task_cell.font = HEADER_FONT
+        task_cell.fill = HEADER_FILL
+
+        region_cell = worksheet.cell(row=region_row, column=column)
+        region_cell.value = column_def.region
+        region_cell.font = REGION_FONT
+        region_cell.fill = HEADER_FILL
+
+        if is_task_marked(task_colors, column_def.task_id):
+            for row in range(header_row, last_data_row + 1):
+                worksheet.cell(row=row, column=column).fill = TASK_FILL
+            task_cell.fill = HEADER_FILL
+            region_cell.fill = HEADER_FILL
 
 
 def _write_row(
@@ -170,62 +300,86 @@ def _write_row(
     row_number: int,
     row: EstimateRowResult,
     columns: _OutputColumns,
+    plan: GlobalAnalogPlan,
     coefficient: float,
+    task_colors: list[TaskColorEntry],
 ) -> bool:
     if columns.section is not None and row.section_code:
-        worksheet.cell(row=row_number, column=columns.section).value = row.section_code
+        section_cell = worksheet.cell(row=row_number, column=columns.section)
+        section_cell.number_format = "@"
+        section_cell.value = row.section_code
+
+    _write_average_formula(worksheet, row_number, columns, plan)
 
     if not row.has_analogs:
         return False
 
-    analog_count = len(row.analogs)
-    for offset, analog in enumerate(row.analogs):
-        column = columns.analog_start + offset
-        worksheet.cell(row=row_number, column=column).value = analog.entry.price * coefficient
-
-    _apply_colours(worksheet, row_number, row, columns.analog_start)
+    for analog in row.analogs:
+        column = plan.by_key[(analog.task_id, analog.price_position)]
+        price_cell = worksheet.cell(row=row_number, column=column)
+        price_cell.value = round(analog.entry.price * coefficient, 2)
+        price_cell.number_format = PRICE_NUMBER_FORMAT
+        _apply_cell_colour(price_cell, row, analog, task_colors)
 
     if row.kr_code is not None:
-        worksheet.cell(row=row_number, column=columns.code_kr).value = row.kr_code
+        kr_cell = worksheet.cell(row=row_number, column=columns.code_kr)
+        kr_cell.number_format = "@"
+        kr_cell.value = row.kr_code
 
-    worksheet.cell(row=row_number, column=columns.average).value = _average_formula(
-        row_number,
-        columns.base_price,
-        columns.analog_start,
-        analog_count,
-    )
     return True
 
 
-def _apply_colours(
+def _write_average_formula(
     worksheet: Worksheet,
     row_number: int,
-    row: EstimateRowResult,
-    analog_start: int,
+    columns: _OutputColumns,
+    plan: GlobalAnalogPlan,
 ) -> None:
+    avg_cell = worksheet.cell(row=row_number, column=columns.average)
+    avg_cell.value = _average_formula(
+        row_number,
+        columns.base_price,
+        columns.analog_start,
+        plan.last_column,
+    )
+    avg_cell.number_format = PRICE_NUMBER_FORMAT
+    avg_cell.font = AVG_FONT
+
+
+def _apply_cell_colour(
+    cell,
+    row: EstimateRowResult,
+    analog,
+    task_colors: list[TaskColorEntry],
+) -> None:
+    if is_task_marked(task_colors, analog.task_id):
+        cell.fill = TASK_FILL
+        return
+
     flagged_ids = {id(entry) for entry in row.risk_result.flagged_entries}
     colour_all = (
         row.risk_result.is_flagged
         and row.risk_result.reason == REASON_RATIO_EXCEEDED
     )
 
-    for offset, analog in enumerate(row.analogs):
-        cell = worksheet.cell(row=row_number, column=analog_start + offset)
-        if analog.price_position > 1:
-            cell.fill = DUP_FILL
-        if colour_all or id(analog.entry) in flagged_ids:
-            cell.fill = PROBLEM_FILL
+    if colour_all or id(analog.entry) in flagged_ids:
+        cell.fill = PROBLEM_FILL
+    elif analog.price_position > 1:
+        cell.fill = DUP_FILL
 
 
 def _average_formula(
     row_number: int,
     base_column: int,
     analog_start: int,
-    analog_count: int,
+    last_analog_column: int,
 ) -> str:
     base = f"{get_column_letter(base_column)}{row_number}"
+    if last_analog_column < analog_start:
+        return f"={base}"
+
     first = f"{get_column_letter(analog_start)}{row_number}"
-    last = f"{get_column_letter(analog_start + analog_count - 1)}{row_number}"
+    last = f"{get_column_letter(last_analog_column)}{row_number}"
     return f"=MAX({base}, IFERROR(AVERAGE({base}, {first}:{last}), {base}))"
 
 
@@ -296,3 +450,33 @@ def _log_min_max(
 
 def _text(value: object) -> str:
     return "" if value is None else str(value)
+
+
+def resolve_kr_column(
+    worksheet: Worksheet,
+    header_row: int,
+    code_column: int,
+    settings_code_kr: int,
+    settings_code_search: int,
+) -> int:
+    """Pick the `/KR` destination column from the header row when present."""
+    if header_row > 0:
+        neighbor = worksheet.cell(row=header_row, column=code_column + 1).value
+        text = _normalize_header_text(neighbor)
+        if text == "\u043a\u0440" or text.startswith("/"):
+            return code_column + 1
+
+    if settings_code_kr != settings_code_search:
+        return settings_code_kr
+    return code_column
+
+
+def _normalize_header_text(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).lower().strip()
+    for char in ("\r", "\n", "\t", ".", ",", ";", ":"):
+        text = text.replace(char, " ")
+    while "  " in text:
+        text = text.replace("  ", " ")
+    return text.strip()

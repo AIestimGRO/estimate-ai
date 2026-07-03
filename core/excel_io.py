@@ -9,7 +9,20 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from core.catalog import CatalogRow
-from core.layout import DEFAULT_MAX_BLANK_RUN, data_row_numbers
+from core.layout import (
+    CATALOG_FIELD_ADDED_DATE,
+    CATALOG_FIELD_CODE,
+    CATALOG_FIELD_PRICE,
+    CATALOG_FIELD_REGION,
+    CATALOG_FIELD_TASK_ID,
+    CATALOG_FIELD_UNIT,
+    CATALOG_FIELD_WORK_NAME,
+    DEFAULT_MAX_BLANK_RUN,
+    LayoutResult,
+    data_row_numbers,
+    load_catalog_layout_config,
+    resolve_catalog_layout,
+)
 from core.matching import EstimateRow
 from core.normalize import NormCode, NormUnit
 
@@ -42,6 +55,30 @@ class Settings:
     cat_added_date_col: int = 17
 
 
+def catalog_default_columns(settings: Settings) -> dict[str, int]:
+    """Template column map used as the catalog resolver's fallback defaults."""
+    return {
+        CATALOG_FIELD_TASK_ID: settings.cat_task_col,
+        CATALOG_FIELD_WORK_NAME: settings.cat_work_name_col,
+        CATALOG_FIELD_UNIT: settings.cat_unit_col,
+        CATALOG_FIELD_PRICE: settings.cat_price_col,
+        CATALOG_FIELD_CODE: settings.cat_code_col,
+        CATALOG_FIELD_REGION: settings.cat_region_col,
+        CATALOG_FIELD_ADDED_DATE: settings.cat_added_date_col,
+    }
+
+
+def _catalog_column(
+    layout: LayoutResult,
+    field: str,
+    defaults: dict[str, int],
+) -> int:
+    column = layout.column(field)
+    if column is not None:
+        return column
+    return defaults[field]
+
+
 def read_catalog_rows(
     workbook_path: str | Path,
     settings: Settings | None = None,
@@ -57,25 +94,53 @@ def read_catalog_rows(
 
     try:
         worksheet = _find_sheet_by_part(workbook.worksheets, CATALOG_SHEET_PART)
+        data_limit = int(getattr(worksheet, "max_row", 0) or 0)
+        defaults = catalog_default_columns(active_settings)
+        catalog_config = load_catalog_layout_config()
+        layout = (
+            resolve_catalog_layout(worksheet, catalog_config, default_columns=defaults)
+            if catalog_config is not None
+            else None
+        )
+
+        if layout is not None and layout.ok and layout.header_row > 0:
+            data_start = layout.header_row + catalog_config.data_start_offset
+            task_col = _catalog_column(layout, CATALOG_FIELD_TASK_ID, defaults)
+            price_col = _catalog_column(layout, CATALOG_FIELD_PRICE, defaults)
+            code_col = _catalog_column(layout, CATALOG_FIELD_CODE, defaults)
+            unit_col = _catalog_column(layout, CATALOG_FIELD_UNIT, defaults)
+            work_name_col = _catalog_column(layout, CATALOG_FIELD_WORK_NAME, defaults)
+            region_col = _catalog_column(layout, CATALOG_FIELD_REGION, defaults)
+            added_date_col = _catalog_column(layout, CATALOG_FIELD_ADDED_DATE, defaults)
+        else:
+            data_start = 4
+            task_col = active_settings.cat_task_col
+            price_col = active_settings.cat_price_col
+            code_col = active_settings.cat_code_col
+            unit_col = active_settings.cat_unit_col
+            work_name_col = active_settings.cat_work_name_col
+            region_col = active_settings.cat_region_col
+            added_date_col = active_settings.cat_added_date_col
+
         rows: list[CatalogRow] = []
 
-        for row_number in range(4, worksheet.max_row + 1):
+        for row_number in range(data_start, data_limit + 1):
             rows.append(
                 CatalogRow(
-                    task_id=_cell_value(worksheet, row_number, active_settings.cat_task_col),
-                    price=_cell_value(worksheet, row_number, active_settings.cat_price_col),
-                    code=_cell_value(worksheet, row_number, active_settings.cat_code_col),
-                    unit=_cell_value(worksheet, row_number, active_settings.cat_unit_col),
+                    task_id=_cell_value(worksheet, row_number, task_col),
+                    price=_cell_value(worksheet, row_number, price_col),
+                    code=_cell_value(worksheet, row_number, code_col),
+                    unit=_cell_value(worksheet, row_number, unit_col),
                     work_name=_cell_value(
                         worksheet,
                         row_number,
-                        active_settings.cat_work_name_col,
+                        work_name_col,
                     ),
-                    region=_cell_value(worksheet, row_number, active_settings.cat_region_col),
+                    region=_cell_value(worksheet, row_number, region_col),
                     added_date=_cell_value(
                         worksheet,
                         row_number,
-                        active_settings.cat_added_date_col,
+                        added_date_col,
                     ),
                 )
             )

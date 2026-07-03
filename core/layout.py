@@ -36,9 +36,24 @@ DEFAULT_MAX_BLANK_RUN = 5
 FIELD_WORK_NAME = "work_name"
 FIELD_UNIT = "unit"
 FIELD_CODE = "code"
+FIELD_SECTION = "section"
 FIELD_BASE_PRICE = "base_price"
 
+CATALOG_FIELD_TASK_ID = "task_id"
+CATALOG_FIELD_PRICE = "price"
+CATALOG_FIELD_CODE = "code"
+CATALOG_FIELD_UNIT = "unit"
+CATALOG_FIELD_WORK_NAME = "work_name"
+CATALOG_FIELD_REGION = "region"
+CATALOG_FIELD_ADDED_DATE = "added_date"
+
 DEFAULT_REQUIRED_FIELDS: tuple[str, ...] = (FIELD_CODE, FIELD_UNIT, FIELD_BASE_PRICE)
+DEFAULT_CATALOG_REQUIRED_FIELDS: tuple[str, ...] = (
+    CATALOG_FIELD_TASK_ID,
+    CATALOG_FIELD_PRICE,
+    CATALOG_FIELD_CODE,
+    CATALOG_FIELD_UNIT,
+)
 
 MODE_EQUALS = "equals"
 MODE_STARTSWITH = "startswith"
@@ -98,6 +113,18 @@ class LayoutConfig:
     max_blank_run: int = DEFAULT_MAX_BLANK_RUN
     region_label: FieldRule | None = None
     coefficient_label: FieldRule | None = None
+
+
+@dataclass(frozen=True)
+class CatalogLayoutConfig:
+    """Header-scan settings for catalog worksheets."""
+
+    fields: dict[str, FieldRule]
+    field_priority: tuple[str, ...]
+    max_rows: int
+    max_cols: int
+    min_matched_fields: int
+    data_start_offset: int = 1
 
 
 @dataclass(frozen=True)
@@ -207,6 +234,38 @@ def load_layout_config(config_path: str | Path | None = None) -> LayoutConfig:
     )
 
 
+def load_catalog_layout_config(
+    config_path: str | Path | None = None,
+) -> CatalogLayoutConfig | None:
+    """Load catalog column-detection rules from layout.json (``catalog`` section)."""
+    path = _default_config_path() if config_path is None else Path(config_path)
+    with path.open("r", encoding="utf-8") as config_file:
+        raw = json.load(config_file)
+
+    catalog = raw.get("catalog")
+    if not catalog:
+        return None
+
+    header_scan = catalog.get("header_scan", {})
+    fields = {
+        field_name: FieldRule(
+            mode=rule["mode"],
+            patterns=tuple(rule.get("patterns", [])),
+        )
+        for field_name, rule in catalog.get("fields", {}).items()
+    }
+    field_priority = tuple(catalog.get("field_priority", tuple(fields.keys())))
+
+    return CatalogLayoutConfig(
+        fields=fields,
+        field_priority=field_priority,
+        max_rows=int(header_scan.get("max_rows", 10)),
+        max_cols=int(header_scan.get("max_cols", 25)),
+        min_matched_fields=int(header_scan.get("min_matched_fields", 3)),
+        data_start_offset=int(catalog.get("data_start_offset", 1)),
+    )
+
+
 def _load_rule(raw_rule: dict | None) -> FieldRule | None:
     if not raw_rule:
         return None
@@ -228,7 +287,7 @@ def resolve_layout(
     defaults = {} if default_columns is None else dict(default_columns)
     explicit = {} if explicit_columns is None else dict(explicit_columns)
 
-    header_row, detected = _detect_header_row(worksheet, config, explicit)
+    header_row, detected = _detect_header_row(worksheet, config, explicit, defaults)
 
     all_fields = _all_field_names(config, defaults, explicit, required_fields)
     header_texts = (
@@ -258,6 +317,31 @@ def resolve_layout(
         header_row=header_row,
         columns=columns,
         missing_required=missing_required,
+    )
+
+
+def resolve_catalog_layout(
+    worksheet: CellSource,
+    config: CatalogLayoutConfig,
+    *,
+    default_columns: dict[str, int] | None = None,
+    explicit_columns: dict[str, int] | None = None,
+    required_fields: tuple[str, ...] = DEFAULT_CATALOG_REQUIRED_FIELDS,
+) -> LayoutResult:
+    """Resolve catalog header row and per-field columns from header text."""
+    estimate_config = LayoutConfig(
+        fields=config.fields,
+        field_priority=config.field_priority,
+        max_rows=config.max_rows,
+        max_cols=config.max_cols,
+        min_matched_fields=config.min_matched_fields,
+    )
+    return resolve_layout(
+        worksheet,
+        estimate_config,
+        default_columns=default_columns,
+        explicit_columns=explicit_columns,
+        required_fields=required_fields,
     )
 
 
@@ -604,18 +688,26 @@ def _detect_header_row(
     worksheet: CellSource,
     config: LayoutConfig,
     explicit: dict[str, int],
+    defaults: dict[str, int] | None = None,
 ) -> tuple[int, dict[str, int]]:
     """Pick the row with the most detected fields (min threshold applies).
 
     Ties keep the first (smallest-index) row. Explicit pins do not help
     locate the header row, so scoring counts detected fields only.
     """
+    default_columns = {} if defaults is None else defaults
     best_row = 0
     best_columns: dict[str, int] = {}
     best_count = -1
 
     for row in range(1, config.max_rows + 1):
-        detected = _detect_columns_in_row(worksheet, row, config, explicit)
+        detected = _detect_columns_in_row(
+            worksheet,
+            row,
+            config,
+            explicit,
+            default_columns,
+        )
         count = len(detected)
         if count > best_count:
             best_count = count
@@ -633,8 +725,10 @@ def _detect_columns_in_row(
     row: int,
     config: LayoutConfig,
     explicit: dict[str, int],
+    defaults: dict[str, int] | None = None,
 ) -> dict[str, int]:
     header_texts = _row_header_texts(worksheet, row, config.max_cols)
+    default_columns = {} if defaults is None else defaults
 
     claimed: set[int] = {explicit[field] for field in explicit if field in config.fields}
     detected: dict[str, int] = {}
@@ -646,14 +740,26 @@ def _detect_columns_in_row(
         if rule is None:
             continue
 
+        candidates: list[int] = []
         for column in range(1, config.max_cols + 1):
             if column in claimed:
                 continue
             text = header_texts.get(column)
             if text and _matches(text, rule):
-                detected[field] = column
-                claimed.add(column)
-                break
+                candidates.append(column)
+
+        if not candidates:
+            continue
+
+        if len(candidates) == 1:
+            chosen = candidates[0]
+        elif field in default_columns and default_columns[field] in candidates:
+            chosen = default_columns[field]
+        else:
+            chosen = candidates[0]
+
+        detected[field] = chosen
+        claimed.add(chosen)
 
     return detected
 

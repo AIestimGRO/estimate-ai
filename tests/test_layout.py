@@ -6,6 +6,8 @@ from core.layout import (
     COEF_METHOD_EXPLICIT,
     COEF_METHOD_LABEL,
     COEF_METHOD_REGION,
+    CATALOG_FIELD_ADDED_DATE,
+    CATALOG_FIELD_CODE,
     FIELD_BASE_PRICE,
     FIELD_CODE,
     FIELD_UNIT,
@@ -16,9 +18,11 @@ from core.layout import (
     METHOD_MISSING,
     data_row_numbers,
     format_layout_report,
+    load_catalog_layout_config,
     load_layout_config,
     rank_sheets,
     resolve_average_placement,
+    resolve_catalog_layout,
     resolve_layout,
     resolve_regional_coefficient,
     select_sheets,
@@ -84,6 +88,15 @@ def test_load_layout_config_reads_real_file() -> None:
     }
     assert config.field_priority[0] == FIELD_BASE_PRICE
     assert config.min_matched_fields >= 1
+
+
+def test_load_catalog_layout_config_reads_real_file() -> None:
+    config = load_catalog_layout_config()
+
+    assert config is not None
+    assert CATALOG_FIELD_ADDED_DATE in config.fields
+    assert CATALOG_FIELD_CODE in config.fields
+    assert config.data_start_offset == 1
 
 
 def test_detects_standard_headers() -> None:

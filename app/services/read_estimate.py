@@ -149,10 +149,13 @@ def load_estimate(
 
         template_rows = read_estimate_rows_from_worksheet(worksheet, active_settings)
         if template_rows:
+            template_header_row = layout.header_row
+            if template_header_row <= 0:
+                template_header_row = template_rows[0][0] - 2
             return EstimateData(
                 sheet_title=title,
                 positioned_rows=template_rows,
-                header_row=0,
+                header_row=template_header_row,
                 code_column=active_settings.col_search,
                 unit_column=active_settings.col_smeta_unit,
                 work_name_column=active_settings.col_smeta_work_name,

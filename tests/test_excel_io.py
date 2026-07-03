@@ -13,6 +13,15 @@ GESN_HEADER = "\u041a\u043e\u0434 \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u
 METER = "\u043c"
 WORK_NAME = "\u0440\u0430\u0431\u043e\u0442\u0430"
 REGION = "\u0440\u0435\u0433\u0438\u043e\u043d"
+TASK_HEADER = "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438"
+WORK_HEADER = "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442"
+UNIT_HEADER = "\u0415\u0434.\u0438\u0437\u043c."
+PRICE_HEADER = "\u0426\u0435\u043d\u0430 \u0435\u0434\u0438\u043d\u0438\u0446\u044b \u0440\u0430\u0431\u043e\u0442"
+CODE_HEADER = "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0422\u0415\u0420/\u041a\u0420"
+REGION_HEADER = "\u0420\u0435\u0433\u0438\u043e\u043d"
+ADDED_DATE_HEADER = "\u0414\u0430\u0442\u0430 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u044f \u0432 \u043a\u0430\u0442\u0430\u043b\u043e\u0433"
+QUARTER_HEADER = "\u0413\u043e\u0434 \u041a\u0432\u0430\u0440\u0442\u0430\u043b \u041b\u0421\u0420"
+REGIONAL_COEF_HEADER = "\u0420\u0435\u0433\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442"
 
 
 def fixture_path(tmp_path: Path, name: str) -> Path:
@@ -32,13 +41,13 @@ def make_catalog_workbook(sheet_name: str = CATALOG_SHEET) -> Workbook:
     worksheet = workbook.active
     worksheet.title = sheet_name
 
-    worksheet.cell(row=3, column=2).value = "task"
-    worksheet.cell(row=3, column=3).value = "work name"
-    worksheet.cell(row=3, column=4).value = "unit"
-    worksheet.cell(row=3, column=7).value = "price"
-    worksheet.cell(row=3, column=14).value = "code"
-    worksheet.cell(row=3, column=16).value = "region"
-    worksheet.cell(row=3, column=17).value = "added date"
+    worksheet.cell(row=3, column=2).value = TASK_HEADER
+    worksheet.cell(row=3, column=3).value = WORK_HEADER
+    worksheet.cell(row=3, column=4).value = UNIT_HEADER
+    worksheet.cell(row=3, column=7).value = PRICE_HEADER
+    worksheet.cell(row=3, column=14).value = CODE_HEADER
+    worksheet.cell(row=3, column=16).value = REGION_HEADER
+    worksheet.cell(row=3, column=17).value = ADDED_DATE_HEADER
 
     worksheet.cell(row=4, column=2).value = "task-1"
     worksheet.cell(row=4, column=3).value = WORK_NAME
@@ -128,3 +137,33 @@ def test_blank_catalog_added_date_resolves_to_serial_zero_downstream(
 
     assert rows[0].added_date is None
     assert _catalog_date_serial(rows[0].added_date) == 0
+
+
+def test_read_catalog_detects_added_date_column_offset_from_template(
+    tmp_path: Path,
+) -> None:
+    workbook = make_catalog_workbook()
+    worksheet = workbook[CATALOG_SHEET]
+    worksheet.cell(row=3, column=17).value = QUARTER_HEADER
+    worksheet.cell(row=3, column=20).value = REGIONAL_COEF_HEADER
+    worksheet.cell(row=3, column=21).value = ADDED_DATE_HEADER
+    worksheet.cell(row=4, column=21).value = datetime(2025, 6, 22)
+
+    rows = read_catalog_rows(save_workbook(workbook, fixture_path(tmp_path, "offset-date.xlsx")))
+
+    assert type(rows[0].added_date) is datetime
+    assert rows[0].added_date == datetime(2025, 6, 22)
+
+
+def test_read_catalog_prefers_template_price_column_when_headers_duplicate(
+    tmp_path: Path,
+) -> None:
+    workbook = make_catalog_workbook()
+    worksheet = workbook[CATALOG_SHEET]
+    worksheet.cell(row=3, column=6).value = PRICE_HEADER
+    worksheet.cell(row=4, column=6).value = 999.0
+    worksheet.cell(row=4, column=7).value = 123.45
+
+    rows = read_catalog_rows(save_workbook(workbook, fixture_path(tmp_path, "dup-price.xlsx")))
+
+    assert rows[0].price == 123.45

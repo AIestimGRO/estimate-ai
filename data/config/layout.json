@@ -65,5 +65,56 @@
       "mode": "contains",
       "patterns": ["коэффициент", "коэфф"]
     }
+  },
+  "catalog": {
+    "header_scan": {
+      "max_rows": 10,
+      "max_cols": 25,
+      "min_matched_fields": 3
+    },
+    "data_start_offset": 1,
+    "field_priority": [
+      "added_date",
+      "code",
+      "task_id",
+      "price",
+      "unit",
+      "work_name",
+      "region"
+    ],
+    "fields": {
+      "task_id": {
+        "mode": "contains",
+        "patterns": ["номер задачи"]
+      },
+      "work_name": {
+        "mode": "startswith",
+        "patterns": ["наименование"]
+      },
+      "unit": {
+        "mode": "contains",
+        "patterns": ["ед изм", "единица измер", "единицы измер"]
+      },
+      "price": {
+        "mode": "contains",
+        "patterns": [
+          "цена единицы работ",
+          "цена единицы",
+          "базовая цена"
+        ]
+      },
+      "code": {
+        "mode": "contains",
+        "patterns": ["перечень гэсн", "перечень", "обоснование"]
+      },
+      "region": {
+        "mode": "equals",
+        "patterns": ["регион"]
+      },
+      "added_date": {
+        "mode": "contains",
+        "patterns": ["дата добавления", "дата добав"]
+      }
+    }
   }
 }

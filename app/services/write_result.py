@@ -16,9 +16,9 @@ from openpyxl import load_workbook
 from app.services.read_estimate import METHOD_TEMPLATE, EstimateData, load_estimate
 from app.services.run_matching import MatchingRunResult, run_matching
 from core.excel_io import Settings, read_catalog_rows
-from core.excel_writer import WriteReport, WriterColumns, write_run_result
-from core.exclusions import NameExclusionRule
-from core.layout import LayoutConfig, load_layout_config, resolve_regional_coefficient
+from core.excel_writer import WriteReport, WriterColumns, resolve_kr_column, write_run_result
+from core.exclusions import NameExclusionRule, TaskColorEntry
+from core.layout import FIELD_SECTION, LayoutConfig, load_layout_config, resolve_regional_coefficient
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 
 WA_SUFFIX = " WA"
@@ -45,6 +45,7 @@ def run_and_write(
     settings: Settings | None = None,
     selected_sheet_title: str | None = None,
     name_exclusion_rules: list[NameExclusionRule] | None = None,
+    task_color_entries: list[TaskColorEntry] | None = None,
     gesn_exceptions: dict[str, GesnException] | None = None,
     demontazh_filter_enabled: bool = True,
     price_spread_limit: float = DEFAULT_PRICE_SPREAD_LIMIT,
@@ -83,14 +84,21 @@ def run_and_write(
     )
 
     destination = _resolve_output_path(estimate_path, output_path)
+    writer_columns = _writer_columns(
+        estimate,
+        active_settings,
+        estimate_path,
+        estimate.sheet_title,
+    )
     write_report = write_run_result(
         estimate_path,
         destination,
         result,
         row_numbers,
-        columns=_writer_columns(estimate, active_settings),
+        columns=writer_columns,
         regional_coefficient=coefficient,
         sheet_title=estimate.sheet_title,
+        task_color_entries=task_color_entries,
     )
 
     return RunAndWriteResult(
@@ -104,20 +112,49 @@ def run_and_write(
     )
 
 
-def _writer_columns(estimate: EstimateData, settings: Settings) -> WriterColumns:
+def _writer_columns(
+    estimate: EstimateData,
+    settings: Settings,
+    estimate_path: str | Path,
+    sheet_title: str,
+) -> WriterColumns:
     if estimate.method == METHOD_TEMPLATE:
         return WriterColumns(
             base_price=settings.col_f,
-            code=settings.col_kr,
+            code=settings.col_search,
+            code_kr=settings.col_kr,
             section=settings.col_section,
             analog_start=settings.col_analog_start,
+            header_row=estimate.header_row,
         )
+
+    section = estimate.layout.column(FIELD_SECTION)
+    if section is None:
+        section = settings.col_section
+        analog_start = settings.col_analog_start
+    else:
+        analog_start = section + 1
+
+    workbook = load_workbook(estimate_path, read_only=True, data_only=True)
+    try:
+        worksheet = workbook[sheet_title]
+        code_kr = resolve_kr_column(
+            worksheet,
+            estimate.header_row,
+            estimate.code_column,
+            settings.col_kr,
+            settings.col_search,
+        )
+    finally:
+        workbook.close()
 
     return WriterColumns(
         base_price=estimate.base_price_column,
         code=estimate.code_column,
-        section=None,
-        analog_start=None,
+        code_kr=code_kr,
+        section=section,
+        analog_start=analog_start,
+        header_row=estimate.header_row,
     )
 
 
