@@ -16,6 +16,7 @@ Thumbs.db
 data/real/
 data/*.xls
 data/*.xlsx
+data/*.db
 *.xlsx.bak
 
 # Stray pytest cache directory variant created in some sandboxes

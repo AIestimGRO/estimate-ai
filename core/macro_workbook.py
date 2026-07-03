@@ -82,13 +82,24 @@ def load_name_exclusions_workbook(
     workbook_path: str | Path,
 ) -> tuple[list[NameExclusionRule], list[TaskColorEntry]]:
     """Read enabled rules (A:F) and task colors (H:K) from Name_Exclusions."""
+    rules, colors = load_all_rules_from_workbook(workbook_path)
+    return [rule for rule in rules if rule.enabled], [entry for entry in colors if entry.enabled]
+
+
+def load_all_rules_from_workbook(
+    workbook_path: str | Path,
+) -> tuple[list[NameExclusionRule], list[TaskColorEntry]]:
+    """Read all Name_Exclusions rows (enabled and disabled) for DB migration."""
     path = Path(workbook_path)
     workbook = load_workbook(path, data_only=True, read_only=True)
     try:
         if NAME_EXCLUSIONS_SHEET not in workbook.sheetnames:
             return [], []
         worksheet = workbook[NAME_EXCLUSIONS_SHEET]
-        return _read_name_rules(worksheet), _read_task_colors(worksheet)
+        return _read_name_rules(worksheet, enabled_only=False), _read_task_colors(
+            worksheet,
+            enabled_only=False,
+        )
     finally:
         workbook.close()
 
@@ -128,7 +139,7 @@ def _workbook_has_exclusions_sheet(path: Path) -> bool:
         workbook.close()
 
 
-def _read_name_rules(worksheet) -> list[NameExclusionRule]:
+def _read_name_rules(worksheet, *, enabled_only: bool = True) -> list[NameExclusionRule]:
     rules: list[NameExclusionRule] = []
     for row in range(2, worksheet.max_row + 1):
         enabled_value = worksheet.cell(row=row, column=1).value
@@ -137,14 +148,15 @@ def _read_name_rules(worksheet) -> list[NameExclusionRule]:
         pattern = worksheet.cell(row=row, column=4).value
         group = worksheet.cell(row=row, column=5).value
         comment = worksheet.cell(row=row, column=6).value
-        if not _is_enabled(enabled_value):
+        enabled = _is_enabled(enabled_value)
+        if enabled_only and not enabled:
             continue
         pattern_text = _cell_text(pattern)
         if pattern_text == "":
             continue
         rules.append(
             NameExclusionRule(
-                enabled=True,
+                enabled=enabled,
                 scope=_cell_text(scope) or "BOTH",
                 match_mode=_cell_text(match_mode) or "ALL_WORDS",
                 pattern=pattern_text,
@@ -155,21 +167,22 @@ def _read_name_rules(worksheet) -> list[NameExclusionRule]:
     return rules
 
 
-def _read_task_colors(worksheet) -> list[TaskColorEntry]:
+def _read_task_colors(worksheet, *, enabled_only: bool = True) -> list[TaskColorEntry]:
     entries: list[TaskColorEntry] = []
     for row in range(2, worksheet.max_row + 1):
         enabled_value = worksheet.cell(row=row, column=8).value
         task_number = worksheet.cell(row=row, column=9).value
         reason = worksheet.cell(row=row, column=10).value
         comment = worksheet.cell(row=row, column=11).value
-        if not _is_enabled(enabled_value):
+        enabled = _is_enabled(enabled_value)
+        if enabled_only and not enabled:
             continue
         task_text = _cell_text(task_number)
         if task_text == "":
             continue
         entries.append(
             TaskColorEntry(
-                enabled=True,
+                enabled=enabled,
                 task_number=task_text,
                 reason=_cell_text(reason),
                 comment=_cell_text(comment),

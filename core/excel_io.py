@@ -90,6 +90,14 @@ def read_catalog_rows(
     values Excel cached on save (real files store prices as formulas), instead
     of returning the formula text (OPEN_ITEMS #2).
     """
+    return [row for _, row in read_catalog_rows_with_positions(workbook_path, settings)]
+
+
+def read_catalog_rows_with_positions(
+    workbook_path: str | Path,
+    settings: Settings | None = None,
+) -> list[tuple[int, CatalogRow]]:
+    """Read catalog rows with their 1-based Excel row numbers."""
     active_settings = Settings() if settings is None else settings
     workbook = load_workbook(workbook_path, data_only=True)
 
@@ -123,25 +131,28 @@ def read_catalog_rows(
             region_col = active_settings.cat_region_col
             added_date_col = active_settings.cat_added_date_col
 
-        rows: list[CatalogRow] = []
+        rows: list[tuple[int, CatalogRow]] = []
 
         for row_number in range(data_start, data_limit + 1):
             rows.append(
-                CatalogRow(
-                    task_id=_cell_value(worksheet, row_number, task_col),
-                    price=_cell_value(worksheet, row_number, price_col),
-                    code=_cell_value(worksheet, row_number, code_col),
-                    unit=_cell_value(worksheet, row_number, unit_col),
-                    work_name=_cell_value(
-                        worksheet,
-                        row_number,
-                        work_name_col,
-                    ),
-                    region=_cell_value(worksheet, row_number, region_col),
-                    added_date=_cell_value(
-                        worksheet,
-                        row_number,
-                        added_date_col,
+                (
+                    row_number,
+                    CatalogRow(
+                        task_id=_cell_value(worksheet, row_number, task_col),
+                        price=_cell_value(worksheet, row_number, price_col),
+                        code=_cell_value(worksheet, row_number, code_col),
+                        unit=_cell_value(worksheet, row_number, unit_col),
+                        work_name=_cell_value(
+                            worksheet,
+                            row_number,
+                            work_name_col,
+                        ),
+                        region=_cell_value(worksheet, row_number, region_col),
+                        added_date=_cell_value(
+                            worksheet,
+                            row_number,
+                            added_date_col,
+                        ),
                     ),
                 )
             )
