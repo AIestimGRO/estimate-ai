@@ -250,7 +250,8 @@ def _ensure_kr_and_section_columns(
 
     The GESN code column keeps the plain code; rows with analogs receive
     ``code + /KR`` in the adjacent `/KR` column. Section codes go into their
-    own column. Missing columns are inserted after the average-column shift.
+    own column. Missing columns are inserted only when the target slot is
+    already occupied; a blank column (as in many eV-grup exports) is reused.
     """
     header_row = _effective_header_row(columns, row_numbers)
     code_col = _shifted_column(columns.code, placement)
@@ -262,26 +263,32 @@ def _ensure_kr_and_section_columns(
         else _find_section_column(worksheet, header_row, code_col)
     )
 
-    pending: list[tuple[int, str]] = []
+    pending_inserts: list[tuple[int, str]] = []
+    pending_headers: list[tuple[int, str]] = []
 
     if kr_col is None:
         kr_col = code_col + 1
-        pending.append((kr_col, KR_HEADER_LABEL))
-        if section_col is not None and section_col >= kr_col:
-            section_col += 1
+        if _column_needs_insert_for_kr(worksheet, header_row, kr_col, section_col):
+            pending_inserts.append((kr_col, KR_HEADER_LABEL))
+            if section_col is not None and section_col >= kr_col:
+                section_col += 1
+        else:
+            pending_headers.append((kr_col, KR_HEADER_LABEL))
 
     if section_col is None or section_col <= kr_col:
         section_col = kr_col + 1
-        if not any(insert_at == section_col for insert_at, _ in pending):
-            pending.append((section_col, SECTION_HEADER_LABEL))
+        if not any(insert_at == section_col for insert_at, _ in pending_inserts):
+            if _column_needs_insert_for_section(worksheet, header_row, section_col):
+                pending_inserts.append((section_col, SECTION_HEADER_LABEL))
+            else:
+                pending_headers.append((section_col, SECTION_HEADER_LABEL))
 
-    for insert_at, label in sorted(pending, key=lambda item: item[0], reverse=True):
+    for insert_at, label in sorted(pending_inserts, key=lambda item: item[0], reverse=True):
         worksheet.insert_cols(insert_at)
-        if header_row > 0:
-            header_cell = worksheet.cell(row=header_row, column=insert_at)
-            header_cell.value = label
-            header_cell.font = HEADER_FONT
-            header_cell.fill = HEADER_FILL
+        _write_output_header(worksheet, header_row, insert_at, label)
+
+    for column, label in pending_headers:
+        _write_output_header(worksheet, header_row, column, label)
 
     analog_start = section_col + 1
     return WriterColumns(
@@ -292,6 +299,64 @@ def _ensure_kr_and_section_columns(
         analog_start=analog_start,
         header_row=columns.header_row,
     )
+
+
+def _write_output_header(
+    worksheet: Worksheet,
+    header_row: int,
+    column: int,
+    label: str,
+) -> None:
+    if header_row <= 0:
+        return
+
+    header_cell = worksheet.cell(row=header_row, column=column)
+    if header_cell.value not in (None, ""):
+        return
+
+    header_cell.value = label
+    header_cell.font = HEADER_FONT
+    header_cell.fill = HEADER_FILL
+
+
+def _column_needs_insert_for_kr(
+    worksheet: Worksheet,
+    header_row: int,
+    kr_col: int,
+    section_col: int | None,
+) -> bool:
+    if section_col == kr_col:
+        return True
+
+    if header_row <= 0:
+        return False
+
+    value = worksheet.cell(row=header_row, column=kr_col).value
+    if value in (None, ""):
+        return False
+
+    if _is_kr_header(value) or _is_section_header(value):
+        return False
+
+    return True
+
+
+def _column_needs_insert_for_section(
+    worksheet: Worksheet,
+    header_row: int,
+    section_col: int,
+) -> bool:
+    if header_row <= 0:
+        return False
+
+    value = worksheet.cell(row=header_row, column=section_col).value
+    if value in (None, ""):
+        return False
+
+    if _is_section_header(value):
+        return False
+
+    return True
 
 
 def _find_kr_column(

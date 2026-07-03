@@ -11,9 +11,10 @@
     <h1>Estimate AI</h1>
     <p class="sub">Подбор аналогов и расчёт цен по смете</p>
     <form method="post" action="/run" enctype="multipart/form-data">
-      <label>База аналогов (Excel .xlsx)
-        <input type="file" name="catalog" accept=".xlsx" required>
+      <label>База аналогов (Excel .xlsx, необязательно если загружена в БД)
+        <input type="file" name="catalog" accept=".xlsx" $catalog_required>
       </label>
+      <p class="muted">SQLite: $catalog_status</p>
       <label>Смета (Excel .xlsx)
         <input type="file" name="estimate" accept=".xlsx" required>
       </label>

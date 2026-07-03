@@ -21,6 +21,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
+from app.services.catalog_source import CatalogNotAvailableError, database_has_catalog
 from app.services.read_estimate import (
     EstimateReadError,
     KeyDataNotFoundError,
@@ -44,10 +45,11 @@ class UploadRecord:
     """Files and options stored for one upload token (survives sheet choice)."""
 
     directory: Path
-    catalog_path: Path
+    catalog_path: Path | None
     estimate_path: Path
     estimate_name: str
     coefficient: float | None
+    use_database_catalog: bool = False
     output_path: Path | None = None
     output_name: str = ""
 
@@ -91,24 +93,43 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 status_code=400,
             )
 
-        if catalog is None or estimate is None:
+        if estimate is None:
             return HTMLResponse(
-                render_index("\u041d\u0443\u0436\u043d\u043e \u0432\u044b\u0431\u0440\u0430\u0442\u044c \u043e\u0431\u0430 \u0444\u0430\u0439\u043b\u0430: \u0431\u0430\u0437\u0443 \u0438 \u0441\u043c\u0435\u0442\u0443."),
+                render_index("\u041d\u0443\u0436\u043d\u043e \u0432\u044b\u0431\u0440\u0430\u0442\u044c \u0444\u0430\u0439\u043b \u0441\u043c\u0435\u0442\u044b."),
                 status_code=400,
             )
 
-        catalog_bytes = await catalog.read()
         estimate_bytes = await estimate.read()
-        if not catalog_bytes or not estimate_bytes:
+        if not estimate_bytes:
             return HTMLResponse(
-                render_index("\u041d\u0443\u0436\u043d\u043e \u0432\u044b\u0431\u0440\u0430\u0442\u044c \u043e\u0431\u0430 \u0444\u0430\u0439\u043b\u0430: \u0431\u0430\u0437\u0443 \u0438 \u0441\u043c\u0435\u0442\u0443."),
+                render_index("\u041d\u0443\u0436\u043d\u043e \u0432\u044b\u0431\u0440\u0430\u0442\u044c \u0444\u0430\u0439\u043b \u0441\u043c\u0435\u0442\u044b."),
+                status_code=400,
+            )
+
+        catalog_bytes = b""
+        if catalog is not None:
+            catalog_bytes = await catalog.read()
+
+        use_database_catalog = False
+        catalog_path: Path | None = None
+        if catalog_bytes:
+            pass
+        elif database_has_catalog():
+            use_database_catalog = True
+        else:
+            return HTMLResponse(
+                render_index(
+                    "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u0431\u0430\u0437\u0443 \u0430\u043d\u0430\u043b\u043e\u0433\u043e\u0432 "
+                    "(\u0438\u043b\u0438 \u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 import-catalog)."
+                ),
                 status_code=400,
             )
 
         token = uuid.uuid4().hex
         directory = state.base_dir / token
         directory.mkdir(parents=True, exist_ok=True)
-        catalog_path = _save(directory, "catalog.xlsx", catalog_bytes)
+        if catalog_bytes:
+            catalog_path = _save(directory, "catalog.xlsx", catalog_bytes)
         estimate_name = _safe_name(estimate.filename) or "estimate.xlsx"
         estimate_path = _save(directory, estimate_name, estimate_bytes)
 
@@ -118,6 +139,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             estimate_path=estimate_path,
             estimate_name=estimate_name,
             coefficient=None if coef is _INVALID else coef,  # type: ignore[arg-type]
+            use_database_catalog=use_database_catalog,
         )
         return _process(state, token, selected_sheet=None)
 
@@ -179,6 +201,14 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
     except EstimateReadError as error:
         return HTMLResponse(
             render_error("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0441\u043c\u0435\u0442\u0443", str(error)),
+            status_code=400,
+        )
+    except CatalogNotAvailableError as error:
+        return HTMLResponse(
+            render_error(
+                "\u0411\u0430\u0437\u0430 \u0430\u043d\u0430\u043b\u043e\u0433\u043e\u0432 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430",
+                str(error),
+            ),
             status_code=400,
         )
 

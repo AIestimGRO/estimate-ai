@@ -7,6 +7,7 @@ from openpyxl import Workbook
 
 from app.web.app import create_app
 from app.web.rendering import XLSX_MIME
+from core.storage import connect, import_catalog_from_excel, init_database
 
 METER = "\u043c"
 CODE = "\u0413\u042d\u0421\u041d01-01-001-01"
@@ -101,6 +102,52 @@ def test_index_page_has_upload_form(client):
     assert response.status_code == 200
     assert 'name="catalog"' in response.text
     assert 'name="estimate"' in response.text
+    assert "SQLite:" in response.text
+
+
+def _seed_database(db_path, catalog_bytes):
+    catalog_file = db_path.parent / "seed_catalog.xlsx"
+    catalog_file.write_bytes(catalog_bytes)
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        import_catalog_from_excel(connection, catalog_file, source_name="main")
+    finally:
+        connection.close()
+
+
+def test_run_from_database_without_catalog_upload(client, tmp_path, monkeypatch):
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_database(db_path, _catalog_bytes([("t-1", 100), ("t-2", 120)]))
+
+    files = {
+        "estimate": ("estimate.xlsx", _template_estimate_bytes(), XLSX_MIME),
+    }
+    page = client.post("/run", files=files, data={"coefficient": ""})
+
+    assert page.status_code == 200
+    assert "\u0411\u0430\u0437\u0430 \u0430\u043d\u0430\u043b\u043e\u0433\u043e\u0432" in page.text
+    assert "\u0411\u0414" in page.text
+    assert '<table class="preview">' in page.text
+
+
+def test_missing_catalog_when_database_empty(client, tmp_path, monkeypatch):
+    db_path = tmp_path / "empty.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+    finally:
+        connection.close()
+
+    files = {
+        "estimate": ("estimate.xlsx", _template_estimate_bytes(), XLSX_MIME),
+    }
+    page = client.post("/run", files=files)
+
+    assert page.status_code == 400
+    assert "import-catalog" in page.text
 
 
 def test_full_run_and_download(client):
@@ -136,7 +183,7 @@ def test_missing_estimate_shows_notice(client):
     page = client.post("/run", files=files)
 
     assert page.status_code == 400
-    assert "\u043e\u0431\u0430 \u0444\u0430\u0439\u043b\u0430" in page.text
+    assert "\u0441\u043c\u0435\u0442" in page.text
 
 
 def test_invalid_coefficient_shows_notice(client):

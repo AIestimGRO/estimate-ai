@@ -67,6 +67,23 @@ def list_catalog_rows(
     return [_row_to_catalog_row(row) for row in rows]
 
 
+def count_catalog_rows(
+    connection: sqlite3.Connection,
+    *,
+    source_name: str = DEFAULT_SOURCE_NAME,
+) -> int:
+    row = connection.execute(
+        """
+        SELECT COUNT(*) AS row_count
+        FROM catalog_items
+        INNER JOIN catalog_sources ON catalog_sources.id = catalog_items.source_id
+        WHERE catalog_sources.name = ?
+        """,
+        (source_name,),
+    ).fetchone()
+    return 0 if row is None else int(row["row_count"])
+
+
 def import_catalog_from_excel(
     connection: sqlite3.Connection,
     workbook_path: str | Path,

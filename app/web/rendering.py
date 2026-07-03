@@ -14,6 +14,7 @@ from string import Template
 from urllib.parse import quote
 
 from app.services.write_result import RunAndWriteResult
+from app.services.catalog_source import catalog_status_label, database_has_catalog
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT
 
@@ -115,6 +116,18 @@ def _macro_exclusion_label(outcome: RunAndWriteResult) -> str:
     return f"{outcome.name_exclusion_rule_count} ({outcome.macro_workbook.name})"
 
 
+def _catalog_source_label(outcome: RunAndWriteResult) -> str:
+    if not outcome.catalog_source:
+        return ""
+    if outcome.catalog_source.startswith("database:"):
+        source_name = outcome.catalog_source.split(":", 1)[1]
+        return f"{outcome.catalog_row_count} \u0441\u0442\u0440\u043e\u043a \u0438\u0437 \u0411\u0414 ({source_name})"
+    if outcome.catalog_source.startswith("file:"):
+        file_name = outcome.catalog_source.split(":", 1)[1]
+        return f"{outcome.catalog_row_count} \u0441\u0442\u0440\u043e\u043a \u0438\u0437 \u0444\u0430\u0439\u043b\u0430 ({file_name})"
+    return f"{outcome.catalog_row_count} ({outcome.catalog_source})"
+
+
 def render(template_name: str, **context: str) -> str:
     text = (TEMPLATES_DIR / template_name).read_text(encoding="utf-8")
     context.setdefault("styles", STYLES)
@@ -123,6 +136,8 @@ def render(template_name: str, **context: str) -> str:
     context.setdefault("preview", "")
     context.setdefault("build_stamp", writer_build_stamp())
     context.setdefault("macro_status", macro_status_label())
+    context.setdefault("catalog_status", html.escape(catalog_status_label()))
+    context.setdefault("catalog_required", "" if database_has_catalog() else "required")
     return Template(text).safe_substitute(context)
 
 
@@ -198,6 +213,7 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
     result = outcome.result
     method_label = READ_METHOD_LABELS.get(outcome.read_method, outcome.read_method)
     exclusion_label = _macro_exclusion_label(outcome)
+    catalog_label = _catalog_source_label(outcome)
     rows = [
         ("\u041b\u0438\u0441\u0442", outcome.sheet_title),
         ("\u0421\u043f\u043e\u0441\u043e\u0431 \u0447\u0442\u0435\u043d\u0438\u044f", method_label),
@@ -221,6 +237,8 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
             writer_build_stamp(),
         ),
     ]
+    if catalog_label:
+        rows.insert(1, ("\u0411\u0430\u0437\u0430 \u0430\u043d\u0430\u043b\u043e\u0433\u043e\u0432", catalog_label))
     if exclusion_label:
         rows.insert(3, (
             "Name_Exclusions",

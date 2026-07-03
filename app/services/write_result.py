@@ -13,9 +13,10 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from app.services.catalog_source import CatalogNotAvailableError, load_catalog_for_run
 from app.services.read_estimate import METHOD_TEMPLATE, EstimateData, load_estimate
 from app.services.run_matching import MatchingRunResult, run_matching
-from core.excel_io import Settings, read_catalog_rows
+from core.excel_io import Settings
 from core.excel_writer import WriteReport, WriterColumns, resolve_kr_column, write_run_result
 from core.exclusions import NameExclusionRule, TaskColorEntry
 from core.layout import FIELD_SECTION, LayoutConfig, load_layout_config, resolve_regional_coefficient
@@ -38,14 +39,18 @@ class RunAndWriteResult:
     read_method: str
     macro_workbook: Path | None = None
     name_exclusion_rule_count: int = 0
+    catalog_source: str = ""
+    catalog_row_count: int = 0
 
 
 def run_and_write(
-    catalog_path: str | Path,
+    catalog_path: str | Path | None,
     estimate_path: str | Path,
     output_path: str | Path | None = None,
     *,
     settings: Settings | None = None,
+    catalog_source_name: str = "main",
+    database_path: str | Path | None = None,
     selected_sheet_title: str | None = None,
     name_exclusion_rules: list[NameExclusionRule] | None = None,
     task_color_entries: list[TaskColorEntry] | None = None,
@@ -69,7 +74,12 @@ def run_and_write(
         task_color_entries,
     )
 
-    catalog_rows = read_catalog_rows(catalog_path, active_settings)
+    catalog = load_catalog_for_run(
+        catalog_path,
+        source_name=catalog_source_name,
+        database_path=database_path,
+        settings=active_settings,
+    )
     estimate = load_estimate(
         estimate_path,
         settings=active_settings,
@@ -87,7 +97,7 @@ def run_and_write(
     )
 
     result = run_matching(
-        catalog_rows,
+        catalog.rows,
         estimate_rows,
         name_exclusion_rules=exclusion_rules,
         gesn_exceptions=gesn_exceptions,
@@ -124,6 +134,8 @@ def run_and_write(
         read_method=estimate.method,
         macro_workbook=macro_workbook,
         name_exclusion_rule_count=len(exclusion_rules),
+        catalog_source=catalog.source_label,
+        catalog_row_count=catalog.row_count,
     )
 
 

@@ -244,7 +244,6 @@ def test_task_color_list_tints_analog_column_blue(tmp_path: Path) -> None:
 
 
 def test_kr_and_section_use_dedicated_columns_with_real_headers(tmp_path: Path) -> None:
-    """eV-grup layout: code col 14, /KR col 15, section col 16, analogs from 17."""
     code_header = "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0422\u0415\u0420/\u041a\u0420"
     kr_header = "/\u041a\u0420"
     section_header = "\u041a\u043e\u0434 \u0440\u0430\u0437\u0434\u0435\u043b\u0430"
@@ -285,5 +284,50 @@ def test_kr_and_section_use_dedicated_columns_with_real_headers(tmp_path: Path) 
         assert sheet.cell(row=header_row, column=17).value == "5818383"
         assert sheet.cell(row=header_row + 1, column=17).value == "\u042f\u043a\u0443\u0442\u0438\u044f"
         assert sheet.cell(row=header_row, column=18).value == "4768644"
+    finally:
+        workbook.close()
+
+
+def test_kr_reuses_free_column_without_inserting(tmp_path: Path) -> None:
+    """eV-grup layout with blank col 15: /KR goes into 15, section stays at 16."""
+    code_header = "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0422\u0415\u0420/\u041a\u0420"
+    section_header = "\u041a\u043e\u0434 \u0440\u0430\u0437\u0434\u0435\u043b\u0430"
+    unit_header = "\u0415\u0434.\u0438\u0437\u043c."
+    base_header = "\u0426\u0435\u043d\u0430 \u0435\u0434\u0438\u043d\u0438\u0446\u044b \u0440\u0430\u0431\u043e\u0442, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421"
+
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("5818383", 100), ("4768644", 120)],
+        region="\u042f\u043a\u0443\u0442\u0438\u044f",
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = ESTIMATE_TITLE
+    header_row = 26
+    sheet.cell(row=header_row, column=4, value=unit_header)
+    sheet.cell(row=header_row, column=6, value=base_header)
+    sheet.cell(row=header_row, column=14, value=code_header)
+    sheet.cell(row=header_row, column=16, value=section_header)
+    data_row = 28
+    sheet.cell(row=data_row, column=3, value=INSTALLATION)
+    sheet.cell(row=data_row, column=4, value=METER)
+    sheet.cell(row=data_row, column=6, value=50.0)
+    sheet.cell(row=data_row, column=14, value=CODE)
+    estimate = tmp_path / "estimate.xlsx"
+    workbook.save(estimate)
+    workbook.close()
+
+    outcome = run_and_write(catalog, estimate, tmp_path / "out.xlsx")
+
+    assert outcome.write_report.analog_start_column == 17
+    workbook = load_workbook(tmp_path / "out.xlsx", data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=header_row, column=15).value == "/\u041a\u0420"
+        assert sheet.cell(row=header_row, column=16).value == section_header
+        assert sheet.cell(row=header_row, column=17).value == "5818383"
+        assert str(sheet.cell(row=data_row, column=15).value).endswith(KR_END)
+        assert sheet.cell(row=data_row, column=16).value == "01"
+        assert sheet.cell(row=data_row, column=17).value == 100
     finally:
         workbook.close()
