@@ -1,13 +1,14 @@
 @echo off
 REM Launch the Estimate AI local web UI using the project virtualenv.
-REM Stops any previous instance on port 8000, then starts with --reload.
+REM Stops ALL previous listeners on port 8000, then starts (no --reload: one process, easy to stop).
 cd /d "%~dp0"
 
-echo Stopping old server on port 8000...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
-  taskkill /F /PID %%a >nul 2>&1
-)
+echo Stopping old servers ...
+call "%~dp0stop_web.bat"
+if errorlevel 1 exit /b 1
 
-echo Starting Estimate AI...
-".venv\Scripts\python.exe" -m app.web --reload %*
+echo.
+echo Starting Estimate AI (.venv) ...
+echo To stop: Ctrl+C in this window, or run stop_web.bat from another terminal.
+".venv\Scripts\python.exe" -m app.web --no-browser %*
 pause

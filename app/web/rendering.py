@@ -14,6 +14,7 @@ from string import Template
 from urllib.parse import quote
 
 from app.services.write_result import RunAndWriteResult
+from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT
 
 _WRITER_MODULE = Path(__file__).resolve().parents[2] / "core" / "excel_writer.py"
@@ -97,6 +98,23 @@ def writer_build_stamp() -> str:
     return modified.strftime("%Y-%m-%d %H:%M UTC")
 
 
+def macro_status_label() -> str:
+    """Show whether Name_Exclusions from the autopodbor workbook is loaded."""
+    settings = load_default_macro_settings()
+    if settings.workbook_path is None:
+        return "\u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d (\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 data/config/macro.json)"
+    count = len(settings.name_exclusion_rules)
+    return f"{count} \u043f\u0440\u0430\u0432\u0438\u043b ({html.escape(settings.workbook_path.name)})"
+
+
+def _macro_exclusion_label(outcome: RunAndWriteResult) -> str:
+    if outcome.name_exclusion_rule_count <= 0 and outcome.macro_workbook is None:
+        return ""
+    if outcome.macro_workbook is None:
+        return str(outcome.name_exclusion_rule_count)
+    return f"{outcome.name_exclusion_rule_count} ({outcome.macro_workbook.name})"
+
+
 def render(template_name: str, **context: str) -> str:
     text = (TEMPLATES_DIR / template_name).read_text(encoding="utf-8")
     context.setdefault("styles", STYLES)
@@ -104,6 +122,7 @@ def render(template_name: str, **context: str) -> str:
     context.setdefault("detail", "")
     context.setdefault("preview", "")
     context.setdefault("build_stamp", writer_build_stamp())
+    context.setdefault("macro_status", macro_status_label())
     return Template(text).safe_substitute(context)
 
 
@@ -178,6 +197,7 @@ def _render_preview(rows: list) -> str:
 def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> str:
     result = outcome.result
     method_label = READ_METHOD_LABELS.get(outcome.read_method, outcome.read_method)
+    exclusion_label = _macro_exclusion_label(outcome)
     rows = [
         ("\u041b\u0438\u0441\u0442", outcome.sheet_title),
         ("\u0421\u043f\u043e\u0441\u043e\u0431 \u0447\u0442\u0435\u043d\u0438\u044f", method_label),
@@ -187,7 +207,7 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
         ("\u0420\u0435\u0433\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442", f"{outcome.regional_coefficient:g}"),
         (
             "\u041f\u043e\u0440\u043e\u0433 ratio (max/min)",
-            f"{DEFAULT_PRICE_SPREAD_LIMIT:g}",
+            f"{DEFAULT_PRICE_SPREAD_LIMIT:g} (\u043a\u0440\u0430\u0441\u043d\u044b\u0439 \u043f\u0440\u0438 ratio \u2265 \u044d\u0442\u043e\u0433\u043e)",
         ),
         ("\u0417\u0430\u043f\u0438\u0441\u0430\u043d\u043e \u0441\u0442\u0440\u043e\u043a \u0432 \u0444\u0430\u0439\u043b", str(outcome.write_report.written_rows)),
         (
@@ -201,6 +221,11 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
             writer_build_stamp(),
         ),
     ]
+    if exclusion_label:
+        rows.insert(3, (
+            "Name_Exclusions",
+            exclusion_label,
+        ))
     stats = "\n".join(
         f"<div><dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd></div>"
         for label, value in rows

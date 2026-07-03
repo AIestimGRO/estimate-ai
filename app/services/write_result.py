@@ -19,6 +19,7 @@ from core.excel_io import Settings, read_catalog_rows
 from core.excel_writer import WriteReport, WriterColumns, resolve_kr_column, write_run_result
 from core.exclusions import NameExclusionRule, TaskColorEntry
 from core.layout import FIELD_SECTION, LayoutConfig, load_layout_config, resolve_regional_coefficient
+from core.macro_workbook import load_default_macro_settings
 from core.risk import GesnException
 
 WA_SUFFIX = " WA"
@@ -35,6 +36,8 @@ class RunAndWriteResult:
     output_path: Path
     sheet_title: str
     read_method: str
+    macro_workbook: Path | None = None
+    name_exclusion_rule_count: int = 0
 
 
 def run_and_write(
@@ -61,6 +64,11 @@ def run_and_write(
         else price_spread_limit
     )
 
+    exclusion_rules, task_colors, macro_workbook = _resolve_macro_settings(
+        name_exclusion_rules,
+        task_color_entries,
+    )
+
     catalog_rows = read_catalog_rows(catalog_path, active_settings)
     estimate = load_estimate(
         estimate_path,
@@ -81,7 +89,7 @@ def run_and_write(
     result = run_matching(
         catalog_rows,
         estimate_rows,
-        name_exclusion_rules=name_exclusion_rules,
+        name_exclusion_rules=exclusion_rules,
         gesn_exceptions=gesn_exceptions,
         demontazh_filter_enabled=demontazh_filter_enabled,
         price_spread_limit=spread_limit,
@@ -103,7 +111,7 @@ def run_and_write(
         columns=writer_columns,
         regional_coefficient=coefficient,
         sheet_title=estimate.sheet_title,
-        task_color_entries=task_color_entries,
+        task_color_entries=task_colors,
     )
 
     return RunAndWriteResult(
@@ -114,7 +122,23 @@ def run_and_write(
         output_path=destination,
         sheet_title=estimate.sheet_title,
         read_method=estimate.method,
+        macro_workbook=macro_workbook,
+        name_exclusion_rule_count=len(exclusion_rules),
     )
+
+
+def _resolve_macro_settings(
+    name_exclusion_rules: list[NameExclusionRule] | None,
+    task_color_entries: list[TaskColorEntry] | None,
+) -> tuple[list[NameExclusionRule], list[TaskColorEntry], Path | None]:
+    if name_exclusion_rules is not None and task_color_entries is not None:
+        return name_exclusion_rules, task_color_entries, None
+
+    macro = load_default_macro_settings()
+    rules = macro.name_exclusion_rules if name_exclusion_rules is None else name_exclusion_rules
+    colors = macro.task_color_entries if task_color_entries is None else task_color_entries
+    macro_path = macro.workbook_path if (name_exclusion_rules is None or task_color_entries is None) else None
+    return rules, colors, macro_path
 
 
 def _writer_columns(

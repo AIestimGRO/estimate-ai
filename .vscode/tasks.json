@@ -2,10 +2,26 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Estimate AI: Stop Web",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/stop_web.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Estimate AI: Run Web",
       "type": "shell",
-      "command": ".\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "app.web", "--reload"],
+      "command": "${workspaceFolder}/run_web.bat",
+      "dependsOn": ["Estimate AI: Stop Web"],
       "options": {
         "cwd": "${workspaceFolder}"
       },
