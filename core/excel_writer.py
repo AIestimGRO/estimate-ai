@@ -41,6 +41,10 @@ HEADER_FONT = Font(bold=True, size=9)
 REGION_FONT = Font(italic=True, size=9)
 AVG_FONT = Font(bold=True)
 
+# Header labels for columns inserted when absent (synonyms live in layout.json).
+KR_HEADER_LABEL = "/\u041a\u0420"
+SECTION_HEADER_LABEL = "\u041a\u043e\u0434 \u0440\u0430\u0437\u0434\u0435\u043b\u0430"
+
 _RISK_LOG_HEADER = (
     "estimate_row",
     "code",
@@ -122,28 +126,36 @@ def write_run_result(
             worksheet = find_estimate_sheet(workbook)
 
         placement = _plan_average_column(worksheet, columns.base_price, row_numbers)
-        analog_start_base = (
-            max(worksheet.max_column + 1, placement.column + 1)
-            if columns.analog_start is None
-            else columns.analog_start
-        )
-        output_columns = _plan_output_columns(columns, placement, analog_start_base)
         if placement.needs_insert:
             worksheet.insert_cols(placement.column)
 
+        layout_columns = _ensure_kr_and_section_columns(
+            worksheet,
+            columns,
+            placement,
+            row_numbers,
+        )
+        analog_start_base = (
+            max(worksheet.max_column + 1, placement.column + 1)
+            if layout_columns.analog_start is None
+            else layout_columns.analog_start
+        )
+        output_columns = _plan_output_columns(layout_columns, placement, analog_start_base)
+
+        header_row = _effective_header_row(layout_columns, row_numbers)
         analog_plan = _build_global_analog_plan(result, output_columns.analog_start)
         last_data_row = max(row_numbers) if row_numbers else output_columns.analog_start
         if analog_plan.columns:
             _clear_analog_block(
                 worksheet,
-                columns.header_row or output_columns.analog_start,
+                header_row or output_columns.analog_start,
                 last_data_row,
                 output_columns.analog_start,
                 analog_plan.last_column,
             )
             _write_analog_headers(
                 worksheet,
-                columns.header_row,
+                header_row,
                 analog_plan,
                 last_data_row,
                 task_colors,
@@ -205,20 +217,119 @@ def _plan_average_column(
 
 
 def _plan_output_columns(columns: WriterColumns, placement, analog_start_base: int) -> _OutputColumns:
-    def shifted(column: int) -> int:
-        if placement.needs_insert and column >= placement.column:
-            return column + 1
-        return column
-
-    section = None if columns.section is None else shifted(columns.section)
-
     return _OutputColumns(
         base_price=columns.base_price,
         average=placement.column,
-        code_kr=shifted(columns.code_kr),
-        section=section,
-        analog_start=shifted(analog_start_base),
+        code_kr=columns.code_kr,
+        section=columns.section,
+        analog_start=analog_start_base,
     )
+
+
+def _effective_header_row(columns: WriterColumns, row_numbers: list[int]) -> int:
+    if columns.header_row > 0:
+        return columns.header_row
+    if not row_numbers:
+        return 0
+    return min(row_numbers) - 2
+
+
+def _shifted_column(column: int, placement) -> int:
+    if placement.needs_insert and column >= placement.column:
+        return column + 1
+    return column
+
+
+def _ensure_kr_and_section_columns(
+    worksheet: Worksheet,
+    columns: WriterColumns,
+    placement,
+    row_numbers: list[int],
+) -> WriterColumns:
+    """Ensure dedicated `/KR` and section columns exist (R11, DOMAIN_RULES.md section 6).
+
+    The GESN code column keeps the plain code; rows with analogs receive
+    ``code + /KR`` in the adjacent `/KR` column. Section codes go into their
+    own column. Missing columns are inserted after the average-column shift.
+    """
+    header_row = _effective_header_row(columns, row_numbers)
+    code_col = _shifted_column(columns.code, placement)
+
+    kr_col = _find_kr_column(worksheet, header_row, code_col)
+    section_col = (
+        _shifted_column(columns.section, placement)
+        if columns.section is not None
+        else _find_section_column(worksheet, header_row, code_col)
+    )
+
+    pending: list[tuple[int, str]] = []
+
+    if kr_col is None:
+        kr_col = code_col + 1
+        pending.append((kr_col, KR_HEADER_LABEL))
+        if section_col is not None and section_col >= kr_col:
+            section_col += 1
+
+    if section_col is None or section_col <= kr_col:
+        section_col = kr_col + 1
+        if not any(insert_at == section_col for insert_at, _ in pending):
+            pending.append((section_col, SECTION_HEADER_LABEL))
+
+    for insert_at, label in sorted(pending, key=lambda item: item[0], reverse=True):
+        worksheet.insert_cols(insert_at)
+        if header_row > 0:
+            header_cell = worksheet.cell(row=header_row, column=insert_at)
+            header_cell.value = label
+            header_cell.font = HEADER_FONT
+            header_cell.fill = HEADER_FILL
+
+    analog_start = section_col + 1
+    return WriterColumns(
+        base_price=columns.base_price,
+        code=code_col,
+        code_kr=kr_col,
+        section=section_col,
+        analog_start=analog_start,
+        header_row=columns.header_row,
+    )
+
+
+def _find_kr_column(
+    worksheet: Worksheet,
+    header_row: int,
+    code_column: int,
+) -> int | None:
+    if header_row <= 0:
+        return None
+
+    for column in range(code_column + 1, code_column + 4):
+        if _is_kr_header(worksheet.cell(row=header_row, column=column).value):
+            return column
+    return None
+
+
+def _find_section_column(
+    worksheet: Worksheet,
+    header_row: int,
+    code_column: int,
+) -> int | None:
+    if header_row <= 0:
+        return None
+
+    for column in range(code_column + 1, code_column + 6):
+        if _is_section_header(worksheet.cell(row=header_row, column=column).value):
+            return column
+    return None
+
+
+def _is_kr_header(value: object) -> bool:
+    text = _normalize_header_text(value)
+    return text == "\u043a\u0440" or text.startswith("/")
+
+
+def _is_section_header(value: object) -> bool:
+    text = _normalize_header_text(value)
+    return "\u043a\u043e\u0434 \u0440\u0430\u0437\u0434\u0435\u043b\u0430" in text
 
 
 def _build_global_analog_plan(
@@ -226,22 +337,34 @@ def _build_global_analog_plan(
     analog_start: int,
 ) -> GlobalAnalogPlan:
     """Assign one worksheet column per (task_id, price_position) pair (Module4 step 2)."""
+    task_order: list[str] = []
+    seen_tasks: set[str] = set()
+    task_max_pi: dict[str, int] = {}
+    region_by_key: dict[tuple[str, int], str] = {}
+
+    for row in result.rows:
+        for analog in row.analogs:
+            task_id = analog.task_id
+            if task_id not in seen_tasks:
+                seen_tasks.add(task_id)
+                task_order.append(task_id)
+            task_max_pi[task_id] = max(task_max_pi.get(task_id, 0), analog.price_position)
+            region_by_key[(task_id, analog.price_position)] = analog.entry.region
+
     by_key: dict[tuple[str, int], int] = {}
     column_defs: list[AnalogColumnDef] = []
     next_column = analog_start
 
-    for row in result.rows:
-        for analog in row.analogs:
-            key = (analog.task_id, analog.price_position)
-            if key in by_key:
-                continue
+    for task_id in task_order:
+        for price_position in range(1, task_max_pi[task_id] + 1):
+            key = (task_id, price_position)
             by_key[key] = next_column
             column_defs.append(
                 AnalogColumnDef(
                     column=next_column,
-                    task_id=analog.task_id,
-                    price_position=analog.price_position,
-                    region=analog.entry.region,
+                    task_id=task_id,
+                    price_position=price_position,
+                    region=region_by_key.get(key, ""),
                 )
             )
             next_column += 1
@@ -459,16 +582,14 @@ def resolve_kr_column(
     settings_code_kr: int,
     settings_code_search: int,
 ) -> int:
-    """Pick the `/KR` destination column from the header row when present."""
-    if header_row > 0:
-        neighbor = worksheet.cell(row=header_row, column=code_column + 1).value
-        text = _normalize_header_text(neighbor)
-        if text == "\u043a\u0440" or text.startswith("/"):
-            return code_column + 1
+    """Pick the `/KR` destination column; never reuse the plain code column."""
+    found = _find_kr_column(worksheet, header_row, code_column)
+    if found is not None:
+        return found
 
     if settings_code_kr != settings_code_search:
         return settings_code_kr
-    return code_column
+    return code_column + 1
 
 
 def _normalize_header_text(value: object) -> str:

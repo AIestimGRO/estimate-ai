@@ -1,5 +1,6 @@
 from core.catalog import CatalogEntry, CatalogRow
 from core.risk import (
+    DEFAULT_PRICE_SPREAD_LIMIT,
     REASON_NONE,
     REASON_OUT_OF_APPROVED_RANGE,
     REASON_RATIO_EXCEEDED,
@@ -46,6 +47,18 @@ def exception(
         approved_max=approved_max,
         last_range_update_date=last_range_update_date,
     )
+
+
+def test_default_spread_limit_is_three() -> None:
+    below = CheckPriceRisk([entry(100), entry(250)])
+    at_threshold = CheckPriceRisk([entry(100), entry(300)])
+
+    assert not below.is_flagged
+    assert below.ratio == 2.5
+    assert at_threshold.is_flagged
+    assert at_threshold.reason == REASON_RATIO_EXCEEDED
+    assert at_threshold.ratio == 3.0
+    assert DEFAULT_PRICE_SPREAD_LIMIT == 3.0
 
 
 def test_fewer_than_two_entries_never_flagged() -> None:

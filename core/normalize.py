@@ -1,5 +1,7 @@
 """Normalization helpers ported from the VBA matching macro."""
 
+import re
+
 KR_SUFFIX = "/\u041a\u0420"
 YO_LOWER = "\u0451"
 YE_LOWER = "\u0435"
@@ -65,6 +67,20 @@ def NormUnit(value: object) -> str:
     return text
 
 
+def BaseUnit(value: object) -> str:
+    """Strip a leading quantity prefix so ``100 m2`` and ``m2`` share one base unit.
+
+    NormUnit is unchanged (full compact token). Matching uses the base unit only;
+    analog prices are never scaled by the stripped prefix.
+    """
+    unit = NormUnit(value)
+    if unit == "":
+        return ""
+
+    without_prefix = re.sub(r"^\d+", "", unit)
+    return unit if without_prefix == "" else without_prefix
+
+
 def HasDemontazh(value: object) -> bool:
     """Port of HasDemontazh from Module3, DOMAIN_RULES.md section 2.4."""
     if value is None:
@@ -107,8 +123,8 @@ def HasDemontazh(value: object) -> bool:
 
 
 def AnalogSearchKey(unit_value: object, code_value: object) -> str:
-    """Port of AnalogSearchKey from Module3, DOMAIN_RULES.md section 2.3."""
-    unit = NormUnit(unit_value)
+    """Port of AnalogSearchKey from Module3, with base-unit matching (DOMAIN_RULES.md section 2.3)."""
+    unit = BaseUnit(unit_value)
     code = NormCode(code_value)
 
     if unit == "" or code == "":

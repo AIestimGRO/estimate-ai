@@ -19,7 +19,7 @@ from core.excel_io import Settings, read_catalog_rows
 from core.excel_writer import WriteReport, WriterColumns, resolve_kr_column, write_run_result
 from core.exclusions import NameExclusionRule, TaskColorEntry
 from core.layout import FIELD_SECTION, LayoutConfig, load_layout_config, resolve_regional_coefficient
-from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
+from core.risk import GesnException
 
 WA_SUFFIX = " WA"
 
@@ -48,13 +48,18 @@ def run_and_write(
     task_color_entries: list[TaskColorEntry] | None = None,
     gesn_exceptions: dict[str, GesnException] | None = None,
     demontazh_filter_enabled: bool = True,
-    price_spread_limit: float = DEFAULT_PRICE_SPREAD_LIMIT,
+    price_spread_limit: float | None = None,
     regional_coefficient: float | None = None,
     layout_config: LayoutConfig | None = None,
 ) -> RunAndWriteResult:
     """Run matching over the files and write the result into a `WA` copy."""
     active_settings = Settings() if settings is None else settings
     config = load_layout_config() if layout_config is None else layout_config
+    spread_limit = (
+        active_settings.price_spread_limit
+        if price_spread_limit is None
+        else price_spread_limit
+    )
 
     catalog_rows = read_catalog_rows(catalog_path, active_settings)
     estimate = load_estimate(
@@ -79,7 +84,7 @@ def run_and_write(
         name_exclusion_rules=name_exclusion_rules,
         gesn_exceptions=gesn_exceptions,
         demontazh_filter_enabled=demontazh_filter_enabled,
-        price_spread_limit=price_spread_limit,
+        price_spread_limit=spread_limit,
         regional_coefficient=coefficient,
     )
 
@@ -118,39 +123,35 @@ def _writer_columns(
     estimate_path: str | Path,
     sheet_title: str,
 ) -> WriterColumns:
-    if estimate.method == METHOD_TEMPLATE:
-        return WriterColumns(
-            base_price=settings.col_f,
-            code=settings.col_search,
-            code_kr=settings.col_kr,
-            section=settings.col_section,
-            analog_start=settings.col_analog_start,
-            header_row=estimate.header_row,
-        )
-
-    section = estimate.layout.column(FIELD_SECTION)
-    if section is None:
-        section = settings.col_section
-        analog_start = settings.col_analog_start
-    else:
-        analog_start = section + 1
-
     workbook = load_workbook(estimate_path, read_only=True, data_only=True)
     try:
         worksheet = workbook[sheet_title]
+        section = estimate.layout.column(FIELD_SECTION)
+        if section is None:
+            section = settings.col_section
+            analog_start = settings.col_analog_start
+        else:
+            analog_start = section + 1
+
+        code_column = estimate.code_column
         code_kr = resolve_kr_column(
             worksheet,
             estimate.header_row,
-            estimate.code_column,
+            code_column,
             settings.col_kr,
             settings.col_search,
+        )
+        base_price = (
+            settings.col_f
+            if estimate.method == METHOD_TEMPLATE
+            else estimate.base_price_column
         )
     finally:
         workbook.close()
 
     return WriterColumns(
-        base_price=estimate.base_price_column,
-        code=estimate.code_column,
+        base_price=base_price,
+        code=code_column,
         code_kr=code_kr,
         section=section,
         analog_start=analog_start,

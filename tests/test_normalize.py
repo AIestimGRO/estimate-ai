@@ -20,13 +20,21 @@ def test_norm_code_cleans_whitespace_tabs_line_breaks_and_nbsp() -> None:
     assert NormCode(raw) == "GESN01-01-001-01/01"
 
 
-def test_norm_unit_100_m_and_m_are_different_keys() -> None:
+def test_norm_unit_100_m_and_m_share_matching_key() -> None:
     assert NormUnit(f"100 {CYRILLIC_M}") == f"100{CYRILLIC_M}"
     assert NormUnit(CYRILLIC_M) == CYRILLIC_M
-    assert AnalogSearchKey(f"100 {CYRILLIC_M}", "gesn01") != AnalogSearchKey(
+    assert AnalogSearchKey(f"100 {CYRILLIC_M}", "gesn01") == AnalogSearchKey(
         CYRILLIC_M,
         "gesn01",
     )
+
+
+def test_base_unit_strips_leading_quantity_prefix() -> None:
+    from core.normalize import BaseUnit
+
+    assert BaseUnit(f"100 {CYRILLIC_M}") == CYRILLIC_M
+    assert BaseUnit("100\u043c2") == "\u043c2"
+    assert BaseUnit(CYRILLIC_M) == CYRILLIC_M
 
 
 def test_norm_unit_handles_yo_superscript_and_punctuation() -> None:

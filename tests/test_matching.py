@@ -209,3 +209,22 @@ def test_matching_key_present_in_catalog_fixture() -> None:
     key = AnalogSearchKey(METER, "gesn01-01-001-01")
 
     assert key in catalog
+
+
+def test_estimate_hundred_m2_matches_catalog_m2_without_price_scaling() -> None:
+    """Real case: estimate '100 m2' vs catalog 'm2' for the same GESN code."""
+    code = "\u0413\u042d\u0421\u041d13-07-001-02"
+    catalog = BuildCatalog(
+        [
+            catalog_row(task_id="4498396", price=171.65, code=code, unit="\u043c2"),
+            catalog_row(task_id="4500000", price=180.0, code=code, unit="\u043c2"),
+        ]
+    )
+    result = MatchEstimateRow(
+        estimate_row(code=code, unit="100 \u043c2", base_price=84.03),
+        catalog,
+    )
+
+    assert result.reason == REASON_MATCHED
+    assert len(result.analogs) == 2
+    assert prices(result) == [171.65, 180.0]

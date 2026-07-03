@@ -83,15 +83,16 @@ def test_writes_analogs_formula_kr_and_section(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=16).value == 100
-        assert sheet.cell(row=9, column=17).value == 120
-        assert sheet.cell(row=7, column=16).value == "task-1"
-        assert sheet.cell(row=7, column=17).value == "task-2"
+        assert sheet.cell(row=9, column=17).value == 100
+        assert sheet.cell(row=9, column=18).value == 120
+        assert sheet.cell(row=7, column=17).value == "task-1"
+        assert sheet.cell(row=7, column=18).value == "task-2"
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, P9:Q9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
         )
-        assert str(sheet.cell(row=9, column=14).value).endswith(KR_END)
-        assert sheet.cell(row=9, column=15).value == "01"
+        assert sheet.cell(row=9, column=14).value == CODE
+        assert str(sheet.cell(row=9, column=15).value).endswith(KR_END)
+        assert sheet.cell(row=9, column=16).value == "01"
         assert RISK_LOG_SHEET not in workbook.sheetnames
     finally:
         workbook.close()
@@ -139,8 +140,8 @@ def test_ratio_risk_writes_log_and_colours_red(tmp_path: Path) -> None:
         assert log.cell(row=2, column=6).value == 300
 
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=16).fill.start_color.rgb == RED_RGB
         assert sheet.cell(row=9, column=17).fill.start_color.rgb == RED_RGB
+        assert sheet.cell(row=9, column=18).fill.start_color.rgb == RED_RGB
     finally:
         workbook.close()
 
@@ -155,7 +156,7 @@ def test_second_price_within_task_is_greyed(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=17).fill.start_color.rgb == GREY_RGB
+        assert sheet.cell(row=9, column=18).fill.start_color.rgb == GREY_RGB
     finally:
         workbook.close()
 
@@ -172,8 +173,8 @@ def test_regional_coefficient_by_label_scales_analogs(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=16).value == 150
-        assert sheet.cell(row=9, column=17).value == 180
+        assert sheet.cell(row=9, column=17).value == 150
+        assert sheet.cell(row=9, column=18).value == 180
     finally:
         workbook.close()
 
@@ -187,17 +188,18 @@ def test_average_column_inserted_when_neighbour_occupied(tmp_path: Path) -> None
 
     assert outcome.write_report.inserted_average_column is True
     assert outcome.write_report.average_column == 7
-    assert outcome.write_report.analog_start_column == 17
+    assert outcome.write_report.analog_start_column == 18
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=17).value == 100
-        assert sheet.cell(row=9, column=18).value == 120
+        assert sheet.cell(row=9, column=18).value == 100
+        assert sheet.cell(row=9, column=19).value == 120
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, R9:S9), F9))"
         )
-        assert str(sheet.cell(row=9, column=15).value).endswith(KR_END)
-        assert sheet.cell(row=9, column=16).value == "01"
+        assert sheet.cell(row=9, column=15).value == CODE
+        assert str(sheet.cell(row=9, column=16).value).endswith(KR_END)
+        assert sheet.cell(row=9, column=17).value == "01"
     finally:
         workbook.close()
 
@@ -216,10 +218,10 @@ def test_analog_headers_include_task_number_and_region(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=16).value == "task-1"
-        assert sheet.cell(row=8, column=16).value == REGION_NAME
-        assert sheet.cell(row=7, column=17).value == "task-2"
+        assert sheet.cell(row=7, column=17).value == "task-1"
         assert sheet.cell(row=8, column=17).value == REGION_NAME
+        assert sheet.cell(row=7, column=18).value == "task-2"
+        assert sheet.cell(row=8, column=18).value == REGION_NAME
     finally:
         workbook.close()
 
@@ -235,7 +237,53 @@ def test_task_color_list_tints_analog_column_blue(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=16).fill.start_color.rgb == BLUE_RGB
-        assert sheet.cell(row=9, column=17).fill.start_color.rgb != BLUE_RGB
+        assert sheet.cell(row=9, column=17).fill.start_color.rgb == BLUE_RGB
+        assert sheet.cell(row=9, column=18).fill.start_color.rgb != BLUE_RGB
+    finally:
+        workbook.close()
+
+
+def test_kr_and_section_use_dedicated_columns_with_real_headers(tmp_path: Path) -> None:
+    """eV-grup layout: code col 14, /KR col 15, section col 16, analogs from 17."""
+    code_header = "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0422\u0415\u0420/\u041a\u0420"
+    kr_header = "/\u041a\u0420"
+    section_header = "\u041a\u043e\u0434 \u0440\u0430\u0437\u0434\u0435\u043b\u0430"
+    unit_header = "\u0415\u0434.\u0438\u0437\u043c."
+    base_header = "\u0426\u0435\u043d\u0430 \u0435\u0434\u0438\u043d\u0438\u0446\u044b \u0440\u0430\u0431\u043e\u0442, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421"
+
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("5818383", 100), ("4768644", 120)],
+        region="\u042f\u043a\u0443\u0442\u0438\u044f",
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = ESTIMATE_TITLE
+    header_row = 26
+    sheet.cell(row=header_row, column=4, value=unit_header)
+    sheet.cell(row=header_row, column=6, value=base_header)
+    sheet.cell(row=header_row, column=14, value=code_header)
+    sheet.cell(row=header_row, column=15, value=kr_header)
+    sheet.cell(row=header_row, column=16, value=section_header)
+    data_row = 28
+    sheet.cell(row=data_row, column=3, value=INSTALLATION)
+    sheet.cell(row=data_row, column=4, value=METER)
+    sheet.cell(row=data_row, column=6, value=50.0)
+    sheet.cell(row=data_row, column=14, value=CODE)
+    estimate = tmp_path / "estimate.xlsx"
+    workbook.save(estimate)
+    workbook.close()
+
+    run_and_write(catalog, estimate, tmp_path / "out.xlsx")
+
+    workbook = load_workbook(tmp_path / "out.xlsx", data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=data_row, column=14).value == CODE
+        assert str(sheet.cell(row=data_row, column=15).value).endswith(KR_END)
+        assert sheet.cell(row=data_row, column=16).value == "01"
+        assert sheet.cell(row=header_row, column=17).value == "5818383"
+        assert sheet.cell(row=header_row + 1, column=17).value == "\u042f\u043a\u0443\u0442\u0438\u044f"
+        assert sheet.cell(row=header_row, column=18).value == "4768644"
     finally:
         workbook.close()

@@ -65,6 +65,7 @@ METHOD_DEFAULT = "default"
 METHOD_MISSING = "missing"
 
 COEF_METHOD_EXPLICIT = "explicit"
+COEF_METHOD_CELL = "configured_cell"
 COEF_METHOD_REGION = "labeled_region"
 COEF_METHOD_LABEL = "labeled_coefficient"
 COEF_METHOD_DEFAULT = "default"
@@ -113,6 +114,7 @@ class LayoutConfig:
     max_blank_run: int = DEFAULT_MAX_BLANK_RUN
     region_label: FieldRule | None = None
     coefficient_label: FieldRule | None = None
+    coefficient_value_cell: str | None = None
 
 
 @dataclass(frozen=True)
@@ -221,6 +223,9 @@ def load_layout_config(config_path: str | Path | None = None) -> LayoutConfig:
     coefficient = raw.get("coefficient", {})
     region_label = _load_rule(coefficient.get("region_label"))
     coefficient_label = _load_rule(coefficient.get("coefficient_label"))
+    coefficient_value_cell = coefficient.get("value_cell")
+    if coefficient_value_cell is not None:
+        coefficient_value_cell = str(coefficient_value_cell).strip() or None
 
     return LayoutConfig(
         fields=fields,
@@ -231,6 +236,7 @@ def load_layout_config(config_path: str | Path | None = None) -> LayoutConfig:
         max_blank_run=int(data_scan.get("max_blank_run", DEFAULT_MAX_BLANK_RUN)),
         region_label=region_label,
         coefficient_label=coefficient_label,
+        coefficient_value_cell=coefficient_value_cell,
     )
 
 
@@ -368,17 +374,19 @@ def resolve_regional_coefficient(
 ) -> CoefficientResolution:
     """Locate the regional coefficient by label (R16).
 
-    Primary pattern (user rule): a "Region" label cell with a "Coefficient"
-    label directly below it; the region name sits to the right of the region
-    label and the numeric coefficient to the right of the coefficient label.
-    Fallbacks: a standalone coefficient label with a number to its right; a
-    caller-provided explicit value; otherwise the default coefficient (1.0).
-    All label wording lives in data/config/layout.json.
+    Resolution order (mirrors VBA Instrument cell address, then label rules):
+    explicit caller value; configured ``value_cell`` in layout.json; stacked
+    Region/Coefficient labels; standalone coefficient label; default 1.0.
     """
     if explicit_value is not None:
         value = _parse_number(explicit_value)
         if value is not None and value > 0:
             return CoefficientResolution(value=value, method=COEF_METHOD_EXPLICIT)
+
+    if config.coefficient_value_cell:
+        from_cell = _read_coefficient_cell(worksheet, config.coefficient_value_cell)
+        if from_cell is not None:
+            return from_cell
 
     rows = config.max_rows if max_rows is None else max_rows
     cols = config.max_cols if max_cols is None else max_cols
@@ -392,6 +400,27 @@ def resolve_regional_coefficient(
         return standalone
 
     return CoefficientResolution(value=DEFAULT_COEFFICIENT, method=COEF_METHOD_DEFAULT)
+
+
+def _read_coefficient_cell(
+    worksheet: CellSource,
+    address: str,
+) -> CoefficientResolution | None:
+    """Read a numeric coefficient from a fixed A1-style cell (VBA Instrument)."""
+    cell_address = address.replace("$", "").strip()
+    if cell_address == "":
+        return None
+
+    try:
+        value = worksheet[cell_address].value
+    except (KeyError, AttributeError, ValueError):
+        return None
+
+    parsed = _parse_number(value)
+    if parsed is None or parsed <= 0:
+        return None
+
+    return CoefficientResolution(value=parsed, method=COEF_METHOD_CELL)
 
 
 def resolve_average_placement(
@@ -635,7 +664,7 @@ def _parse_number(value: object) -> float | None:
         return float(value)
 
     text = str(value).strip()
-    if text == "":
+    if text == "" or _looks_like_placeholder(text):
         return None
 
     text = text.replace(NBSP, "").replace(" ", "")
@@ -646,6 +675,11 @@ def _parse_number(value: object) -> float | None:
         return float(text)
     except ValueError:
         return None
+
+
+def _looks_like_placeholder(text: str) -> bool:
+    lowered = text.casefold()
+    return lowered.startswith("(") and lowered.endswith(")")
 
 
 def _resolve_one_field(

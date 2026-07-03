@@ -154,6 +154,20 @@ def test_invalid_input_row_has_no_recommended_price() -> None:
     assert row.kr_code is None
 
 
+def test_ratio_spread_below_default_limit_is_not_flagged() -> None:
+    result = run_matching(
+        [
+            catalog_row(task_id="task-1", price=100),
+            catalog_row(task_id="task-2", price=250),
+        ],
+        [estimate_row()],
+    )
+    row = result.rows[0]
+
+    assert not row.risk_result.is_flagged
+    assert result.flagged_row_count == 0
+
+
 def test_ratio_spread_is_flagged() -> None:
     result = run_matching(
         [

@@ -152,11 +152,16 @@ def load_estimate(
             template_header_row = layout.header_row
             if template_header_row <= 0:
                 template_header_row = template_rows[0][0] - 2
+            code_column = (
+                layout.column(FIELD_CODE)
+                if layout.column(FIELD_CODE) is not None
+                else active_settings.col_search
+            )
             return EstimateData(
                 sheet_title=title,
                 positioned_rows=template_rows,
                 header_row=template_header_row,
-                code_column=active_settings.col_search,
+                code_column=code_column,
                 unit_column=active_settings.col_smeta_unit,
                 work_name_column=active_settings.col_smeta_work_name,
                 base_price_column=active_settings.col_f,

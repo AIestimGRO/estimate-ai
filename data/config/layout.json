@@ -57,6 +57,7 @@
     }
   },
   "coefficient": {
+    "value_cell": "D20",
     "region_label": {
       "mode": "contains",
       "patterns": ["регион"]

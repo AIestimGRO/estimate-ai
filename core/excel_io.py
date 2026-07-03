@@ -53,6 +53,7 @@ class Settings:
     cat_work_name_col: int = 3
     cat_unit_col: int = 4
     cat_added_date_col: int = 17
+    price_spread_limit: float = 3.0
 
 
 def catalog_default_columns(settings: Settings) -> dict[str, int]:

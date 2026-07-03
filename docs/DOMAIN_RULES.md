@@ -49,16 +49,21 @@ output concern (see §6), not a matching-exclusion rule.
 4. Strip all spaces, periods, commas, and `^` (to build a compact
    comparison key — e.g. "100 м" and "100м" become the same key).
 
-There is no separate "multiplier" extraction (e.g. "100 m" is not split
-into unit="m" + multiplier=100 in current code) — the unit string is
-normalized and compared as a whole token. "100 м" and "м" are currently
-**different** matching keys.
+There is no separate "multiplier" extraction in `NormUnit` — the full compact
+token is kept for display. **Matching** uses `BaseUnit`, which strips a leading
+numeric prefix so ``100 m2`` and ``m2`` share the same lookup key. Analog
+prices are **not** scaled by that prefix; only the regional coefficient applies
+at write time (see §6).
 
 ### 2.3 Matching key (`AnalogSearchKey`, Module3)
 
 ```
-key = NormUnit(unit) & "||" & NormCode(code)
+key = BaseUnit(unit) & "||" & NormCode(code)
 ```
+
+`BaseUnit` applies `NormUnit` then removes a leading run of digits (e.g.
+`100м2` → `м2`, `100м` → `м`). Prices from matched catalog rows are written
+as-is; the prefix is not applied as a price multiplier.
 
 If either side is empty, no key is built (prevents accidental matches on
 missing data). **Region is intentionally not part of the matching key** —
@@ -142,7 +147,8 @@ Two parallel mechanisms, mutually exclusive per matching key:
 - Needs ≥ 2 priced analogs.
 - `ratio = max_price / min_price`.
 - Flagged as a problem if `ratio >= priceSpreadLimit` (default threshold
-  2.0, configurable on Instrument sheet).
+  3.0 in production Instrument settings; the VBA fallback before reading
+  Instrument is 2.0, configurable on Instrument sheet row 46).
 - If flagged: the min and max entries are logged to `Price_Check_Log` as
   reason `RATIO_EXCEEDED` (deduplicated per run so the same pair is not
   logged twice), and all analog cells for that key are colored red in the

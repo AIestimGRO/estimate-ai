@@ -8,11 +8,15 @@ presentation strings for the local tool).
 """
 
 import html
+from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
 from urllib.parse import quote
 
 from app.services.write_result import RunAndWriteResult
+from core.risk import DEFAULT_PRICE_SPREAD_LIMIT
+
+_WRITER_MODULE = Path(__file__).resolve().parents[2] / "core" / "excel_writer.py"
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -83,7 +87,14 @@ table.preview th { position: sticky; top: 0; background: #f8fafc; color: #475569
   font-weight: 600; }
 table.preview td.risk { color: #b91c1c; text-align: center; font-weight: 700; }
 .muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
+.build { margin-top: 20px; font-size: 12px; color: #94a3b8; text-align: center; }
 """
+
+
+def writer_build_stamp() -> str:
+    """Human-readable stamp so the UI shows whether the server picked up new code."""
+    modified = datetime.fromtimestamp(_WRITER_MODULE.stat().st_mtime, tz=timezone.utc)
+    return modified.strftime("%Y-%m-%d %H:%M UTC")
 
 
 def render(template_name: str, **context: str) -> str:
@@ -92,6 +103,7 @@ def render(template_name: str, **context: str) -> str:
     context.setdefault("message", "")
     context.setdefault("detail", "")
     context.setdefault("preview", "")
+    context.setdefault("build_stamp", writer_build_stamp())
     return Template(text).safe_substitute(context)
 
 
@@ -173,7 +185,21 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
         ("\u0421 \u043f\u043e\u0434\u043e\u0431\u0440\u0430\u043d\u043d\u044b\u043c\u0438 \u0430\u043d\u0430\u043b\u043e\u0433\u0430\u043c\u0438", str(result.matched_row_count)),
         ("\u041e\u0442\u043c\u0435\u0447\u0435\u043d\u043e \u043d\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 (\u0440\u0438\u0441\u043a)", str(result.flagged_row_count)),
         ("\u0420\u0435\u0433\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442", f"{outcome.regional_coefficient:g}"),
+        (
+            "\u041f\u043e\u0440\u043e\u0433 ratio (max/min)",
+            f"{DEFAULT_PRICE_SPREAD_LIMIT:g}",
+        ),
         ("\u0417\u0430\u043f\u0438\u0441\u0430\u043d\u043e \u0441\u0442\u0440\u043e\u043a \u0432 \u0444\u0430\u0439\u043b", str(outcome.write_report.written_rows)),
+        (
+            "\u041a\u043e\u043b\u043e\u043d\u043a\u0438 \u0432\u044b\u0432\u043e\u0434\u0430",
+            f"/\u041a\u0420={outcome.write_report.analog_start_column - 2}, "
+            f"\u0440\u0430\u0437\u0434\u0435\u043b={outcome.write_report.analog_start_column - 1}, "
+            f"\u0430\u043d\u0430\u043b\u043e\u0433\u0438={outcome.write_report.analog_start_column}",
+        ),
+        (
+            "\u0412\u0435\u0440\u0441\u0438\u044f writer",
+            writer_build_stamp(),
+        ),
     ]
     stats = "\n".join(
         f"<div><dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd></div>"

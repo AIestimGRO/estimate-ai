@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from core.catalog import CatalogEntry
 
 
-DEFAULT_PRICE_SPREAD_LIMIT = 2.0
+DEFAULT_PRICE_SPREAD_LIMIT = 3.0
 REASON_NONE = "none"
 REASON_RATIO_EXCEEDED = "RATIO_EXCEEDED"
 REASON_OUT_OF_APPROVED_RANGE = "OUT_OF_APPROVED_RANGE"

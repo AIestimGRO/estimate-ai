@@ -2,6 +2,7 @@ from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from core.layout import (
+    COEF_METHOD_CELL,
     COEF_METHOD_DEFAULT,
     COEF_METHOD_EXPLICIT,
     COEF_METHOD_LABEL,
@@ -277,6 +278,26 @@ def test_regional_coefficient_ignores_nonpositive_value() -> None:
     worksheet = _sheet(2, {1: REGION_LABEL, 2: REGION_NAME})
     worksheet.cell(row=3, column=1).value = COEFFICIENT_LABEL
     worksheet.cell(row=3, column=2).value = 0
+
+    result = resolve_regional_coefficient(worksheet, _config())
+
+    assert result.value == 1.0
+    assert result.method == COEF_METHOD_DEFAULT
+
+
+def test_regional_coefficient_reads_configured_value_cell() -> None:
+    worksheet = _sheet(1, {1: COEFFICIENT_LABEL})
+    worksheet["D20"].value = 1.4
+
+    result = resolve_regional_coefficient(worksheet, _config())
+
+    assert result.value == 1.4
+    assert result.method == COEF_METHOD_CELL
+
+
+def test_regional_coefficient_skips_placeholder_in_value_cell() -> None:
+    worksheet = _sheet(1, {1: COEFFICIENT_LABEL})
+    worksheet["D20"].value = "(\u0437\u0430\u043f\u043e\u043b\u043d\u0438\u0442\u044c)"
 
     result = resolve_regional_coefficient(worksheet, _config())
 
