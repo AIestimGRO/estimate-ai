@@ -70,6 +70,8 @@ def test_init_database_creates_schema() -> None:
         assert "catalog_sources" in tables
         assert "catalog_items" in tables
         assert "name_exclusion_rules" in tables
+        assert "price_risk_log" in tables
+        assert "gesn_exceptions" in tables
     finally:
         connection.close()
 
@@ -182,3 +184,141 @@ def test_cli_import_catalog(tmp_path: Path, monkeypatch) -> None:
     assert main(["import-catalog", str(catalog_path)]) == 0
     assert main(["status"]) == 0
     assert db_path.is_file()
+
+
+def test_upsert_open_risk_does_not_duplicate_on_second_run(tmp_path: Path) -> None:
+    from core.risk import REASON_RATIO_EXCEEDED
+    from core.storage.risk_log import (
+        STATUS_OPEN,
+        list_price_risks,
+        upsert_open_risk,
+    )
+
+    db_path = tmp_path / "risks.db"
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        key = f"{METER}||{CODE}||NO_DEM"
+        upsert_open_risk(
+            connection,
+            exception_key=key,
+            reason=REASON_RATIO_EXCEEDED,
+            code=CODE,
+            unit=METER,
+            min_price=100,
+            max_price=300,
+            ratio=3.0,
+            recommended_price=150,
+            estimate_row=9,
+        )
+        upsert_open_risk(
+            connection,
+            exception_key=key,
+            reason=REASON_RATIO_EXCEEDED,
+            code=CODE,
+            unit=METER,
+            min_price=110,
+            max_price=320,
+            ratio=2.9,
+            recommended_price=160,
+            estimate_row=10,
+        )
+        open_rows = list_price_risks(connection, status=STATUS_OPEN)
+        total = connection.execute("SELECT COUNT(*) FROM price_risk_log").fetchone()[0]
+    finally:
+        connection.close()
+
+    assert total == 1
+    assert len(open_rows) == 1
+    assert open_rows[0].min_price == pytest.approx(110)
+    assert open_rows[0].max_price == pytest.approx(320)
+    assert open_rows[0].ratio == pytest.approx(2.9)
+    assert open_rows[0].estimate_row == 10
+
+
+def test_approve_risk_writes_gesn_exception_and_clears_open_flag(tmp_path: Path) -> None:
+    from core.catalog import CatalogRow
+    from core.matching import EstimateRow
+    from core.normalize import NormCode, NormUnit
+    from core.risk import (
+        REASON_NONE,
+        REASON_RATIO_EXCEEDED,
+        build_dem_key,
+        build_gesn_exception_key,
+    )
+    from core.storage.risk_log import (
+        STATUS_APPROVED,
+        STATUS_OPEN,
+        approve_risk,
+        load_gesn_exceptions,
+        list_price_risks,
+        upsert_open_risk,
+    )
+    from app.services.run_matching import run_matching
+
+    db_path = tmp_path / "risks.db"
+    dem_key = build_dem_key(source_has_demolition=False, demontazh_filter_enabled=True)
+    key = build_gesn_exception_key(NormUnit(METER), NormCode(CODE), dem_key)
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        upsert_open_risk(
+            connection,
+            exception_key=key,
+            reason=REASON_RATIO_EXCEEDED,
+            code=CODE,
+            unit=METER,
+            min_price=100,
+            max_price=300,
+            ratio=3.0,
+            recommended_price=150,
+            estimate_row=9,
+        )
+        approve_risk(connection, key, proposed_min=90, proposed_max=310, proposed_date_serial=20)
+        exceptions = load_gesn_exceptions(connection)
+        open_rows = list_price_risks(connection, status=STATUS_OPEN)
+        approved_rows = list_price_risks(connection, status=STATUS_APPROVED)
+    finally:
+        connection.close()
+
+    assert key in exceptions
+    assert exceptions[key].approved_min == pytest.approx(90)
+    assert exceptions[key].approved_max == pytest.approx(310)
+    assert len(open_rows) == 0
+    assert len(approved_rows) == 1
+
+    catalog_rows = [
+        CatalogRow(
+            task_id="task-1",
+            price=100,
+            code=CODE,
+            unit=METER,
+            work_name="\u043c\u043e\u043d\u0442\u0430\u0436",
+            region="region-1",
+        ),
+        CatalogRow(
+            task_id="task-2",
+            price=300,
+            code=CODE,
+            unit=METER,
+            work_name="\u043c\u043e\u043d\u0442\u0430\u0436",
+            region="region-1",
+        ),
+    ]
+    result = run_matching(
+        catalog_rows,
+        [
+            EstimateRow(
+                code=CODE,
+                unit=METER,
+                work_name="\u043c\u043e\u043d\u0442\u0430\u0436",
+                base_price=50.0,
+            )
+        ],
+        gesn_exceptions=exceptions,
+    )
+    row = result.rows[0]
+
+    assert not row.risk_result.is_flagged
+    assert row.risk_result.reason == REASON_NONE
+    assert result.flagged_row_count == 0

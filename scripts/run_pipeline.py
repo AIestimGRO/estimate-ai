@@ -53,7 +53,6 @@ def main() -> None:
     lines.append(f"avg column:           {outcome.write_report.average_column} "
                  f"(inserted={outcome.write_report.inserted_average_column})")
     lines.append(f"analog start column:  {outcome.write_report.analog_start_column}")
-    lines.append(f"risk log rows:        {outcome.write_report.risk_log_rows}")
     lines.append(f"output:               {outcome.output_path}")
 
     lines.append("")

@@ -15,13 +15,21 @@ from openpyxl import load_workbook
 
 from app.services.catalog_source import CatalogNotAvailableError, load_catalog_for_run
 from app.services.read_estimate import METHOD_TEMPLATE, EstimateData, load_estimate
-from app.services.run_matching import MatchingRunResult, run_matching
+from app.services.run_matching import EstimateRowResult, MatchingRunResult, run_matching
 from core.excel_io import Settings
 from core.excel_writer import WriteReport, WriterColumns, resolve_kr_column, write_run_result
 from core.exclusions import NameExclusionRule, TaskColorEntry
 from core.layout import FIELD_SECTION, LayoutConfig, load_layout_config, resolve_regional_coefficient
 from core.macro_workbook import load_default_macro_settings
 from core.risk import GesnException
+from core.storage import (
+    FlaggedRiskSnapshot,
+    connect,
+    database_is_available,
+    init_database,
+    load_gesn_exceptions,
+    persist_flagged_risks,
+)
 
 WA_SUFFIX = " WA"
 
@@ -74,6 +82,8 @@ def run_and_write(
         task_color_entries,
     )
 
+    resolved_exceptions = _resolve_gesn_exceptions(gesn_exceptions, database_path)
+
     catalog = load_catalog_for_run(
         catalog_path,
         source_name=catalog_source_name,
@@ -100,10 +110,17 @@ def run_and_write(
         catalog.rows,
         estimate_rows,
         name_exclusion_rules=exclusion_rules,
-        gesn_exceptions=gesn_exceptions,
+        gesn_exceptions=resolved_exceptions,
         demontazh_filter_enabled=demontazh_filter_enabled,
         price_spread_limit=spread_limit,
         regional_coefficient=coefficient,
+    )
+
+    _persist_risk_log(
+        result,
+        row_numbers,
+        coefficient,
+        database_path=database_path,
     )
 
     destination = _resolve_output_path(estimate_path, output_path)
@@ -223,3 +240,91 @@ def _resolve_output_path(
 
     source = Path(estimate_path)
     return source.with_name(f"{source.stem}{WA_SUFFIX}{source.suffix}")
+
+
+def _resolve_gesn_exceptions(
+    gesn_exceptions: dict[str, GesnException] | None,
+    database_path: str | Path | None,
+) -> dict[str, GesnException]:
+    if gesn_exceptions is not None:
+        return gesn_exceptions
+    if not database_is_available(database_path):
+        return {}
+
+    connection = connect(database_path)
+    try:
+        init_database(connection)
+        return load_gesn_exceptions(connection)
+    finally:
+        connection.close()
+
+
+def _persist_risk_log(
+    result: MatchingRunResult,
+    row_numbers: list[int],
+    coefficient: float,
+    *,
+    database_path: str | Path | None,
+) -> None:
+    if not database_is_available(database_path):
+        return
+
+    snapshots = [
+        _flagged_snapshot(row_number, row, coefficient)
+        for row_number, row in zip(row_numbers, result.rows)
+        if row.risk_result.is_flagged and row.exception_key
+    ]
+    if not snapshots:
+        return
+
+    connection = connect(database_path)
+    try:
+        init_database(connection)
+        persist_flagged_risks(connection, snapshots)
+    finally:
+        connection.close()
+
+
+def _flagged_snapshot(
+    row_number: int,
+    row: EstimateRowResult,
+    coefficient: float,
+) -> FlaggedRiskSnapshot:
+    min_price, max_price = _risk_min_max(row, coefficient)
+    return FlaggedRiskSnapshot(
+        exception_key=row.exception_key,
+        reason=row.risk_result.reason,
+        code=row.norm_code,
+        unit=row.norm_unit,
+        min_price=min_price,
+        max_price=max_price,
+        ratio=row.risk_result.ratio or None,
+        recommended_price=row.recommended_price,
+        estimate_row=row_number,
+    )
+
+
+def _risk_min_max(
+    row: EstimateRowResult,
+    coefficient: float,
+) -> tuple[float | None, float | None]:
+    risk = row.risk_result
+    entries = risk.flagged_entries
+
+    if risk.min_entry is not None:
+        min_price = risk.min_entry.price
+    elif entries:
+        min_price = min(entry.price for entry in entries)
+    else:
+        min_price = None
+
+    if risk.max_entry is not None:
+        max_price = risk.max_entry.price
+    elif entries:
+        max_price = max(entry.price for entry in entries)
+    else:
+        max_price = None
+
+    scaled_min = None if min_price is None else min_price * coefficient
+    scaled_max = None if max_price is None else max_price * coefficient
+    return scaled_min, scaled_max

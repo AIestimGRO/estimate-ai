@@ -14,6 +14,17 @@ from core.storage.rules import (
     replace_name_exclusion_rules,
     replace_task_color_entries,
 )
+from core.storage.risk_log import (
+    FlaggedRiskSnapshot,
+    PriceRiskLogEntry,
+    approve_risk,
+    database_is_available,
+    list_price_risks,
+    load_gesn_exceptions,
+    persist_flagged_risks,
+    save_gesn_exception,
+    upsert_open_risk,
+)
 
 __all__ = [
     "connect",
@@ -28,4 +39,13 @@ __all__ = [
     "list_task_color_entries",
     "replace_name_exclusion_rules",
     "replace_task_color_entries",
+    "FlaggedRiskSnapshot",
+    "PriceRiskLogEntry",
+    "approve_risk",
+    "database_is_available",
+    "list_price_risks",
+    "load_gesn_exceptions",
+    "persist_flagged_risks",
+    "save_gesn_exception",
+    "upsert_open_risk",
 ]

@@ -4,7 +4,7 @@ from openpyxl import Workbook, load_workbook
 
 from app.services.run_matching import KR_END
 from app.services.write_result import run_and_write
-from core.excel_writer import PROBLEM_FILL, RISK_LOG_SHEET, TASK_FILL
+from core.excel_writer import PROBLEM_FILL, TASK_FILL
 from core.exclusions import TaskColorEntry
 from core.risk import REASON_RATIO_EXCEEDED
 
@@ -93,7 +93,6 @@ def test_writes_analogs_formula_kr_and_section(tmp_path: Path) -> None:
         assert sheet.cell(row=9, column=14).value == CODE
         assert str(sheet.cell(row=9, column=15).value).endswith(KR_END)
         assert sheet.cell(row=9, column=16).value == "01"
-        assert RISK_LOG_SHEET not in workbook.sheetnames
     finally:
         workbook.close()
 
@@ -123,27 +122,38 @@ def test_default_output_name_gets_wa_suffix(tmp_path: Path) -> None:
     assert outcome.output_path.exists()
 
 
-def test_ratio_risk_writes_log_and_colours_red(tmp_path: Path) -> None:
+def test_ratio_risk_colours_red_without_price_check_log_sheet(tmp_path: Path) -> None:
     catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100), ("task-2", 300)])
     estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
     output = tmp_path / "out.xlsx"
+    db_path = tmp_path / "risks.db"
 
-    outcome = run_and_write(catalog, estimate, output)
+    outcome = run_and_write(catalog, estimate, output, database_path=db_path)
 
-    assert outcome.write_report.risk_log_rows == 1
+    assert outcome.result.flagged_row_count == 1
     workbook = load_workbook(output, data_only=False)
     try:
-        assert RISK_LOG_SHEET in workbook.sheetnames
-        log = workbook[RISK_LOG_SHEET]
-        assert log.cell(row=2, column=4).value == REASON_RATIO_EXCEEDED
-        assert log.cell(row=2, column=5).value == 100
-        assert log.cell(row=2, column=6).value == 300
+        assert "Price_Check_Log" not in workbook.sheetnames
 
         sheet = workbook[ESTIMATE_TITLE]
         assert sheet.cell(row=9, column=17).fill.start_color.rgb == RED_RGB
         assert sheet.cell(row=9, column=18).fill.start_color.rgb == RED_RGB
     finally:
         workbook.close()
+
+    from core.storage import connect, init_database, list_price_risks
+
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        risks = list_price_risks(connection, status="open")
+    finally:
+        connection.close()
+
+    assert len(risks) == 1
+    assert risks[0].reason == REASON_RATIO_EXCEEDED
+    assert risks[0].min_price == 100
+    assert risks[0].max_price == 300
 
 
 def test_second_price_within_task_is_greyed(tmp_path: Path) -> None:

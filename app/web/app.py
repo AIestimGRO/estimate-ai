@@ -28,6 +28,7 @@ from app.services.read_estimate import (
     MultipleSheetsError,
 )
 from app.services.write_result import run_and_write
+from core.storage.connection import default_database_path
 from app.web.rendering import (
     XLSX_MIME,
     render_choice,
@@ -184,6 +185,7 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             record.catalog_path,
             record.estimate_path,
             record.directory / _wa_name(record.estimate_name),
+            database_path=default_database_path(),
             selected_sheet_title=selected_sheet,
             regional_coefficient=record.coefficient,
         )

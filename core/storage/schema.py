@@ -1,6 +1,6 @@
-"""SQLite schema for Estimate AI (version 1)."""
+"""SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -89,4 +89,23 @@ CREATE TABLE IF NOT EXISTS gesn_exceptions (
     approved_max REAL NOT NULL,
     last_range_update_date REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS price_risk_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exception_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'open',
+    reason TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    unit TEXT NOT NULL DEFAULT '',
+    min_price REAL,
+    max_price REAL,
+    ratio REAL,
+    recommended_price REAL,
+    estimate_row INTEGER,
+    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_risk_log_status
+    ON price_risk_log(status);
 """

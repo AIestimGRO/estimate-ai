@@ -3,9 +3,8 @@
 Pure Excel output primitive (symmetric to core/excel_io.py): given a source
 estimate file, the structured run result, the physical worksheet row for each
 result row, and an explicit column plan, it writes analog columns, the
-average-price formula, the section code, the `/KR` code suffix, cell
-colouring, and a risk-check log sheet into a *copy* of the workbook. The
-source file is never modified.
+average-price formula, the section code, the `/KR` code suffix, and cell
+colouring into a *copy* of the workbook. The source file is never modified.
 
 Ports the output side-effects of ProcessSmeta (Module4), DOMAIN_RULES.md
 section 6, and uses the average-column placement rule from core/layout.py
@@ -28,8 +27,6 @@ from core.exclusions import TaskColorEntry, is_task_marked
 from core.layout import resolve_average_placement
 from core.risk import REASON_RATIO_EXCEEDED
 
-RISK_LOG_SHEET = "Price_Check_Log"
-
 # Module4_updated.bas RGB fills
 HEADER_FILL = PatternFill(start_color="FFD9E1F2", end_color="FFD9E1F2", fill_type="solid")
 TASK_FILL = PatternFill(start_color="FFDDEBF7", end_color="FFDDEBF7", fill_type="solid")
@@ -44,17 +41,6 @@ AVG_FONT = Font(bold=True)
 # Header labels for columns inserted when absent (synonyms live in layout.json).
 KR_HEADER_LABEL = "/\u041a\u0420"
 SECTION_HEADER_LABEL = "\u041a\u043e\u0434 \u0440\u0430\u0437\u0434\u0435\u043b\u0430"
-
-_RISK_LOG_HEADER = (
-    "estimate_row",
-    "code",
-    "unit",
-    "reason",
-    "min_price",
-    "max_price",
-    "ratio",
-    "recommended_price",
-)
 
 
 @dataclass(frozen=True)
@@ -79,7 +65,6 @@ class WriteReport:
     average_column: int
     analog_start_column: int
     analog_column_count: int
-    risk_log_rows: int
 
 
 @dataclass(frozen=True)
@@ -174,8 +159,6 @@ def write_run_result(
             ):
                 written_rows += 1
 
-        risk_log_rows = _write_risk_log(workbook, result, row_numbers, regional_coefficient)
-
         destination = Path(output_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(destination)
@@ -189,7 +172,6 @@ def write_run_result(
         average_column=output_columns.average,
         analog_start_column=output_columns.analog_start,
         analog_column_count=len(analog_plan.columns),
-        risk_log_rows=risk_log_rows,
     )
 
 
@@ -569,75 +551,6 @@ def _average_formula(
     first = f"{get_column_letter(analog_start)}{row_number}"
     last = f"{get_column_letter(last_analog_column)}{row_number}"
     return f"=MAX({base}, IFERROR(AVERAGE({base}, {first}:{last}), {base}))"
-
-
-def _write_risk_log(
-    workbook,
-    result: MatchingRunResult,
-    row_numbers: list[int],
-    coefficient: float,
-) -> int:
-    if RISK_LOG_SHEET in workbook.sheetnames:
-        del workbook[RISK_LOG_SHEET]
-
-    log_rows = [
-        (row_number, row)
-        for row_number, row in zip(row_numbers, result.rows)
-        if row.risk_result.is_flagged
-    ]
-    if not log_rows:
-        return 0
-
-    sheet = workbook.create_sheet(title=RISK_LOG_SHEET)
-    sheet.append(list(_RISK_LOG_HEADER))
-
-    for row_number, row in log_rows:
-        risk = row.risk_result
-        min_price, max_price = _log_min_max(row, coefficient)
-        sheet.append(
-            [
-                row_number,
-                _text(row.estimate_row.code),
-                _text(row.estimate_row.unit),
-                risk.reason,
-                min_price,
-                max_price,
-                risk.ratio or None,
-                row.recommended_price,
-            ]
-        )
-
-    return len(log_rows)
-
-
-def _log_min_max(
-    row: EstimateRowResult,
-    coefficient: float,
-) -> tuple[float | None, float | None]:
-    risk = row.risk_result
-    entries = risk.flagged_entries
-
-    if risk.min_entry is not None:
-        min_price = risk.min_entry.price
-    elif entries:
-        min_price = min(entry.price for entry in entries)
-    else:
-        min_price = None
-
-    if risk.max_entry is not None:
-        max_price = risk.max_entry.price
-    elif entries:
-        max_price = max(entry.price for entry in entries)
-    else:
-        max_price = None
-
-    scaled_min = None if min_price is None else min_price * coefficient
-    scaled_max = None if max_price is None else max_price * coefficient
-    return scaled_min, scaled_max
-
-
-def _text(value: object) -> str:
-    return "" if value is None else str(value)
 
 
 def resolve_kr_column(

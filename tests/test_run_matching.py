@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook
 
 from app.services.run_matching import (
@@ -294,3 +295,52 @@ def test_run_matching_from_files_end_to_end(tmp_path: Path) -> None:
     assert [analog.entry.price for analog in row.analogs] == [100, 120]
     assert row.recommended_price == 90
     assert row.kr_code is not None and row.kr_code.endswith(KR_END)
+
+
+def test_second_run_and_write_updates_single_open_risk_row(tmp_path: Path) -> None:
+    from openpyxl import Workbook, load_workbook
+
+    from app.services.write_result import run_and_write
+    from core.storage import connect, init_database, list_price_risks
+
+    catalog_path = tmp_path / "catalog.xlsx"
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "\u041a\u0430\u0442\u0430\u043b\u043e\u0433"
+    worksheet.cell(row=4, column=2).value = "task-1"
+    worksheet.cell(row=4, column=3).value = INSTALLATION
+    worksheet.cell(row=4, column=4).value = METER
+    worksheet.cell(row=4, column=7).value = 100
+    worksheet.cell(row=4, column=14).value = CODE
+    worksheet.cell(row=5, column=2).value = "task-2"
+    worksheet.cell(row=5, column=3).value = INSTALLATION
+    worksheet.cell(row=5, column=4).value = METER
+    worksheet.cell(row=5, column=7).value = 350
+    worksheet.cell(row=5, column=14).value = CODE
+    workbook.save(catalog_path)
+    workbook.close()
+
+    estimate_path = _make_estimate_file(tmp_path)
+    db_path = tmp_path / "risks.db"
+    output = tmp_path / "out.xlsx"
+
+    run_and_write(catalog_path, estimate_path, output, database_path=db_path)
+    run_and_write(catalog_path, estimate_path, output, database_path=db_path)
+
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        open_rows = list_price_risks(connection, status="open")
+        total = connection.execute("SELECT COUNT(*) FROM price_risk_log").fetchone()[0]
+    finally:
+        connection.close()
+
+    assert total == 1
+    assert len(open_rows) == 1
+    assert open_rows[0].max_price == pytest.approx(350)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        assert "Price_Check_Log" not in workbook.sheetnames
+    finally:
+        workbook.close()
