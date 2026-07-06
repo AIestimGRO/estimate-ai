@@ -49,31 +49,32 @@ Roughly matches dependency order in the VBA modules:
    §9.6 must be explicitly decided (not silently assumed) before or
    during this task.
 
-## Database (target architecture, not yet built)
+## Database — DONE (SQLite, schema v2)
 
-The long-term goal is a real database for the catalog, not an Excel sheet,
-populated by watching a folder of RNMC Excel files (region inferred from
-subfolder name, per the existing macro's convention — see DOMAIN_RULES.md
-§9.5). This does not need to be built in Phase 0: the ingestion logic
-(item 9 above) can be developed and tested writing to a local SQLite file
-or even just an in-memory structure first, with the real database swapped
-in once the matching engine (items 1–7) is proven. Keep `core/ingest.py`'s
-output a plain Python data structure (e.g. a list of dicts / dataclasses)
-so the storage backend can change without touching the parsing logic.
+SQLite storage is implemented in `core/storage/`:
+
+- `catalog_items` — RNMC catalog rows (import via `python -m app.cli import-catalog`).
+- `imported_files` / `import_row_log` — per-file import history.
+- `name_exclusion_rules` / `task_color_entries` — admin config (import via `import-rules`).
+- `gesn_exceptions` — approved price ranges per `(unit, code, demolition)` key.
+- `price_risk_log` — open/approved risk rows (replaces WA `Price_Check_Log` sheet).
+
+Config: `data/config/db.json` or env `ESTIMATE_AI_DB_PATH`. The web UI and
+`write_result.run_and_write` load catalog and `gesn_exceptions` from the DB
+when no catalog file is uploaded.
+
+`core/ingest.py` remains storage-agnostic (plain Python structures); the CLI
+and future watched-folder workflow call the storage layer to persist results.
 
 ## Explicitly out of scope for now
 
-- Web interface, database/persistence beyond local files, Docker.
-- Authentication.
+- Full admin UI (risk approval screen, import dashboard) — in progress on
+  `feature/admin-ui`; backend (`price_risk_log`, `approve_risk`) is ready.
+- Authentication, user roles.
 - Any matching logic beyond exact (unit, code) key match — no fuzzy/
-  semantic matching yet (see DOMAIN_RULES.md §8 for what's intentionally
-  not happening today).
-- Catalog import / ingestion **logic** can be developed in Phase 0 (item 9
-  above), but the **real database** it writes to, and the actual
-  "watched folder" automation, are out of scope until matching (items
-  1–7) is proven on real data.
-- Region-based filtering or price adjustment (region is currently
-  descriptive only, not used in matching).
+  semantic matching yet (see DOMAIN_RULES.md §8).
+- Watched-folder auto-import automation (manual `import-catalog` works).
+- Region-based filtering or price adjustment (region is descriptive only).
 
 ## Definition of done for Phase 0
 

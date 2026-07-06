@@ -2,10 +2,8 @@
 
 > Running list of things flagged during Phase 0 development that need a
 > deliberate decision, but were intentionally deferred rather than decided
-> on the spot. Review this file in full once all core modules
-> (normalize → exclusions → catalog → matching → risk → approval →
-> sections → pricing → excel_io) are done, before moving to ingest.py /
-> database / web layer.
+> on the spot. Core modules, SQLite storage, and minimal web UI are done;
+> see `docs/ROADMAP.md` for current state and next milestone (admin UI).
 
 ## From excel_io.py
 

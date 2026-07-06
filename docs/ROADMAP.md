@@ -18,14 +18,12 @@ The target product is a web service:
 - Download a completed Excel result.
 - Keep import history and approval history in a database.
 
-The current phase should still stay simple: build a working local pipeline
-first, then wrap it with API and UI layers.
+## Current State (2026-07)
 
-## Current State
+Core VBA logic has been ported into a local Python library with a working
+end-to-end pipeline, SQLite persistence, and a minimal web UI.
 
-Core VBA logic has been ported into a local Python library.
-
-Implemented modules:
+### Done — core library
 
 - `core/normalize.py` — code/unit normalization, demolition detection, search key.
 - `core/exclusions.py` — name exclusion rules and task color metadata.
@@ -35,148 +33,109 @@ Implemented modules:
 - `core/approval.py` — create/widen `GesnException` ranges.
 - `core/sections.py` — GESN prefix extraction and section code resolution.
 - `core/pricing.py` — average price formula and regional coefficient.
-- `core/excel_io.py` — read catalog and estimate Excel rows.
+- `core/excel_io.py` — read catalog and estimate Excel rows (`data_only=True`).
 - `core/ingest.py` — folder-walk RNMC ingestion into plain Python structures.
-- `core/layout.py` — deterministic flexible layout resolution (sheet/columns/
-  regional coefficient/average placement, R1/R5/R6-R9/R12/R16/R19/R20).
-- `core/excel_writer.py` — write a run result (analogs, average formula, `/KR`,
-  section, colours, risk log) into a `WA` copy via an explicit column plan.
-- `app/services/run_matching.py` — one end-to-end matching run over rows.
-- `app/services/read_estimate.py` — Step 4c flexible read (sheet selection,
-  template-or-detected columns, clear "key data not found"/multi-sheet errors).
-- `app/services/write_result.py` — read + resolve coefficient + match + write.
-- `app/web/` — local web UI over the pipeline (FastAPI + uvicorn). Run with
-  `python -m app.web`. This is a thin HTTP layer (`app/web/app.py` routes,
-  `app/web/rendering.py` HTML); all logic stays in the tested core/services.
+- `core/layout.py` — flexible layout resolution (sheet/columns/regional
+  coefficient/average placement, R1/R5/R6-R9/R12/R16/R19/R20).
+- `core/excel_writer.py` — write run result into a `WA` copy (analogs,
+  average formula, `/KR`, section, cell colours). Risk rows are **not**
+  written to Excel anymore (see storage below).
+- `core/macro_workbook.py` — load `Name_Exclusions` / task colours from xlsm.
 
-Important docs:
+### Done — storage (SQLite, schema v2)
+
+- `core/storage/schema.py` — catalog, import log, rules, `gesn_exceptions`,
+  `price_risk_log`.
+- `core/storage/catalog.py` — import catalog from Excel, list rows.
+- `core/storage/rules.py` — name exclusion rules and task colours.
+- `core/storage/risk_log.py` — upsert open risks by `exception_key`,
+  load/approve → `gesn_exceptions` (ports Module6, DOMAIN_RULES §5.2).
+- `app/cli/` — `init-db`, `import-catalog`, `import-rules`, `status`.
+
+### Done — application services
+
+- `app/services/run_matching.py` — one end-to-end matching run over rows.
+- `app/services/read_estimate.py` — flexible read (sheet selection,
+  template-or-detected columns, clear errors).
+- `app/services/write_result.py` — read + coefficient + match + persist
+  risks to SQLite + write WA Excel.
+- `app/services/catalog_source.py` — catalog from upload or database.
+
+### Done — web UI (minimal)
+
+- `app/web/` — FastAPI + uvicorn: upload estimate (+ optional catalog),
+  run matching, multi-sheet choice, download WA. Run with `python -m app.web`.
+- Catalog can come from SQLite when the DB is populated (`import-catalog`).
+
+### Done — validation
+
+- 186 automated tests (pytest).
+- Real-file comparisons against VBA macro output (scripts in `scripts/`).
+- Example: estimate 6458203 — WAW=WAM for matching; Price_Check_Log channel
+  differs from macro by design (risks now in SQLite, not WA sheet).
+
+### Important docs
 
 - `docs/AGENTS.md`
 - `docs/DOMAIN_RULES.md`
 - `docs/MVP.md`
 - `docs/OPEN_ITEMS.md`
 
-## Next Milestone
+## Completed Milestones
 
-Build the first end-to-end local matching run:
+- [x] Port core VBA matching/pricing/risk logic to tested Python modules.
+- [x] End-to-end local run: catalog + estimate → structured result.
+- [x] Excel writer: analogs, average formula, `/KR`, section, colours.
+- [x] Flexible layout read (template + detected headers).
+- [x] SQLite catalog storage and CLI import.
+- [x] Minimal web UI (upload → run → download WA).
+- [x] Risk log in SQLite (`price_risk_log`), `gesn_exceptions` from DB only;
+  red cell highlighting in estimate preserved; `Price_Check_Log` sheet removed
+  from WA output.
 
-```text
-catalog.xlsx + estimate.xlsx
--> read rows
--> build catalog
--> match estimate rows
--> calculate risk, section, price
--> produce structured result
-```
+## Next Milestone — Admin UI (`feature/admin-ui`)
 
-At first, the result can be JSON or an in-memory structure. After that,
-write the result back to Excel.
+Backend for risk review and approval is in place (`core/storage/risk_log.py`,
+`core/approval.py`). Next: admin screens and API wiring.
 
-## Immediate Tasks
+1. **Risk review UI** — list open rows from `price_risk_log` (filter by status,
+   reason, code, unit).
+2. **Approve workflow** — call `approve_risk()` → widen `gesn_exceptions`,
+   mark log row `approved`; verify re-run no longer flags the same spread.
+3. **Import dashboard** — show `imported_files` / `import_row_log` history;
+   trigger `import-catalog` / force re-import (DOMAIN_RULES §9.6).
+4. **Rules management** — view/edit `name_exclusion_rules` and task colours
+   (or re-import from macro workbook).
+5. **REST endpoints** (if UI needs them):
+   - `GET /risks`, `POST /risks/{key}/approve`
+   - `GET /catalog/imports`, `POST /catalog/import`
+   - optional: `POST /runs` refactor of current `/run` flow
 
-1. Create an application service for a single matching run.
-   Suggested module: `app/services/run_matching.py`.
+No new dependencies unless explicitly approved.
 
-2. Define result dataclasses for:
-   - estimate row result;
-   - analog columns;
-   - risk result;
-   - section code;
-   - recommended/average price;
-   - row status/reason.
+## Web Service Path — remaining
 
-3. Add a simple local CLI command.
-   Example target:
+After admin UI:
 
-   ```powershell
-   python -m estimate_ai run --catalog catalog.xlsx --estimate smeta.xlsx --out result.json
-   ```
-
-4. Test the pipeline on small fixtures first.
-
-5. Test the pipeline on real anonymized files and compare against VBA output.
-
-6. Add Excel writer:
-   - copy/source estimate workbook;
-   - write analog columns;
-   - write average price;
-   - write section code;
-   - append `/KR`;
-   - preserve useful formatting where practical;
-   - add logs for risk checks.
-
-## Web Service Path
-
-After the local pipeline works:
-
-1. Add a small backend API.
-   Preferred starting point: FastAPI.
-
-2. Add local database storage.
-   Start with SQLite; keep storage interfaces swappable.
-
-3. Add endpoints:
-   - `POST /runs`
-   - `GET /runs/{id}`
-   - `GET /runs/{id}/download`
-   - `POST /catalog/import`
-   - `GET /catalog/imports`
-   - `POST /exceptions/approve`
-
-4. Add a simple web UI:
-   - upload catalog/estimate;
-   - run matching;
-   - show status;
-   - download result;
-   - review risk rows.
-
-5. Add import dashboard and approval UI.
+1. Refactor upload/run into proper REST resources (`POST /runs`, `GET /runs/{id}`).
+2. Auth / user roles (explicitly deferred).
+3. Watched-folder auto-import.
+4. Better Excel output formatting (OPEN_ITEMS: blue task-colour tint, R13 full).
 
 ## Multi-source analogs (future phase, registered 2026-07)
 
 Beyond the historical RNMC price catalog, analogs will be drawn from two
 additional sources and shown in the **leading analog columns**, ahead of the
-exact-match catalog analogs. This is a decided product direction, sequenced
-**after** the deterministic exact-match core is proven on real data — it must
-not weaken or bypass the base exact-match conditions (see DOMAIN_RULES.md §8
-and AGENTS.md rule 8). Semantic/AI results are non-deterministic and must be
-isolated behind a separate, cache-backed layer so any run stays reproducible
-from stored results; the core matching/pricing path stays deterministic.
-
-Sources and their reserved columns (left to right):
-
-1. **TKP database** (technical-commercial proposals) — semantic search for
-   the closest proposal to the estimate work item, not contradicting the
-   base search conditions. Reserved columns:
-   - price for this work from the TKP source,
-   - the matched work name from the TKP source,
-   - match percentage between the original and the pulled name.
-2. **Internet AI agent** — finds the most relevant price for the work from
-   open web sources. Reserved columns:
-   - the recommended price,
-   - a link to the resource the price came from.
-3. **Historical RNMC catalog** — the existing exact-match analogs (today's
-   pipeline) follow after the reserved source columns above.
-
-Open decisions before building this are tracked in `docs/OPEN_ITEMS.md`
-("Multi-source analogs") — e.g. whether a TKP price feeds the recommended
-average, the similarity metric/threshold, provenance/staleness of internet
-prices, reserved-column ordering/configurability, and the determinism
-boundary. Do not implement any of this before those decisions are made and
-the deterministic core is signed off.
+exact-match catalog analogs. Sequenced **after** the deterministic exact-match
+core is proven on real data. See `docs/OPEN_ITEMS.md` ("Multi-source analogs")
+for open decisions. Do not implement before those decisions are made.
 
 ## Later Enhancements
 
-- Persistent RNMC catalog database.
-- Watched/import folder workflow.
-- Import history with failed/successful status.
-- GESN exception management screen.
-- Better Excel output formatting.
 - User roles/authentication.
 - Region-aware analytics if explicitly approved.
-- Fuzzy/semantic matching only after exact rule-based matching is proven
-  (see "Multi-source analogs" above for the TKP semantic + internet-agent
-  sources).
+- Fuzzy/semantic matching only after exact rule-based matching is proven.
+- Full R13 analog column placement (reserved slots for multi-source analogs).
 
 ## Working Rules
 
