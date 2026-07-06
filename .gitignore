@@ -24,3 +24,12 @@ pytest-cache-files-*/
 
 # Cursor local
 .cursor/cache/
+
+# Local throwaway diagnostics on data/real/ (not maintained; similar tools
+# like scripts/compare_6356153.py stay tracked when promoted)
+scripts/check_load.py
+scripts/check_raw.py
+scripts/compare_6458203.py
+scripts/debug_row101.py
+scripts/inspect_headers.py
+scripts/verify_out.py
