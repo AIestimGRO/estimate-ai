@@ -46,7 +46,9 @@ from core.storage.risk_log import (
 from core.storage.rules import (
     list_name_exclusion_rules,
     list_task_color_entries,
+    set_name_exclusion_rule_enabled,
     set_task_color_enabled,
+    upsert_name_exclusion_rule,
     upsert_task_color_entry,
 )
 from core.storage.connection import connect, default_database_path, init_database
@@ -198,6 +200,81 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         finally:
             connection.close()
         return RedirectResponse("/admin/approvals", status_code=303)
+
+
+    @app.post("/admin/name-exclusions/add", response_class=HTMLResponse)
+    def admin_name_exclusion_add(
+        scope: str = Form(""),
+        match_mode: str = Form(""),
+        pattern: str = Form(""),
+        rule_group: str = Form(""),
+        comment: str = Form(""),
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                upsert_name_exclusion_rule(
+                    connection,
+                    scope=scope,
+                    match_mode=match_mode,
+                    pattern=pattern,
+                    rule_group=rule_group,
+                    comment=comment,
+                    enabled=True,
+                )
+            except ValueError as error:
+                rules = list_name_exclusion_rules(connection)
+                return HTMLResponse(
+                    render_admin_name_exclusions(
+                        rules,
+                        error=_name_exclusion_error_message(error),
+                    ),
+                    status_code=400,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse("/admin/name-exclusions", status_code=303)
+
+    @app.post("/admin/name-exclusions/toggle", response_class=HTMLResponse)
+    def admin_name_exclusion_toggle(
+        scope: str = Form(""),
+        match_mode: str = Form(""),
+        pattern: str = Form(""),
+        enabled: str = Form("0"),
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                changed = set_name_exclusion_rule_enabled(
+                    connection,
+                    scope=scope,
+                    match_mode=match_mode,
+                    pattern=pattern,
+                    enabled=enabled == "1",
+                )
+            except ValueError as error:
+                rules = list_name_exclusion_rules(connection)
+                return HTMLResponse(
+                    render_admin_name_exclusions(
+                        rules,
+                        error=_name_exclusion_error_message(error),
+                    ),
+                    status_code=400,
+                )
+            if not changed:
+                rules = list_name_exclusion_rules(connection)
+                return HTMLResponse(
+                    render_admin_name_exclusions(
+                        rules,
+                        error="Правило для изменения не найдено.",
+                    ),
+                    status_code=404,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse("/admin/name-exclusions", status_code=303)
 
     @app.post("/admin/task-colors/add", response_class=HTMLResponse)
     def admin_task_color_add(
@@ -416,6 +493,17 @@ def _admin_settings_rows(connection) -> list[tuple[str, str]]:
         ("Task color entries", str(len(task_colors))),
         ("Name exclusion rules", str(len(name_rules))),
     ]
+
+
+def _name_exclusion_error_message(error: ValueError) -> str:
+    message = str(error)
+    if message == "pattern is required":
+        return "Pattern обязателен."
+    if message == "invalid scope":
+        return "Scope должен быть SMETA, CATALOG или BOTH."
+    if message == "invalid match_mode":
+        return "Match mode должен быть CONTAINS или ALL_WORDS."
+    return "Правило исключения заполнено некорректно."
 
 def _today_vba_date_serial() -> float:
     return float((date.today() - VBA_DATE_BASE).days)

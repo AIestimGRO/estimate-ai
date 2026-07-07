@@ -101,7 +101,7 @@ h1 { margin: 0 0 4px; font-size: 24px; }
 h2.section { margin: 0 0 10px; font-size: 16px; color: #334155; }
 .sub { margin: 0 0 24px; color: #64748b; }
 label { display: block; margin-bottom: 16px; font-weight: 600; font-size: 14px; }
-input[type=file], input[type=text], textarea {
+input[type=file], input[type=text], select, textarea {
   display: block; width: 100%; margin-top: 6px; padding: 10px 12px;
   border: 1px solid #cbd5e1; border-radius: 10px; font-size: 14px; font-weight: 400;
 }
@@ -688,11 +688,17 @@ def _render_approval_button(risk: PriceRiskLogEntry) -> str:
         '</form>'
     )
 
-def render_admin_name_exclusions(rules: list[NameExclusionRule]) -> str:
+def render_admin_name_exclusions(
+    rules: list[NameExclusionRule],
+    error: str = "",
+    notice: str = "",
+) -> str:
     content = (
         '<section class="admin-panel">'
         '<h2 class="section">Исключения по наименованиям</h2>'
-        '<p>Правила исключений хранятся отдельно от синих задач. Они влияют на фильтрацию по тексту работ, поэтому редактирование подключим отдельным write-этапом.</p>'
+        '<p>Правила исключений хранятся отдельно от синих задач. Они влияют на фильтрацию по тексту работ и могут включаться или выключаться из админки.</p>'
+        f'{_render_admin_message(error, notice)}'
+        f'{_render_name_exclusion_form()}'
         f'{_render_name_exclusion_table(rules)}'
         '</section>'
     )
@@ -702,6 +708,37 @@ def render_admin_name_exclusions(rules: list[NameExclusionRule]) -> str:
         subtitle="Раздел администрирования автоподборщика.",
         admin_nav=_render_admin_nav(active_slug="name-exclusions"),
         content=content,
+    )
+
+
+def _render_name_exclusion_form() -> str:
+    return (
+        '<form class="admin-form" method="post" action="/admin/name-exclusions/add">'
+        '<h2 class="section">Добавить или включить правило</h2>'
+        '<label>Scope'
+        '<select name="scope">'
+        '<option value="BOTH">BOTH</option>'
+        '<option value="SMETA">SMETA</option>'
+        '<option value="CATALOG">CATALOG</option>'
+        '</select>'
+        '</label>'
+        '<label>Match mode'
+        '<select name="match_mode">'
+        '<option value="ALL_WORDS">ALL_WORDS</option>'
+        '<option value="CONTAINS">CONTAINS</option>'
+        '</select>'
+        '</label>'
+        '<label>Pattern'
+        '<input type="text" name="pattern" placeholder="Например, демонтаж|временный" required>'
+        '</label>'
+        '<label>Группа'
+        '<input type="text" name="rule_group" placeholder="Например, noise">'
+        '</label>'
+        '<label>Комментарий'
+        '<textarea name="comment" placeholder="Короткое пояснение для админки"></textarea>'
+        '</label>'
+        '<button type="submit">Добавить / включить</button>'
+        '</form>'
     )
 
 
@@ -717,6 +754,7 @@ def _render_name_exclusion_table(rules: list[NameExclusionRule]) -> str:
         '<th>Pattern</th>'
         '<th>Группа</th>'
         '<th>Комментарий</th>'
+        '<th>Действие</th>'
         '</tr></thead><tbody>'
     )
     rows = []
@@ -729,9 +767,27 @@ def _render_name_exclusion_table(rules: list[NameExclusionRule]) -> str:
             f'<td>{html.escape(rule.pattern)}</td>'
             f'<td>{html.escape(rule.group)}</td>'
             f'<td>{html.escape(rule.comment)}</td>'
+            f'<td>{_render_name_exclusion_toggle(rule)}</td>'
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table>'
+
+
+def _render_name_exclusion_toggle(rule: NameExclusionRule) -> str:
+    next_enabled = "0" if rule.enabled else "1"
+    button_label = "Выключить" if rule.enabled else "Включить"
+    scope_value = html.escape(rule.scope, quote=True)
+    mode_value = html.escape(rule.match_mode, quote=True)
+    pattern_value = html.escape(rule.pattern, quote=True)
+    return (
+        '<form class="table-action" method="post" action="/admin/name-exclusions/toggle">'
+        f'<input type="hidden" name="scope" value="{scope_value}">'
+        f'<input type="hidden" name="match_mode" value="{mode_value}">'
+        f'<input type="hidden" name="pattern" value="{pattern_value}">'
+        f'<input type="hidden" name="enabled" value="{next_enabled}">'
+        f'<button type="submit">{button_label}</button>'
+        '</form>'
+    )
 
 
 def render_admin_settings(settings_rows: list[tuple[str, str]]) -> str:

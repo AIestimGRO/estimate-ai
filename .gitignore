@@ -74,3 +74,7 @@ _admin_approvals_review/
 # Admin readonly block delivery artifacts
 admin-readonly-block-updated-files.zip
 _admin_readonly_block_review/
+
+# Admin name-exclusions edit delivery artifacts
+admin-name-exclusions-edit-updated-files.zip
+_admin_name_exclusions_edit_review/

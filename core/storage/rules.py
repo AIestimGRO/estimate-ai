@@ -5,7 +5,13 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from core.exclusions import NameExclusionRule, TaskColorEntry, normalize_task_key
+from core.exclusions import (
+    NameExclusionRule,
+    TaskColorEntry,
+    VALID_MATCH_MODES,
+    VALID_SCOPES,
+    normalize_task_key,
+)
 from core.macro_workbook import (
     load_all_rules_from_workbook,
     resolve_macro_workbook_path,
@@ -21,6 +27,112 @@ def list_name_exclusion_rules(connection: sqlite3.Connection) -> list[NameExclus
         """
     ).fetchall()
     return [_row_to_rule(row) for row in rows]
+
+
+def upsert_name_exclusion_rule(
+    connection: sqlite3.Connection,
+    scope: str,
+    match_mode: str,
+    pattern: str,
+    rule_group: str = "",
+    comment: str = "",
+    enabled: bool = True,
+) -> None:
+    scope_value = _normalize_rule_scope(scope)
+    mode_value = _normalize_rule_match_mode(match_mode)
+    pattern_value = str(pattern).strip()
+    if pattern_value == "":
+        raise ValueError("pattern is required")
+
+    rows = connection.execute(
+        """
+        SELECT id, scope, match_mode, pattern
+        FROM name_exclusion_rules
+        ORDER BY sort_order, id
+        """
+    ).fetchall()
+    for row in rows:
+        if (
+            _normalize_rule_scope(row["scope"]) == scope_value
+            and _normalize_rule_match_mode(row["match_mode"]) == mode_value
+            and str(row["pattern"]).strip().lower() == pattern_value.lower()
+        ):
+            connection.execute(
+                """
+                UPDATE name_exclusion_rules
+                SET enabled = ?, scope = ?, match_mode = ?, pattern = ?,
+                    rule_group = ?, comment = ?
+                WHERE id = ?
+                """,
+                (
+                    int(enabled),
+                    scope_value,
+                    mode_value,
+                    pattern_value,
+                    rule_group.strip(),
+                    comment.strip(),
+                    int(row["id"]),
+                ),
+            )
+            connection.commit()
+            return
+
+    sort_row = connection.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM name_exclusion_rules"
+    ).fetchone()
+    next_sort_order = int(sort_row["next_sort_order"])
+    connection.execute(
+        """
+        INSERT INTO name_exclusion_rules (
+            enabled, scope, match_mode, pattern, rule_group, comment, sort_order
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(enabled),
+            scope_value,
+            mode_value,
+            pattern_value,
+            rule_group.strip(),
+            comment.strip(),
+            next_sort_order,
+        ),
+    )
+    connection.commit()
+
+
+def set_name_exclusion_rule_enabled(
+    connection: sqlite3.Connection,
+    scope: str,
+    match_mode: str,
+    pattern: str,
+    enabled: bool,
+) -> bool:
+    scope_value = _normalize_rule_scope(scope)
+    mode_value = _normalize_rule_match_mode(match_mode)
+    pattern_value = str(pattern).strip()
+    if pattern_value == "":
+        return False
+
+    rows = connection.execute(
+        """
+        SELECT id, scope, match_mode, pattern
+        FROM name_exclusion_rules
+        ORDER BY sort_order, id
+        """
+    ).fetchall()
+    for row in rows:
+        if (
+            _normalize_rule_scope(row["scope"]) == scope_value
+            and _normalize_rule_match_mode(row["match_mode"]) == mode_value
+            and str(row["pattern"]).strip().lower() == pattern_value.lower()
+        ):
+            connection.execute(
+                "UPDATE name_exclusion_rules SET enabled = ? WHERE id = ?",
+                (int(enabled), int(row["id"])),
+            )
+            connection.commit()
+            return True
+    return False
 
 
 def list_task_color_entries(connection: sqlite3.Connection) -> list[TaskColorEntry]:
@@ -186,3 +298,21 @@ def _row_to_task_color(row: sqlite3.Row) -> TaskColorEntry:
         reason=str(row["reason"]),
         comment=str(row["comment"]),
     )
+
+
+def _normalize_rule_scope(scope: str) -> str:
+    scope_key = str(scope).strip().upper()
+    if scope_key == "":
+        scope_key = "BOTH"
+    if scope_key not in VALID_SCOPES:
+        raise ValueError("invalid scope")
+    return scope_key
+
+
+def _normalize_rule_match_mode(match_mode: str) -> str:
+    mode_key = str(match_mode).strip().upper()
+    if mode_key == "":
+        mode_key = "ALL_WORDS"
+    if mode_key not in VALID_MATCH_MODES:
+        raise ValueError("invalid match_mode")
+    return mode_key

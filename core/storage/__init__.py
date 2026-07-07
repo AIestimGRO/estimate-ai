@@ -14,7 +14,9 @@ from core.storage.rules import (
     list_task_color_entries,
     replace_name_exclusion_rules,
     replace_task_color_entries,
+    set_name_exclusion_rule_enabled,
     set_task_color_enabled,
+    upsert_name_exclusion_rule,
     upsert_task_color_entry,
 )
 from core.storage.risk_log import (
@@ -45,7 +47,9 @@ __all__ = [
     "list_task_color_entries",
     "replace_name_exclusion_rules",
     "replace_task_color_entries",
+    "set_name_exclusion_rule_enabled",
     "set_task_color_enabled",
+    "upsert_name_exclusion_rule",
     "upsert_task_color_entry",
     "FlaggedRiskSnapshot",
     "PriceRiskLogEntry",
