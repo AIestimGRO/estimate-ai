@@ -101,10 +101,11 @@ h1 { margin: 0 0 4px; font-size: 24px; }
 h2.section { margin: 0 0 10px; font-size: 16px; color: #334155; }
 .sub { margin: 0 0 24px; color: #64748b; }
 label { display: block; margin-bottom: 16px; font-weight: 600; font-size: 14px; }
-input[type=file], input[type=text] {
+input[type=file], input[type=text], textarea {
   display: block; width: 100%; margin-top: 6px; padding: 10px 12px;
   border: 1px solid #cbd5e1; border-radius: 10px; font-size: 14px; font-weight: 400;
 }
+textarea { min-height: 70px; resize: vertical; font-family: inherit; }
 button {
   width: 100%; margin-top: 8px; padding: 12px 16px; border: 0; border-radius: 10px;
   background: #4f46e5; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
@@ -191,6 +192,16 @@ table.preview td.risk { color: #b91c1c; text-align: center; font-weight: 700; }
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   background: #f8fafc;
+}
+.admin-form {
+  margin: 16px 0 20px; padding: 14px; border: 1px solid #e2e8f0;
+  border-radius: 12px; background: #fff;
+}
+.table-action { margin: 0; }
+.table-action button { width: auto; margin: 0; padding: 7px 10px; font-size: 12px; }
+.notice-ok {
+  margin-top: 14px; padding: 12px; border-radius: 10px;
+  background: #ecfdf5; color: #047857; font-size: 14px;
 }
 .notice-soft {
   margin-top: 14px;
@@ -603,11 +614,17 @@ def _dem_flag_label(dem_flag: str) -> str:
     return dem_flag
 
 
-def render_admin_task_colors(entries: list[TaskColorEntry]) -> str:
+def render_admin_task_colors(
+    entries: list[TaskColorEntry],
+    error: str = "",
+    notice: str = "",
+) -> str:
     content = (
         '<section class="admin-panel">'
         '<h2 class="section">Синие задачи</h2>'
         '<p>Задачи из этого списка не блокируют подбор аналогов. Их аналоги остаются в результате, но должны подсвечиваться синим.</p>'
+        f'{_render_admin_message(error, notice)}'
+        f'{_render_task_color_form()}'
         f'{_render_task_color_table(entries)}'
         '</section>'
     )
@@ -617,6 +634,32 @@ def render_admin_task_colors(entries: list[TaskColorEntry]) -> str:
         subtitle="Раздел администрирования автоподборщика.",
         admin_nav=_render_admin_nav(active_slug="task-colors"),
         content=content,
+    )
+
+
+def _render_admin_message(error: str, notice: str) -> str:
+    if error:
+        return f'<p class="notice">{html.escape(error)}</p>'
+    if notice:
+        return f'<p class="notice-ok">{html.escape(notice)}</p>'
+    return ""
+
+
+def _render_task_color_form() -> str:
+    return (
+        '<form class="admin-form" method="post" action="/admin/task-colors/add">'
+        '<h2 class="section">Добавить или включить задачу</h2>'
+        '<label>Номер задачи'
+        '<input type="text" name="task_number" placeholder="Например, TASK-123" required>'
+        '</label>'
+        '<label>Причина'
+        '<input type="text" name="reason" placeholder="Например, manual_review">'
+        '</label>'
+        '<label>Комментарий'
+        '<textarea name="comment" placeholder="Короткое пояснение для админки"></textarea>'
+        '</label>'
+        '<button type="submit">Добавить / включить</button>'
+        '</form>'
     )
 
 
@@ -630,6 +673,7 @@ def _render_task_color_table(entries: list[TaskColorEntry]) -> str:
         '<th>Номер задачи</th>'
         '<th>Причина</th>'
         '<th>Комментарий</th>'
+        '<th>Действие</th>'
         '</tr></thead><tbody>'
     )
     rows = []
@@ -640,9 +684,23 @@ def _render_task_color_table(entries: list[TaskColorEntry]) -> str:
             f'<td>{html.escape(entry.task_number)}</td>'
             f'<td>{html.escape(entry.reason)}</td>'
             f'<td>{html.escape(entry.comment)}</td>'
+            f'<td>{_render_task_color_toggle(entry)}</td>'
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table>'
+
+
+def _render_task_color_toggle(entry: TaskColorEntry) -> str:
+    next_enabled = "0" if entry.enabled else "1"
+    button_label = "Выключить" if entry.enabled else "Включить"
+    task_value = html.escape(entry.task_number, quote=True)
+    return (
+        '<form class="table-action" method="post" action="/admin/task-colors/toggle">'
+        f'<input type="hidden" name="task_number" value="{task_value}">'
+        f'<input type="hidden" name="enabled" value="{next_enabled}">'
+        f'<button type="submit">{button_label}</button>'
+        '</form>'
+    )
 
 
 def _enabled_label(enabled: bool) -> str:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from core.exclusions import NameExclusionRule, TaskColorEntry
+from core.exclusions import NameExclusionRule, TaskColorEntry, normalize_task_key
 from core.macro_workbook import (
     load_all_rules_from_workbook,
     resolve_macro_workbook_path,
@@ -32,6 +32,72 @@ def list_task_color_entries(connection: sqlite3.Connection) -> list[TaskColorEnt
         """
     ).fetchall()
     return [_row_to_task_color(row) for row in rows]
+
+
+def upsert_task_color_entry(
+    connection: sqlite3.Connection,
+    task_number: str,
+    reason: str = "",
+    comment: str = "",
+    enabled: bool = True,
+) -> None:
+    task_value = str(task_number).strip()
+    task_key = normalize_task_key(task_value)
+    if task_key == "":
+        raise ValueError("task_number is required")
+
+    rows = connection.execute(
+        "SELECT id, task_number FROM task_color_entries ORDER BY sort_order, id"
+    ).fetchall()
+    for row in rows:
+        if normalize_task_key(row["task_number"]) == task_key:
+            connection.execute(
+                """
+                UPDATE task_color_entries
+                SET enabled = ?, task_number = ?, reason = ?, comment = ?
+                WHERE id = ?
+                """,
+                (int(enabled), task_value, reason.strip(), comment.strip(), int(row["id"])),
+            )
+            connection.commit()
+            return
+
+    sort_row = connection.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM task_color_entries"
+    ).fetchone()
+    next_sort_order = int(sort_row["next_sort_order"])
+    connection.execute(
+        """
+        INSERT INTO task_color_entries (
+            enabled, task_number, reason, comment, sort_order
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (int(enabled), task_value, reason.strip(), comment.strip(), next_sort_order),
+    )
+    connection.commit()
+
+
+def set_task_color_enabled(
+    connection: sqlite3.Connection,
+    task_number: str,
+    enabled: bool,
+) -> bool:
+    task_key = normalize_task_key(task_number)
+    if task_key == "":
+        return False
+
+    rows = connection.execute(
+        "SELECT id, task_number FROM task_color_entries ORDER BY sort_order, id"
+    ).fetchall()
+    for row in rows:
+        if normalize_task_key(row["task_number"]) == task_key:
+            connection.execute(
+                "UPDATE task_color_entries SET enabled = ? WHERE id = ?",
+                (int(enabled), int(row["id"])),
+            )
+            connection.commit()
+            return True
+    return False
 
 
 def replace_name_exclusion_rules(

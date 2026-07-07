@@ -62,3 +62,7 @@ _admin_gesn_review/
 # Admin task-colors delivery artifacts
 admin-task-colors-readonly-updated-files.zip
 _admin_task_colors_review/
+
+# Admin task-colors edit delivery artifacts
+admin-task-colors-edit-updated-files.zip
+_admin_task_colors_edit_review/

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.services.catalog_source import CatalogNotAvailableError, database_has_catalog
 from app.services.read_estimate import (
@@ -32,7 +32,11 @@ from app.services.read_estimate import (
 from app.services.write_result import run_and_write
 from core.storage.catalog import list_catalog_sources, list_imported_files
 from core.storage.risk_log import list_gesn_exceptions, list_price_risks
-from core.storage.rules import list_task_color_entries
+from core.storage.rules import (
+    list_task_color_entries,
+    set_task_color_enabled,
+    upsert_task_color_entry,
+)
 from core.storage.connection import connect, default_database_path, init_database
 from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
@@ -129,6 +133,62 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             connection.close()
 
         return HTMLResponse(render_admin_section(section_slug))
+
+    @app.post("/admin/task-colors/add", response_class=HTMLResponse)
+    def admin_task_color_add(
+        task_number: str = Form(""),
+        reason: str = Form(""),
+        comment: str = Form(""),
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                upsert_task_color_entry(
+                    connection,
+                    task_number=task_number,
+                    reason=reason,
+                    comment=comment,
+                    enabled=True,
+                )
+            except ValueError:
+                entries = list_task_color_entries(connection)
+                return HTMLResponse(
+                    render_admin_task_colors(
+                        entries,
+                        error="Номер задачи обязателен.",
+                    ),
+                    status_code=400,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse("/admin/task-colors", status_code=303)
+
+    @app.post("/admin/task-colors/toggle", response_class=HTMLResponse)
+    def admin_task_color_toggle(
+        task_number: str = Form(""),
+        enabled: str = Form("0"),
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            changed = set_task_color_enabled(
+                connection,
+                task_number=task_number,
+                enabled=enabled == "1",
+            )
+            if not changed:
+                entries = list_task_color_entries(connection)
+                return HTMLResponse(
+                    render_admin_task_colors(
+                        entries,
+                        error="Задача для изменения не найдена.",
+                    ),
+                    status_code=404,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse("/admin/task-colors", status_code=303)
 
     @app.post("/run", response_class=HTMLResponse)
     async def run(
