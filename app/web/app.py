@@ -8,6 +8,8 @@ token so the multi-sheet choice can re-run without a re-upload.
 
 Flow:
   GET  /                    -> upload form
+  GET  /admin               -> admin dashboard (placeholder sections)
+  GET  /admin/{section}     -> admin section placeholder
   POST /run                 -> save uploads, run, render result / sheet choice
   GET  /run?token=&sheet=   -> re-run stored uploads for a chosen sheet
   GET  /download?token=     -> download the produced WA workbook
@@ -30,7 +32,10 @@ from app.services.read_estimate import (
 from app.services.write_result import run_and_write
 from core.storage.connection import default_database_path
 from app.web.rendering import (
+    ADMIN_SECTION_SLUGS,
     XLSX_MIME,
+    render_admin_index,
+    render_admin_section,
     render_choice,
     render_error,
     render_index,
@@ -78,6 +83,23 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         return HTMLResponse(render_index())
+
+    @app.get("/admin", response_class=HTMLResponse)
+    def admin_index() -> HTMLResponse:
+        return HTMLResponse(render_admin_index())
+
+    @app.get("/admin/{section_slug}", response_class=HTMLResponse)
+    def admin_section(section_slug: str) -> HTMLResponse:
+        if section_slug not in ADMIN_SECTION_SLUGS:
+            return HTMLResponse(
+                render_error(
+                    "\u0420\u0430\u0437\u0434\u0435\u043b \u0430\u0434\u043c\u0438\u043d\u043a\u0438 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d",
+                    f"\u041d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u044b\u0439 \u0440\u0430\u0437\u0434\u0435\u043b: {section_slug}",
+                ),
+                status_code=404,
+            )
+
+        return HTMLResponse(render_admin_section(section_slug))
 
     @app.post("/run", response_class=HTMLResponse)
     async def run(

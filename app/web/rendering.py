@@ -28,6 +28,59 @@ READ_METHOD_LABELS = {
     "detected": "\u043f\u043e \u0440\u0430\u0441\u043f\u043e\u0437\u043d\u0430\u043d\u043d\u044b\u043c \u0441\u0442\u043e\u043b\u0431\u0446\u0430\u043c",
 }
 
+ADMIN_SECTIONS = [
+    {
+        "slug": "sources",
+        "title": "\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438 \u0431\u0430\u0437\u044b",
+        "description": "\u0420\u0430\u0437\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u0434\u0430\u043d\u043d\u044b\u0445 \u043f\u043e \u043f\u0440\u043e\u0438\u0441\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u044e: \u0420\u041d\u041c\u0426, \u0422\u041a\u041f, \u0440\u0443\u0447\u043d\u044b\u0435 \u0430\u043d\u0430\u043b\u043e\u0433\u0438, \u043f\u0440\u0430\u0439\u0441\u044b \u0438 \u0434\u0440\u0443\u0433\u0438\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438.",
+        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0448\u0430\u0433 \u2014 \u043f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u0438 \u0438\u0437 catalog_sources.",
+    },
+    {
+        "slug": "imports",
+        "title": "\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u0444\u0430\u0439\u043b\u043e\u0432",
+        "description": "\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043e\u043a, \u043f\u0440\u0438\u043d\u044f\u0442\u044b\u0435 \u0438 \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u043d\u044b\u0435 \u0441\u0442\u0440\u043e\u043a\u0438, \u0440\u0435\u0433\u0438\u043e\u043d, \u0444\u0430\u0439\u043b \u0438 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a.",
+        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u043a\u0430\u0436\u0435\u043c imported_files \u0438 import_row_log.",
+    },
+    {
+        "slug": "risks",
+        "title": "\u0420\u0438\u0441\u043a-\u043b\u043e\u0433",
+        "description": "\u0421\u0442\u0440\u043e\u043a\u0438, \u0433\u0434\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0441\u0438\u043b\u044c\u043d\u044b\u0439 \u0440\u0430\u0437\u0431\u0440\u043e\u0441 \u0446\u0435\u043d \u0438 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0447\u0435\u043b\u043e\u0432\u0435\u043a\u043e\u043c.",
+        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c price_risk_log.",
+    },
+    {
+        "slug": "approvals",
+        "title": "\u041e\u0434\u043e\u0431\u0440\u0435\u043d\u0438\u0435 \u0434\u0438\u0430\u043f\u0430\u0437\u043e\u043d\u043e\u0432",
+        "description": "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0434\u043e\u043f\u0443\u0441\u0442\u0438\u043c\u044b\u0445 \u0434\u0438\u0430\u043f\u0430\u0437\u043e\u043d\u043e\u0432 min/max \u0434\u043b\u044f \u0441\u043f\u043e\u0440\u043d\u044b\u0445 \u0413\u042d\u0421\u041d \u0438 \u0435\u0434\u0438\u043d\u0438\u0446 \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u044f.",
+        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c approve workflow.",
+    },
+    {
+        "slug": "task-colors",
+        "title": "\u0421\u0438\u043d\u0438\u0435 \u0437\u0430\u0434\u0430\u0447\u0438",
+        "description": "\u041d\u043e\u043c\u0435\u0440\u0430 \u0437\u0430\u0434\u0430\u0447, \u0430\u043d\u0430\u043b\u043e\u0433\u0438 \u0438\u0437 \u043a\u043e\u0442\u043e\u0440\u044b\u0445 \u043d\u0435 \u0431\u043b\u043e\u043a\u0438\u0440\u0443\u044e\u0442\u0441\u044f, \u0430 \u043f\u043e\u0434\u0441\u0432\u0435\u0447\u0438\u0432\u0430\u044e\u0442\u0441\u044f \u0441\u0438\u043d\u0438\u043c.",
+        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c task_color_entries.",
+    },
+    {
+        "slug": "name-exclusions",
+        "title": "\u0418\u0441\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f \u043f\u043e \u043d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u044f\u043c",
+        "description": "\u041f\u0440\u0430\u0432\u0438\u043b\u0430 \u043f\u043e \u0442\u0435\u043a\u0441\u0442\u0443 \u0440\u0430\u0431\u043e\u0442 \u0438 \u043d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0439, \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e \u043e\u0442 \u043f\u043e\u0434\u0441\u0432\u0435\u0442\u043a\u0438 \u0437\u0430\u0434\u0430\u0447.",
+        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c name_exclusion_rules.",
+    },
+    {
+        "slug": "gesn-exceptions",
+        "title": "GESN exceptions",
+        "description": "\u041e\u0434\u043e\u0431\u0440\u0435\u043d\u043d\u044b\u0435 \u0434\u0438\u0430\u043f\u0430\u0437\u043e\u043d\u044b \u0446\u0435\u043d \u043f\u043e \u0441\u0432\u044f\u0437\u043a\u0435 \u043a\u043e\u0434 + \u0435\u0434\u0438\u043d\u0438\u0446\u0430 + \u043f\u0440\u0438\u0437\u043d\u0430\u043a \u0434\u0435\u043c\u043e\u043d\u0442\u0430\u0436\u0430.",
+        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c gesn_exceptions.",
+    },
+    {
+        "slug": "settings",
+        "title": "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
+        "description": "\u0422\u0435\u0445\u043d\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043f\u0440\u043e\u0435\u043a\u0442\u0430: \u0431\u0430\u0437\u0430, \u043a\u043e\u043d\u0444\u0438\u0433\u0438, \u0441\u0442\u0430\u0442\u0443\u0441 \u0441\u043b\u043e\u0432\u0430\u0440\u0435\u0439 \u0438 \u0432\u0435\u0440\u0441\u0438\u044f writer.",
+        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u0434\u043e\u0431\u0430\u0432\u0438\u043c read-only diagnostics.",
+    },
+]
+
+ADMIN_SECTION_SLUGS = {section["slug"] for section in ADMIN_SECTIONS}
+
 STYLES = """
 * { box-sizing: border-box; }
 body {
@@ -90,6 +143,61 @@ table.preview th { position: sticky; top: 0; background: #f8fafc; color: #475569
 table.preview td.risk { color: #b91c1c; text-align: center; font-weight: 700; }
 .muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
 .build { margin-top: 20px; font-size: 12px; color: #94a3b8; text-align: center; }
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 24px;
+}
+.admin-nav-link {
+  display: inline-block;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.admin-nav-link:hover { background: #e0e7ff; }
+.admin-nav-link.active { background: #4f46e5; color: #fff; }
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.admin-card {
+  display: block;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+  color: #0f172a;
+  text-decoration: none;
+}
+.admin-card:hover { border-color: #c7d2fe; background: #eef2ff; }
+.admin-card strong { display: block; margin-bottom: 8px; color: #1e293b; }
+.admin-card span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.admin-panel {
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+.notice-soft {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 14px;
+}
+
 """
 
 
@@ -255,3 +363,63 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
         download_url=f"/download?token={quote(token)}",
         filename=html.escape(output_name),
     )
+
+
+def render_admin_index() -> str:
+    cards = "\n".join(_render_admin_card(section) for section in ADMIN_SECTIONS)
+    return render(
+        "admin.html",
+        title="\u0410\u0434\u043c\u0438\u043d\u043a\u0430 Estimate AI",
+        subtitle="\u0423\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0430\u043c\u0438, \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430\u043c\u0438 \u0438 \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430\u043c\u0438 \u0430\u0432\u0442\u043e\u043f\u043e\u0434\u0431\u043e\u0440\u0449\u0438\u043a\u0430.",
+        admin_nav=_render_admin_nav(active_slug=""),
+        content=f'<div class="admin-grid">{cards}</div>',
+    )
+
+
+def render_admin_section(section_slug: str) -> str:
+    section = _get_admin_section(section_slug)
+    content = (
+        '<section class="admin-panel">'
+        f'<h2 class="section">{html.escape(section["title"])}</h2>'
+        f'<p>{html.escape(section["description"])}</p>'
+        f'<p class="notice-soft">{html.escape(section["status"])}</p>'
+        "</section>"
+    )
+    return render(
+        "admin.html",
+        title=html.escape(section["title"]),
+        subtitle="\u0420\u0430\u0437\u0434\u0435\u043b \u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f \u0430\u0432\u0442\u043e\u043f\u043e\u0434\u0431\u043e\u0440\u0449\u0438\u043a\u0430.",
+        admin_nav=_render_admin_nav(active_slug=section_slug),
+        content=content,
+    )
+
+
+def _get_admin_section(section_slug: str) -> dict[str, str]:
+    for section in ADMIN_SECTIONS:
+        if section["slug"] == section_slug:
+            return section
+    raise KeyError(section_slug)
+
+
+def _render_admin_card(section: dict[str, str]) -> str:
+    href = f'/admin/{quote(section["slug"])}'
+    return (
+        f'<a class="admin-card" href="{href}">'
+        f'<strong>{html.escape(section["title"])}</strong>'
+        f'<span>{html.escape(section["description"])}</span>'
+        "</a>"
+    )
+
+
+def _render_admin_nav(active_slug: str) -> str:
+    links = ['<a class="admin-nav-link" href="/admin">\u0413\u043b\u0430\u0432\u043d\u0430\u044f</a>']
+    for section in ADMIN_SECTIONS:
+        classes = "admin-nav-link"
+        if section["slug"] == active_slug:
+            classes += " active"
+        links.append(
+            f'<a class="{classes}" href="/admin/{quote(section["slug"])}">'
+            f'{html.escape(section["title"])}'
+            "</a>"
+        )
+    return "\n".join(links)

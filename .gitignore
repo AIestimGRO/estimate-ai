@@ -33,3 +33,8 @@ scripts/compare_6458203.py
 scripts/debug_row101.py
 scripts/inspect_headers.py
 scripts/verify_out.py
+
+# Admin shell delivery artifacts (apply once, then ignore)
+admin-shell.patch
+admin-shell-changed-files.zip
+_admin_shell_review/
