@@ -48,3 +48,9 @@ _admin_sources_review/
 admin-imports-readonly.patch
 admin-imports-readonly-files.zip
 _admin_imports_review/
+
+# Admin risks delivery artifacts
+admin-risks-readonly.patch
+admin-risks-readonly-updated-files.zip
+_admin_risks_review/
+estimate-ai-admin-ui-current.zip

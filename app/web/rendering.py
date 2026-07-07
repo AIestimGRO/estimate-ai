@@ -18,6 +18,7 @@ from app.services.catalog_source import catalog_status_label, database_has_catal
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT
 from core.storage.catalog import CatalogSource, ImportedFileRecord
+from core.storage.risk_log import PriceRiskLogEntry
 
 _WRITER_MODULE = Path(__file__).resolve().parents[2] / "core" / "excel_writer.py"
 
@@ -46,7 +47,7 @@ ADMIN_SECTIONS = [
         "slug": "risks",
         "title": "\u0420\u0438\u0441\u043a-\u043b\u043e\u0433",
         "description": "\u0421\u0442\u0440\u043e\u043a\u0438, \u0433\u0434\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0441\u0438\u043b\u044c\u043d\u044b\u0439 \u0440\u0430\u0437\u0431\u0440\u043e\u0441 \u0446\u0435\u043d \u0438 \u0442\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0447\u0435\u043b\u043e\u0432\u0435\u043a\u043e\u043c.",
-        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c price_risk_log.",
+        "status": "Риск-лог из price_risk_log показывается в read-only режиме.",
     },
     {
         "slug": "approvals",
@@ -472,6 +473,66 @@ def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
             f'<td>{item.rows_rejected}</td>'
             f'<td>{html.escape(item.imported_at)}</td>'
             f'<td>{html.escape(item.failure_reason)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
+
+def render_admin_risks(risks: list[PriceRiskLogEntry]) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">Риск-лог</h2>'
+        '<p>Журнал показывает строки с сильным разбросом цен, которые требуют проверки и последующего одобрения диапазона.</p>'
+        f'{_render_price_risk_table(risks)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="Риск-лог",
+        subtitle="Раздел администрирования автоподборщика.",
+        admin_nav=_render_admin_nav(active_slug="risks"),
+        content=content,
+    )
+
+
+def _render_price_risk_table(risks: list[PriceRiskLogEntry]) -> str:
+    if not risks:
+        return '<p class="muted">Риск-лог пока пуст.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>ID</th>'
+        '<th>Статус</th>'
+        '<th>Ключ</th>'
+        '<th>Причина</th>'
+        '<th>Код</th>'
+        '<th>Ед.</th>'
+        '<th>Min</th>'
+        '<th>Max</th>'
+        '<th>Ratio</th>'
+        '<th>Реком.</th>'
+        '<th>Строка сметы</th>'
+        '<th>Первое появление</th>'
+        '<th>Последнее появление</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for risk in risks:
+        rows.append(
+            '<tr>'
+            f'<td>{risk.id}</td>'
+            f'<td>{html.escape(risk.status)}</td>'
+            f'<td>{html.escape(risk.exception_key)}</td>'
+            f'<td>{html.escape(risk.reason)}</td>'
+            f'<td>{html.escape(risk.code)}</td>'
+            f'<td>{html.escape(risk.unit)}</td>'
+            f'<td>{_fmt_number(risk.min_price)}</td>'
+            f'<td>{_fmt_number(risk.max_price)}</td>'
+            f'<td>{_fmt_number(risk.ratio)}</td>'
+            f'<td>{_fmt_number(risk.recommended_price)}</td>'
+            f'<td>{_fmt_number(risk.estimate_row)}</td>'
+            f'<td>{html.escape(risk.first_seen_at)}</td>'
+            f'<td>{html.escape(risk.last_seen_at)}</td>'
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table>'

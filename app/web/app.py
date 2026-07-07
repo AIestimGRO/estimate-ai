@@ -31,12 +31,14 @@ from app.services.read_estimate import (
 )
 from app.services.write_result import run_and_write
 from core.storage.catalog import list_catalog_sources, list_imported_files
+from core.storage.risk_log import list_price_risks
 from core.storage.connection import connect, default_database_path, init_database
 from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
     XLSX_MIME,
     render_admin_imports,
     render_admin_index,
+    render_admin_risks,
     render_admin_section,
     render_admin_sources,
     render_choice,
@@ -111,6 +113,9 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             if section_slug == "imports":
                 imports = list_imported_files(connection)
                 return HTMLResponse(render_admin_imports(imports))
+            if section_slug == "risks":
+                risks = list_price_risks(connection)
+                return HTMLResponse(render_admin_risks(risks))
         finally:
             connection.close()
 
