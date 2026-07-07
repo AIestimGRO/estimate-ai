@@ -31,11 +31,12 @@ from app.services.read_estimate import (
 )
 from app.services.write_result import run_and_write
 from core.storage.catalog import list_catalog_sources, list_imported_files
-from core.storage.risk_log import list_price_risks
+from core.storage.risk_log import list_gesn_exceptions, list_price_risks
 from core.storage.connection import connect, default_database_path, init_database
 from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
     XLSX_MIME,
+    render_admin_gesn_exceptions,
     render_admin_imports,
     render_admin_index,
     render_admin_risks,
@@ -116,6 +117,9 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             if section_slug == "risks":
                 risks = list_price_risks(connection)
                 return HTMLResponse(render_admin_risks(risks))
+            if section_slug == "gesn-exceptions":
+                exceptions = list_gesn_exceptions(connection)
+                return HTMLResponse(render_admin_gesn_exceptions(exceptions))
         finally:
             connection.close()
 

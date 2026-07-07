@@ -16,7 +16,7 @@ from urllib.parse import quote
 from app.services.write_result import RunAndWriteResult
 from app.services.catalog_source import catalog_status_label, database_has_catalog
 from core.macro_workbook import load_default_macro_settings
-from core.risk import DEFAULT_PRICE_SPREAD_LIMIT
+from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogSource, ImportedFileRecord
 from core.storage.risk_log import PriceRiskLogEntry
 
@@ -71,7 +71,7 @@ ADMIN_SECTIONS = [
         "slug": "gesn-exceptions",
         "title": "GESN exceptions",
         "description": "\u041e\u0434\u043e\u0431\u0440\u0435\u043d\u043d\u044b\u0435 \u0434\u0438\u0430\u043f\u0430\u0437\u043e\u043d\u044b \u0446\u0435\u043d \u043f\u043e \u0441\u0432\u044f\u0437\u043a\u0435 \u043a\u043e\u0434 + \u0435\u0434\u0438\u043d\u0438\u0446\u0430 + \u043f\u0440\u0438\u0437\u043d\u0430\u043a \u0434\u0435\u043c\u043e\u043d\u0442\u0430\u0436\u0430.",
-        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c gesn_exceptions.",
+        "status": "Одобренные диапазоны из gesn_exceptions показываются в read-only режиме.",
     },
     {
         "slug": "settings",
@@ -536,6 +536,70 @@ def _render_price_risk_table(risks: list[PriceRiskLogEntry]) -> str:
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table>'
+
+
+def render_admin_gesn_exceptions(exceptions: list[GesnException]) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">GESN exceptions</h2>'
+        '<p>Одобренные диапазоны показывают, какие min/max цены уже приняты человеком для связки код + единица + признак демонтажа.</p>'
+        f'{_render_gesn_exceptions_table(exceptions)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="GESN exceptions",
+        subtitle="Раздел администрирования автоподборщика.",
+        admin_nav=_render_admin_nav(active_slug="gesn-exceptions"),
+        content=content,
+    )
+
+
+def _render_gesn_exceptions_table(exceptions: list[GesnException]) -> str:
+    if not exceptions:
+        return '<p class="muted">Одобренные диапазоны пока не записаны.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Ключ</th>'
+        '<th>Код</th>'
+        '<th>Ед.</th>'
+        '<th>Демонтаж</th>'
+        '<th>Approved min</th>'
+        '<th>Approved max</th>'
+        '<th>Дата обновления диапазона</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for item in exceptions:
+        unit, code, dem_flag = _split_exception_key(item.exception_key)
+        rows.append(
+            '<tr>'
+            f'<td>{html.escape(item.exception_key)}</td>'
+            f'<td>{html.escape(code)}</td>'
+            f'<td>{html.escape(unit)}</td>'
+            f'<td>{html.escape(_dem_flag_label(dem_flag))}</td>'
+            f'<td>{_fmt_number(item.approved_min)}</td>'
+            f'<td>{_fmt_number(item.approved_max)}</td>'
+            f'<td>{_fmt_number(item.last_range_update_date)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
+
+def _split_exception_key(exception_key: str) -> tuple[str, str, str]:
+    parts = exception_key.split("||")
+    if len(parts) != 3:
+        return "", "", ""
+    return parts[0], parts[1], parts[2]
+
+
+def _dem_flag_label(dem_flag: str) -> str:
+    if dem_flag == "1":
+        return "да"
+    if dem_flag == "0":
+        return "нет"
+    return dem_flag
 
 
 def render_admin_section(section_slug: str) -> str:

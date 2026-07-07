@@ -20,7 +20,6 @@ def test_admin_placeholder_sections_open(tmp_path) -> None:
         "/admin/approvals",
         "/admin/task-colors",
         "/admin/name-exclusions",
-        "/admin/gesn-exceptions",
         "/admin/settings",
     ]
 

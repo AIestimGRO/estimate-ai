@@ -54,21 +54,29 @@ class PriceRiskLogEntry:
 
 
 def load_gesn_exceptions(connection: sqlite3.Connection) -> dict[str, GesnException]:
+    return {
+        item.exception_key: item
+        for item in list_gesn_exceptions(connection)
+    }
+
+
+def list_gesn_exceptions(connection: sqlite3.Connection) -> list[GesnException]:
     rows = connection.execute(
         """
         SELECT exception_key, approved_min, approved_max, last_range_update_date
         FROM gesn_exceptions
+        ORDER BY exception_key
         """
     ).fetchall()
-    return {
-        str(row["exception_key"]): GesnException(
+    return [
+        GesnException(
             exception_key=str(row["exception_key"]),
             approved_min=float(row["approved_min"]),
             approved_max=float(row["approved_max"]),
             last_range_update_date=float(row["last_range_update_date"]),
         )
         for row in rows
-    }
+    ]
 
 
 def save_gesn_exception(connection: sqlite3.Connection, exception: GesnException) -> None:

@@ -54,3 +54,7 @@ admin-risks-readonly.patch
 admin-risks-readonly-updated-files.zip
 _admin_risks_review/
 estimate-ai-admin-ui-current.zip
+
+# Admin gesn-exceptions delivery artifacts
+admin-gesn-exceptions-readonly-updated-files.zip
+_admin_gesn_review/
