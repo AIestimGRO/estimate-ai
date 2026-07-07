@@ -32,6 +32,7 @@ from app.services.read_estimate import (
 from app.services.write_result import run_and_write
 from core.storage.catalog import list_catalog_sources, list_imported_files
 from core.storage.risk_log import list_gesn_exceptions, list_price_risks
+from core.storage.rules import list_task_color_entries
 from core.storage.connection import connect, default_database_path, init_database
 from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
@@ -39,6 +40,7 @@ from app.web.rendering import (
     render_admin_gesn_exceptions,
     render_admin_imports,
     render_admin_index,
+    render_admin_task_colors,
     render_admin_risks,
     render_admin_section,
     render_admin_sources,
@@ -120,6 +122,9 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             if section_slug == "gesn-exceptions":
                 exceptions = list_gesn_exceptions(connection)
                 return HTMLResponse(render_admin_gesn_exceptions(exceptions))
+            if section_slug == "task-colors":
+                entries = list_task_color_entries(connection)
+                return HTMLResponse(render_admin_task_colors(entries))
         finally:
             connection.close()
 

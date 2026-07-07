@@ -58,3 +58,7 @@ estimate-ai-admin-ui-current.zip
 # Admin gesn-exceptions delivery artifacts
 admin-gesn-exceptions-readonly-updated-files.zip
 _admin_gesn_review/
+
+# Admin task-colors delivery artifacts
+admin-task-colors-readonly-updated-files.zip
+_admin_task_colors_review/

@@ -19,6 +19,7 @@ from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogSource, ImportedFileRecord
 from core.storage.risk_log import PriceRiskLogEntry
+from core.exclusions import TaskColorEntry
 
 _WRITER_MODULE = Path(__file__).resolve().parents[2] / "core" / "excel_writer.py"
 
@@ -59,7 +60,7 @@ ADMIN_SECTIONS = [
         "slug": "task-colors",
         "title": "\u0421\u0438\u043d\u0438\u0435 \u0437\u0430\u0434\u0430\u0447\u0438",
         "description": "\u041d\u043e\u043c\u0435\u0440\u0430 \u0437\u0430\u0434\u0430\u0447, \u0430\u043d\u0430\u043b\u043e\u0433\u0438 \u0438\u0437 \u043a\u043e\u0442\u043e\u0440\u044b\u0445 \u043d\u0435 \u0431\u043b\u043e\u043a\u0438\u0440\u0443\u044e\u0442\u0441\u044f, \u0430 \u043f\u043e\u0434\u0441\u0432\u0435\u0447\u0438\u0432\u0430\u044e\u0442\u0441\u044f \u0441\u0438\u043d\u0438\u043c.",
-        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c task_color_entries.",
+        "status": "Список задач из task_color_entries показывается в read-only режиме.",
     },
     {
         "slug": "name-exclusions",
@@ -600,6 +601,52 @@ def _dem_flag_label(dem_flag: str) -> str:
     if dem_flag == "0":
         return "нет"
     return dem_flag
+
+
+def render_admin_task_colors(entries: list[TaskColorEntry]) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">Синие задачи</h2>'
+        '<p>Задачи из этого списка не блокируют подбор аналогов. Их аналоги остаются в результате, но должны подсвечиваться синим.</p>'
+        f'{_render_task_color_table(entries)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="Синие задачи",
+        subtitle="Раздел администрирования автоподборщика.",
+        admin_nav=_render_admin_nav(active_slug="task-colors"),
+        content=content,
+    )
+
+
+def _render_task_color_table(entries: list[TaskColorEntry]) -> str:
+    if not entries:
+        return '<p class="muted">Синие задачи пока не записаны.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Вкл.</th>'
+        '<th>Номер задачи</th>'
+        '<th>Причина</th>'
+        '<th>Комментарий</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for entry in entries:
+        rows.append(
+            '<tr>'
+            f'<td>{_enabled_label(entry.enabled)}</td>'
+            f'<td>{html.escape(entry.task_number)}</td>'
+            f'<td>{html.escape(entry.reason)}</td>'
+            f'<td>{html.escape(entry.comment)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
+
+def _enabled_label(enabled: bool) -> str:
+    return "да" if enabled else "нет"
 
 
 def render_admin_section(section_slug: str) -> str:
