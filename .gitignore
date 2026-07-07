@@ -70,3 +70,7 @@ _admin_task_colors_edit_review/
 # Admin approvals delivery artifacts
 admin-approvals-approve-updated-files.zip
 _admin_approvals_review/
+
+# Admin readonly block delivery artifacts
+admin-readonly-block-updated-files.zip
+_admin_readonly_block_review/
