@@ -23,6 +23,7 @@ class CatalogSource:
     name: str
     kind: str
     created_at: str
+    item_count: int
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,22 @@ class CatalogImportResult:
 
 def list_catalog_sources(connection: sqlite3.Connection) -> list[CatalogSource]:
     rows = connection.execute(
-        "SELECT id, name, kind, created_at FROM catalog_sources ORDER BY name"
+        """
+        SELECT
+            catalog_sources.id,
+            catalog_sources.name,
+            catalog_sources.kind,
+            catalog_sources.created_at,
+            COUNT(catalog_items.id) AS item_count
+        FROM catalog_sources
+        LEFT JOIN catalog_items ON catalog_items.source_id = catalog_sources.id
+        GROUP BY
+            catalog_sources.id,
+            catalog_sources.name,
+            catalog_sources.kind,
+            catalog_sources.created_at
+        ORDER BY catalog_sources.name
+        """
     ).fetchall()
     return [
         CatalogSource(
@@ -44,6 +60,7 @@ def list_catalog_sources(connection: sqlite3.Connection) -> list[CatalogSource]:
             name=str(row["name"]),
             kind=str(row["kind"]),
             created_at=str(row["created_at"]),
+            item_count=int(row["item_count"]),
         )
         for row in rows
     ]

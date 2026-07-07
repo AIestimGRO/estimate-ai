@@ -17,6 +17,7 @@ from app.services.write_result import RunAndWriteResult
 from app.services.catalog_source import catalog_status_label, database_has_catalog
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT
+from core.storage.catalog import CatalogSource
 
 _WRITER_MODULE = Path(__file__).resolve().parents[2] / "core" / "excel_writer.py"
 
@@ -33,7 +34,7 @@ ADMIN_SECTIONS = [
         "slug": "sources",
         "title": "\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438 \u0431\u0430\u0437\u044b",
         "description": "\u0420\u0430\u0437\u0434\u0435\u043b\u0435\u043d\u0438\u0435 \u0434\u0430\u043d\u043d\u044b\u0445 \u043f\u043e \u043f\u0440\u043e\u0438\u0441\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u044e: \u0420\u041d\u041c\u0426, \u0422\u041a\u041f, \u0440\u0443\u0447\u043d\u044b\u0435 \u0430\u043d\u0430\u043b\u043e\u0433\u0438, \u043f\u0440\u0430\u0439\u0441\u044b \u0438 \u0434\u0440\u0443\u0433\u0438\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438.",
-        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0448\u0430\u0433 \u2014 \u043f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u0438 \u0438\u0437 catalog_sources.",
+        "status": "\u0421\u043f\u0438\u0441\u043e\u043a \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u043e\u0432 \u0438\u0437 catalog_sources \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0432 read-only \u0440\u0435\u0436\u0438\u043c\u0435.",
     },
     {
         "slug": "imports",
@@ -375,6 +376,50 @@ def render_admin_index() -> str:
         content=f'<div class="admin-grid">{cards}</div>',
     )
 
+
+
+def render_admin_sources(sources: list[CatalogSource]) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438 \u0431\u0430\u0437\u044b</h2>'
+        '<p>\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438 \u043d\u0443\u0436\u043d\u044b, \u0447\u0442\u043e\u0431\u044b \u043d\u0435 \u0441\u043c\u0435\u0448\u0438\u0432\u0430\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0435 \u0420\u041d\u041c\u0426, \u0422\u041a\u041f, \u0440\u0443\u0447\u043d\u044b\u0435 \u0430\u043d\u0430\u043b\u043e\u0433\u0438, \u043f\u0440\u0430\u0439\u0441\u044b \u0438 \u0434\u0440\u0443\u0433\u0438\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438.</p>'
+        f'{_render_catalog_source_table(sources)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438 \u0431\u0430\u0437\u044b",
+        subtitle="\u0420\u0430\u0437\u0434\u0435\u043b \u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f \u0430\u0432\u0442\u043e\u043f\u043e\u0434\u0431\u043e\u0440\u0449\u0438\u043a\u0430.",
+        admin_nav=_render_admin_nav(active_slug="sources"),
+        content=content,
+    )
+
+
+def _render_catalog_source_table(sources: list[CatalogSource]) -> str:
+    if not sources:
+        return '<p class="muted">\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u044b.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>ID</th>'
+        '<th>\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435</th>'
+        '<th>\u0422\u0438\u043f</th>'
+        '<th>\u0421\u0442\u0440\u043e\u043a</th>'
+        '<th>\u0421\u043e\u0437\u0434\u0430\u043d</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for source in sources:
+        rows.append(
+            '<tr>'
+            f'<td>{source.id}</td>'
+            f'<td>{html.escape(source.name)}</td>'
+            f'<td>{html.escape(source.kind)}</td>'
+            f'<td>{source.item_count}</td>'
+            f'<td>{html.escape(source.created_at)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
 
 def render_admin_section(section_slug: str) -> str:
     section = _get_admin_section(section_slug)

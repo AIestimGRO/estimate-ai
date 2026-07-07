@@ -38,3 +38,8 @@ scripts/verify_out.py
 admin-shell.patch
 admin-shell-changed-files.zip
 _admin_shell_review/
+
+# Admin delivery artifacts (apply once, then ignore)
+admin-sources-readonly.patch
+admin-sources-readonly-files.zip
+_admin_sources_review/

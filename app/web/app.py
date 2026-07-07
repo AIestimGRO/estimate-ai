@@ -30,12 +30,14 @@ from app.services.read_estimate import (
     MultipleSheetsError,
 )
 from app.services.write_result import run_and_write
-from core.storage.connection import default_database_path
+from core.storage.catalog import list_catalog_sources
+from core.storage.connection import connect, default_database_path, init_database
 from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
     XLSX_MIME,
     render_admin_index,
     render_admin_section,
+    render_admin_sources,
     render_choice,
     render_error,
     render_index,
@@ -98,6 +100,15 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 ),
                 status_code=404,
             )
+
+        if section_slug == "sources":
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                sources = list_catalog_sources(connection)
+            finally:
+                connection.close()
+            return HTMLResponse(render_admin_sources(sources))
 
         return HTMLResponse(render_admin_section(section_slug))
 

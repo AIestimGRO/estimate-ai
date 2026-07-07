@@ -17,7 +17,6 @@ def test_admin_index_shows_navigation(tmp_path) -> None:
 
 def test_admin_placeholder_sections_open(tmp_path) -> None:
     paths = [
-        "/admin/sources",
         "/admin/imports",
         "/admin/risks",
         "/admin/approvals",
