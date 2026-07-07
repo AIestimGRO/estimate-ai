@@ -19,7 +19,7 @@ from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogSource, ImportedFileRecord
 from core.storage.risk_log import PriceRiskLogEntry
-from core.exclusions import TaskColorEntry
+from core.exclusions import NameExclusionRule, TaskColorEntry
 
 _WRITER_MODULE = Path(__file__).resolve().parents[2] / "core" / "excel_writer.py"
 
@@ -54,7 +54,7 @@ ADMIN_SECTIONS = [
         "slug": "approvals",
         "title": "\u041e\u0434\u043e\u0431\u0440\u0435\u043d\u0438\u0435 \u0434\u0438\u0430\u043f\u0430\u0437\u043e\u043d\u043e\u0432",
         "description": "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435 \u0434\u043e\u043f\u0443\u0441\u0442\u0438\u043c\u044b\u0445 \u0434\u0438\u0430\u043f\u0430\u0437\u043e\u043d\u043e\u0432 min/max \u0434\u043b\u044f \u0441\u043f\u043e\u0440\u043d\u044b\u0445 \u0413\u042d\u0421\u041d \u0438 \u0435\u0434\u0438\u043d\u0438\u0446 \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u044f.",
-        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c approve workflow.",
+        "status": "Открытые риски из price_risk_log показываются в read-only режиме. Approve workflow подключим отдельным write-этапом.",
     },
     {
         "slug": "task-colors",
@@ -66,7 +66,7 @@ ADMIN_SECTIONS = [
         "slug": "name-exclusions",
         "title": "\u0418\u0441\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f \u043f\u043e \u043d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u044f\u043c",
         "description": "\u041f\u0440\u0430\u0432\u0438\u043b\u0430 \u043f\u043e \u0442\u0435\u043a\u0441\u0442\u0443 \u0440\u0430\u0431\u043e\u0442 \u0438 \u043d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0439, \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e \u043e\u0442 \u043f\u043e\u0434\u0441\u0432\u0435\u0442\u043a\u0438 \u0437\u0430\u0434\u0430\u0447.",
-        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u043c name_exclusion_rules.",
+        "status": "Правила из name_exclusion_rules показываются в read-only режиме.",
     },
     {
         "slug": "gesn-exceptions",
@@ -78,7 +78,7 @@ ADMIN_SECTIONS = [
         "slug": "settings",
         "title": "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
         "description": "\u0422\u0435\u0445\u043d\u0438\u0447\u0435\u0441\u043a\u0438\u0435 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043f\u0440\u043e\u0435\u043a\u0442\u0430: \u0431\u0430\u0437\u0430, \u043a\u043e\u043d\u0444\u0438\u0433\u0438, \u0441\u0442\u0430\u0442\u0443\u0441 \u0441\u043b\u043e\u0432\u0430\u0440\u0435\u0439 \u0438 \u0432\u0435\u0440\u0441\u0438\u044f writer.",
-        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u0434\u043e\u0431\u0430\u0432\u0438\u043c read-only diagnostics.",
+        "status": "Read-only диагностика путей, базы и счетчиков подключена.",
     },
 ]
 
@@ -613,6 +613,157 @@ def _dem_flag_label(dem_flag: str) -> str:
         return "нет"
     return dem_flag
 
+
+
+def render_admin_approvals(
+    risks: list[PriceRiskLogEntry],
+    error: str = "",
+    notice: str = "",
+) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">Одобрение диапазонов</h2>'
+        '<p>Здесь показываются открытые риски. Кнопка одобрения переносит min/max риска в GESN exceptions и меняет статус риска на approved.</p>'
+        f'{_render_admin_message(error, notice)}'
+        f'{_render_approval_risk_table(risks)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="Одобрение диапазонов",
+        subtitle="Раздел администрирования автоподборщика.",
+        admin_nav=_render_admin_nav(active_slug="approvals"),
+        content=content,
+    )
+
+
+def _render_approval_risk_table(risks: list[PriceRiskLogEntry]) -> str:
+    if not risks:
+        return '<p class="muted">Открытых рисков для одобрения пока нет.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>ID</th>'
+        '<th>Ключ</th>'
+        '<th>Причина</th>'
+        '<th>Код</th>'
+        '<th>Ед.</th>'
+        '<th>Min</th>'
+        '<th>Max</th>'
+        '<th>Ratio</th>'
+        '<th>Реком.</th>'
+        '<th>Строка сметы</th>'
+        '<th>Последнее появление</th>'
+        '<th>Действие</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for risk in risks:
+        rows.append(
+            '<tr>'
+            f'<td>{risk.id}</td>'
+            f'<td>{html.escape(risk.exception_key)}</td>'
+            f'<td>{html.escape(risk.reason)}</td>'
+            f'<td>{html.escape(risk.code)}</td>'
+            f'<td>{html.escape(risk.unit)}</td>'
+            f'<td>{_fmt_number(risk.min_price)}</td>'
+            f'<td>{_fmt_number(risk.max_price)}</td>'
+            f'<td>{_fmt_number(risk.ratio)}</td>'
+            f'<td>{_fmt_number(risk.recommended_price)}</td>'
+            f'<td>{_fmt_number(risk.estimate_row)}</td>'
+            f'<td>{html.escape(risk.last_seen_at)}</td>'
+            f'<td>{_render_approval_button(risk)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
+
+
+def _render_approval_button(risk: PriceRiskLogEntry) -> str:
+    key_value = html.escape(risk.exception_key, quote=True)
+    return (
+        '<form class="table-action" method="post" action="/admin/approvals/approve">'
+        f'<input type="hidden" name="exception_key" value="{key_value}">'
+        '<button type="submit">Одобрить</button>'
+        '</form>'
+    )
+
+def render_admin_name_exclusions(rules: list[NameExclusionRule]) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">Исключения по наименованиям</h2>'
+        '<p>Правила исключений хранятся отдельно от синих задач. Они влияют на фильтрацию по тексту работ, поэтому редактирование подключим отдельным write-этапом.</p>'
+        f'{_render_name_exclusion_table(rules)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="Исключения по наименованиям",
+        subtitle="Раздел администрирования автоподборщика.",
+        admin_nav=_render_admin_nav(active_slug="name-exclusions"),
+        content=content,
+    )
+
+
+def _render_name_exclusion_table(rules: list[NameExclusionRule]) -> str:
+    if not rules:
+        return '<p class="muted">Правила исключений пока не записаны.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Вкл.</th>'
+        '<th>Scope</th>'
+        '<th>Match mode</th>'
+        '<th>Pattern</th>'
+        '<th>Группа</th>'
+        '<th>Комментарий</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for rule in rules:
+        rows.append(
+            '<tr>'
+            f'<td>{_enabled_label(rule.enabled)}</td>'
+            f'<td>{html.escape(rule.scope)}</td>'
+            f'<td>{html.escape(rule.match_mode)}</td>'
+            f'<td>{html.escape(rule.pattern)}</td>'
+            f'<td>{html.escape(rule.group)}</td>'
+            f'<td>{html.escape(rule.comment)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
+
+def render_admin_settings(settings_rows: list[tuple[str, str]]) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">Настройки и диагностика</h2>'
+        '<p>Read-only сводка по базе, конфигам и накопленным админ-таблицам. Эта страница ничего не меняет.</p>'
+        f'{_render_settings_table(settings_rows)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="Настройки",
+        subtitle="Раздел администрирования автоподборщика.",
+        admin_nav=_render_admin_nav(active_slug="settings"),
+        content=content,
+    )
+
+
+def _render_settings_table(settings_rows: list[tuple[str, str]]) -> str:
+    if not settings_rows:
+        return '<p class="muted">Диагностика пока недоступна.</p>'
+
+    rows = []
+    for label, value in settings_rows:
+        rows.append(
+            '<tr>'
+            f'<th>{html.escape(label)}</th>'
+            f'<td>{html.escape(value)}</td>'
+            '</tr>'
+        )
+    return '<table class="preview"><tbody>' + ''.join(rows) + '</tbody></table>'
 
 def render_admin_task_colors(
     entries: list[TaskColorEntry],

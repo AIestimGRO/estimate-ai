@@ -18,6 +18,7 @@ Flow:
 import tempfile
 import uuid
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
@@ -30,9 +31,20 @@ from app.services.read_estimate import (
     MultipleSheetsError,
 )
 from app.services.write_result import run_and_write
-from core.storage.catalog import list_catalog_sources, list_imported_files
-from core.storage.risk_log import list_gesn_exceptions, list_price_risks
+from core.storage.catalog import (
+    count_catalog_rows,
+    list_catalog_sources,
+    list_imported_files,
+)
+from core.storage.risk_log import (
+    STATUS_OPEN,
+    approve_risk,
+    get_price_risk,
+    list_gesn_exceptions,
+    list_price_risks,
+)
 from core.storage.rules import (
+    list_name_exclusion_rules,
     list_task_color_entries,
     set_task_color_enabled,
     upsert_task_color_entry,
@@ -41,12 +53,15 @@ from core.storage.connection import connect, default_database_path, init_databas
 from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
     XLSX_MIME,
+    render_admin_approvals,
     render_admin_gesn_exceptions,
     render_admin_imports,
+    render_admin_name_exclusions,
     render_admin_index,
     render_admin_task_colors,
     render_admin_risks,
     render_admin_section,
+    render_admin_settings,
     render_admin_sources,
     render_choice,
     render_error,
@@ -55,6 +70,7 @@ from app.web.rendering import (
 )
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+VBA_DATE_BASE = date(1899, 12, 30)
 _INVALID = object()
 
 
@@ -126,13 +142,62 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             if section_slug == "gesn-exceptions":
                 exceptions = list_gesn_exceptions(connection)
                 return HTMLResponse(render_admin_gesn_exceptions(exceptions))
+            if section_slug == "approvals":
+                risks = list_price_risks(connection, status="open")
+                return HTMLResponse(render_admin_approvals(risks))
             if section_slug == "task-colors":
                 entries = list_task_color_entries(connection)
                 return HTMLResponse(render_admin_task_colors(entries))
+            if section_slug == "name-exclusions":
+                rules = list_name_exclusion_rules(connection)
+                return HTMLResponse(render_admin_name_exclusions(rules))
+            if section_slug == "settings":
+                settings_rows = _admin_settings_rows(connection)
+                return HTMLResponse(render_admin_settings(settings_rows))
         finally:
             connection.close()
 
         return HTMLResponse(render_admin_section(section_slug))
+
+    @app.post("/admin/approvals/approve", response_class=HTMLResponse)
+    def admin_approval_approve(exception_key: str = Form("")):
+        normalized_key = exception_key.strip()
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            risk = get_price_risk(
+                connection,
+                exception_key=normalized_key,
+                status=STATUS_OPEN,
+            )
+            if risk is None:
+                open_risks = list_price_risks(connection, status=STATUS_OPEN)
+                return HTMLResponse(
+                    render_admin_approvals(
+                        open_risks,
+                        error="Открытый риск для одобрения не найден.",
+                    ),
+                    status_code=404,
+                )
+            if risk.min_price is None or risk.max_price is None:
+                open_risks = list_price_risks(connection, status=STATUS_OPEN)
+                return HTMLResponse(
+                    render_admin_approvals(
+                        open_risks,
+                        error="У риска нет min/max цен для одобрения диапазона.",
+                    ),
+                    status_code=400,
+                )
+            approve_risk(
+                connection,
+                normalized_key,
+                proposed_min=risk.min_price,
+                proposed_max=risk.max_price,
+                proposed_date_serial=_today_vba_date_serial(),
+            )
+        finally:
+            connection.close()
+        return RedirectResponse("/admin/approvals", status_code=303)
 
     @app.post("/admin/task-colors/add", response_class=HTMLResponse)
     def admin_task_color_add(
@@ -328,6 +393,32 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
     record.output_path = outcome.output_path
     record.output_name = _wa_name(record.estimate_name)
     return HTMLResponse(render_result(token, record.output_name, outcome))
+
+
+
+def _admin_settings_rows(connection) -> list[tuple[str, str]]:
+    database_path = default_database_path()
+    sources = list_catalog_sources(connection)
+    imports = list_imported_files(connection)
+    risks = list_price_risks(connection)
+    exceptions = list_gesn_exceptions(connection)
+    task_colors = list_task_color_entries(connection)
+    name_rules = list_name_exclusion_rules(connection)
+    return [
+        ("Database path", str(database_path)),
+        ("Database exists", "yes" if database_path.is_file() else "no"),
+        ("Catalog rows", str(count_catalog_rows(connection))),
+        ("Sources", str(len(sources))),
+        ("Imported files", str(len(imports))),
+        ("Open risks", str(len([risk for risk in risks if risk.status == "open"]))),
+        ("Approved risks", str(len([risk for risk in risks if risk.status == "approved"]))),
+        ("GESN exceptions", str(len(exceptions))),
+        ("Task color entries", str(len(task_colors))),
+        ("Name exclusion rules", str(len(name_rules))),
+    ]
+
+def _today_vba_date_serial() -> float:
+    return float((date.today() - VBA_DATE_BASE).days)
 
 
 def _parse_coefficient(text: str) -> float | None | object:

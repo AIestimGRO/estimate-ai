@@ -130,6 +130,31 @@ def list_price_risks(
     return [_row_to_entry(row) for row in rows]
 
 
+def get_price_risk(
+    connection: sqlite3.Connection,
+    *,
+    exception_key: str,
+    status: str | None = None,
+) -> PriceRiskLogEntry | None:
+    query = """
+        SELECT id, exception_key, status, reason, code, unit,
+               min_price, max_price, ratio, recommended_price,
+               estimate_row, first_seen_at, last_seen_at
+        FROM price_risk_log
+        WHERE exception_key = ?
+    """
+    params: tuple[object, ...]
+    if status is None:
+        params = (exception_key,)
+    else:
+        query += " AND status = ?"
+        params = (exception_key, status)
+    row = connection.execute(query, params).fetchone()
+    if row is None:
+        return None
+    return _row_to_entry(row)
+
+
 def upsert_open_risk(
     connection: sqlite3.Connection,
     *,
