@@ -27,6 +27,21 @@ class CatalogSource:
 
 
 @dataclass(frozen=True)
+class ImportedFileRecord:
+    id: int
+    source_name: str
+    source_kind: str
+    region_folder: str
+    filename: str
+    status: str
+    imported_at: str
+    task_number: str
+    rows_ok: int
+    rows_rejected: int
+    failure_reason: str
+
+
+@dataclass(frozen=True)
 class CatalogImportResult:
     source_name: str
     source_id: int
@@ -61,6 +76,44 @@ def list_catalog_sources(connection: sqlite3.Connection) -> list[CatalogSource]:
             kind=str(row["kind"]),
             created_at=str(row["created_at"]),
             item_count=int(row["item_count"]),
+        )
+        for row in rows
+    ]
+
+
+def list_imported_files(connection: sqlite3.Connection) -> list[ImportedFileRecord]:
+    rows = connection.execute(
+        """
+        SELECT
+            imported_files.id,
+            COALESCE(catalog_sources.name, '') AS source_name,
+            COALESCE(catalog_sources.kind, '') AS source_kind,
+            imported_files.region_folder,
+            imported_files.filename,
+            imported_files.status,
+            imported_files.imported_at,
+            imported_files.task_number,
+            imported_files.rows_ok,
+            imported_files.rows_rejected,
+            imported_files.failure_reason
+        FROM imported_files
+        LEFT JOIN catalog_sources ON catalog_sources.id = imported_files.source_id
+        ORDER BY imported_files.imported_at DESC, imported_files.id DESC
+        """
+    ).fetchall()
+    return [
+        ImportedFileRecord(
+            id=int(row["id"]),
+            source_name=str(row["source_name"]),
+            source_kind=str(row["source_kind"]),
+            region_folder=str(row["region_folder"]),
+            filename=str(row["filename"]),
+            status=str(row["status"]),
+            imported_at=str(row["imported_at"]),
+            task_number=str(row["task_number"]),
+            rows_ok=int(row["rows_ok"]),
+            rows_rejected=int(row["rows_rejected"]),
+            failure_reason=str(row["failure_reason"]),
         )
         for row in rows
     ]

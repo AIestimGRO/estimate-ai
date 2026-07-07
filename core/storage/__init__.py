@@ -5,6 +5,7 @@ from core.storage.catalog import (
     import_catalog_from_excel,
     list_catalog_rows,
     list_catalog_sources,
+    list_imported_files,
     count_catalog_rows,
 )
 from core.storage.rules import (
@@ -33,6 +34,7 @@ __all__ = [
     "import_catalog_from_excel",
     "list_catalog_rows",
     "list_catalog_sources",
+    "list_imported_files",
     "count_catalog_rows",
     "import_rules_from_workbook",
     "list_name_exclusion_rules",

@@ -17,7 +17,7 @@ from app.services.write_result import RunAndWriteResult
 from app.services.catalog_source import catalog_status_label, database_has_catalog
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT
-from core.storage.catalog import CatalogSource
+from core.storage.catalog import CatalogSource, ImportedFileRecord
 
 _WRITER_MODULE = Path(__file__).resolve().parents[2] / "core" / "excel_writer.py"
 
@@ -40,7 +40,7 @@ ADMIN_SECTIONS = [
         "slug": "imports",
         "title": "\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u0444\u0430\u0439\u043b\u043e\u0432",
         "description": "\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043e\u043a, \u043f\u0440\u0438\u043d\u044f\u0442\u044b\u0435 \u0438 \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u043d\u044b\u0435 \u0441\u0442\u0440\u043e\u043a\u0438, \u0440\u0435\u0433\u0438\u043e\u043d, \u0444\u0430\u0439\u043b \u0438 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a.",
-        "status": "\u041f\u043e\u043a\u0430 \u043a\u0430\u0440\u043a\u0430\u0441. \u041f\u043e\u0437\u0436\u0435 \u043f\u043e\u043a\u0430\u0436\u0435\u043c imported_files \u0438 import_row_log.",
+        "status": "\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u0438\u043c\u043f\u043e\u0440\u0442\u043e\u0432 \u0438\u0437 imported_files \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0432 read-only \u0440\u0435\u0436\u0438\u043c\u0435.",
     },
     {
         "slug": "risks",
@@ -420,6 +420,62 @@ def _render_catalog_source_table(sources: list[CatalogSource]) -> str:
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table>'
+
+def render_admin_imports(imports: list[ImportedFileRecord]) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u0444\u0430\u0439\u043b\u043e\u0432</h2>'
+        '<p>\u0416\u0443\u0440\u043d\u0430\u043b \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442, \u043a\u0430\u043a\u0438\u0435 \u0444\u0430\u0439\u043b\u044b \u0431\u044b\u043b\u0438 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u044b, \u0438\u0437 \u043a\u0430\u043a\u043e\u0433\u043e \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0430 \u0438 \u0441\u043a\u043e\u043b\u044c\u043a\u043e \u0441\u0442\u0440\u043e\u043a \u043f\u0440\u0438\u043d\u044f\u0442\u043e.</p>'
+        f'{_render_imported_file_table(imports)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u0444\u0430\u0439\u043b\u043e\u0432",
+        subtitle="\u0420\u0430\u0437\u0434\u0435\u043b \u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f \u0430\u0432\u0442\u043e\u043f\u043e\u0434\u0431\u043e\u0440\u0449\u0438\u043a\u0430.",
+        admin_nav=_render_admin_nav(active_slug="imports"),
+        content=content,
+    )
+
+
+def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
+    if not imports:
+        return '<p class="muted">\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u043f\u043e\u043a\u0430 \u043d\u0435 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u044b.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>ID</th>'
+        '<th>\u0424\u0430\u0439\u043b</th>'
+        '<th>\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a</th>'
+        '<th>\u0422\u0438\u043f</th>'
+        '<th>\u0420\u0435\u0433\u0438\u043e\u043d</th>'
+        '<th>\u0417\u0430\u0434\u0430\u0447\u0430</th>'
+        '<th>\u0421\u0442\u0430\u0442\u0443\u0441</th>'
+        '<th>OK</th>'
+        '<th>Rejected</th>'
+        '<th>\u0418\u043c\u043f\u043e\u0440\u0442</th>'
+        '<th>\u041e\u0448\u0438\u0431\u043a\u0430</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for item in imports:
+        rows.append(
+            '<tr>'
+            f'<td>{item.id}</td>'
+            f'<td>{html.escape(item.filename)}</td>'
+            f'<td>{html.escape(item.source_name)}</td>'
+            f'<td>{html.escape(item.source_kind)}</td>'
+            f'<td>{html.escape(item.region_folder)}</td>'
+            f'<td>{html.escape(item.task_number)}</td>'
+            f'<td>{html.escape(item.status)}</td>'
+            f'<td>{item.rows_ok}</td>'
+            f'<td>{item.rows_rejected}</td>'
+            f'<td>{html.escape(item.imported_at)}</td>'
+            f'<td>{html.escape(item.failure_reason)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
 
 def render_admin_section(section_slug: str) -> str:
     section = _get_admin_section(section_slug)

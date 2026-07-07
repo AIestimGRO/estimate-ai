@@ -43,3 +43,8 @@ _admin_shell_review/
 admin-sources-readonly.patch
 admin-sources-readonly-files.zip
 _admin_sources_review/
+
+# Admin imports delivery artifacts
+admin-imports-readonly.patch
+admin-imports-readonly-files.zip
+_admin_imports_review/
