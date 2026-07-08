@@ -452,6 +452,7 @@ def render_admin_imports(
         f'{error_html}'
         f'{_render_file_log_import_form()}'
         f'{_render_rnmc_zip_dry_run_form()}'
+        f'{_render_rnmc_zip_import_log_form()}'
         f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
         f'{_render_imported_file_table(imports)}'
         '</section>'
@@ -485,6 +486,18 @@ def _render_rnmc_zip_dry_run_form() -> str:
         '<label>ZIP-архив РНМЦ<input type="file" name="rnmc_zip" accept=".zip" required></label>'
         '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Оставьте пустым, чтобы взять регион из папки"></label>'
         '<button type="submit">Проверить ZIP без импорта</button>'
+        '</form>'
+    )
+
+
+def _render_rnmc_zip_import_log_form() -> str:
+    return (
+        '<form class="admin-form" action="/admin/imports/rnmc-log" method="post" enctype="multipart/form-data">'
+        '<h2 class="section">Зафиксировать ZIP в журнале</h2>'
+        '<p class="muted">Эта кнопка записывает только журнал imported_files: новые файлы станут pending, уже обработанные будут skipped, дубликаты имени — duplicate_name. Строки каталога пока не добавляются.</p>'
+        '<label>ZIP-архив РНМЦ<input type="file" name="rnmc_zip" accept=".zip" required></label>'
+        '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Оставьте пустым, чтобы взять регион из папки"></label>'
+        '<button type="submit">Записать ZIP в журнал без каталога</button>'
         '</form>'
     )
 

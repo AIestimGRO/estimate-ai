@@ -32,7 +32,7 @@ from app.services.read_estimate import (
     MultipleSheetsError,
 )
 from app.services.write_result import run_and_write
-from app.services.rnmc_zip import analyze_rnmc_zip_dry_run
+from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_import_log
 from core.storage.catalog import (
     count_catalog_rows,
     import_legacy_file_log,
@@ -216,6 +216,71 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     imports,
                     notice="ZIP проверен без записи в каталог.",
                     dry_run_result=dry_run_result,
+                )
+            )
+        finally:
+            connection.close()
+
+
+    @app.post("/admin/imports/rnmc-log", response_class=HTMLResponse)
+    async def admin_imports_rnmc_log(
+        rnmc_zip: UploadFile = File(...),
+        region_override: str = Form(""),
+    ):
+        raw_name = rnmc_zip.filename or ""
+        if _safe_name(raw_name) == "":
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(
+                        imports,
+                        error="ZIP-архив РНМЦ не выбран.",
+                    ),
+                    status_code=400,
+                )
+            finally:
+                connection.close()
+
+        upload_dir = app.state.app_state.base_dir / "admin_imports"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        saved_path = _save(
+            upload_dir,
+            f"rnmc_log_{uuid.uuid4().hex}.zip",
+            await rnmc_zip.read(),
+        )
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                result = commit_rnmc_zip_import_log(
+                    connection,
+                    str(saved_path),
+                    region_override=region_override,
+                )
+            except ValueError as exc:
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(
+                        imports,
+                        error=f"Не удалось зафиксировать ZIP: {exc}",
+                    ),
+                    status_code=400,
+                )
+            imports = list_imported_files(connection)
+            message = (
+                "ZIP зафиксирован в журнале без записи строк в каталог: "
+                f"pending {result.pending_recorded}, "
+                f"skipped {result.skipped_recorded}, "
+                f"duplicate_name {result.duplicates_recorded}, "
+                f"существующие записи сохранены {result.existing_records_kept}."
+            )
+            return HTMLResponse(
+                render_admin_imports(
+                    imports,
+                    notice=message,
+                    dry_run_result=result.dry_run,
                 )
             )
         finally:

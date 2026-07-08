@@ -27,6 +27,9 @@ STATUS_NO_DATA = "no_data"
 STATUS_FAILED = "failed"
 STATUS_DUPLICATE_NAME = "duplicate_name"
 STATUS_MANUAL_CHECKED = "manual_checked"
+STATUS_PENDING = "pending"
+RNMC_ZIP_SOURCE_NAME = "rnmc_zip_upload"
+RNMC_ZIP_SOURCE_KIND = "rnmc_zip"
 PROCESSED_FILE_STATUSES = frozenset(
     {
         STATUS_LEGACY_IMPORTED,
@@ -35,6 +38,7 @@ PROCESSED_FILE_STATUSES = frozenset(
         STATUS_NO_DATA,
         STATUS_DUPLICATE_NAME,
         STATUS_MANUAL_CHECKED,
+        STATUS_PENDING,
     }
 )
 
@@ -291,6 +295,59 @@ def filename_is_processed(connection: sqlite3.Connection, filename: str) -> bool
         (key, *sorted(PROCESSED_FILE_STATUSES)),
     ).fetchone()
     return row is not None
+
+
+def imported_file_exists_for_region(
+    connection: sqlite3.Connection,
+    *,
+    region_folder: str,
+    filename: str,
+) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM imported_files
+        WHERE region_folder = ? AND filename = ?
+        LIMIT 1
+        """,
+        (_text(region_folder), _text(filename)),
+    ).fetchone()
+    return row is not None
+
+
+def record_imported_file(
+    connection: sqlite3.Connection,
+    *,
+    region_folder: str,
+    filename: str,
+    status: str,
+    rows_ok: int = 0,
+    rows_rejected: int = 0,
+    failure_reason: str = "",
+    task_number: str = "",
+    legacy_note: str = "",
+    lsr_quarter: str = "",
+    planned_start: str = "",
+    planned_finish: str = "",
+    source_name: str = RNMC_ZIP_SOURCE_NAME,
+    source_kind: str = RNMC_ZIP_SOURCE_KIND,
+) -> None:
+    source_id = _get_or_create_source(connection, source_name, kind=source_kind)
+    _record_imported_file(
+        connection,
+        source_id=source_id,
+        region_folder=region_folder,
+        filename=filename,
+        status=status,
+        rows_ok=rows_ok,
+        rows_rejected=rows_rejected,
+        failure_reason=failure_reason,
+        task_number=task_number,
+        legacy_note=legacy_note,
+        lsr_quarter=lsr_quarter,
+        planned_start=planned_start,
+        planned_finish=planned_finish,
+    )
 
 
 def normalize_import_filename(filename: str) -> str:

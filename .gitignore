@@ -86,3 +86,7 @@ _rnmc_file_log_review/
 # RNMC zip dry-run delivery artifacts
 rnmc-zip-dry-run-updated-files.zip
 _rnmc_zip_dry_run_review/
+
+# RNMC zip log delivery artifacts
+rnmc-zip-log-updated-files.zip
+_rnmc_zip_log_review/

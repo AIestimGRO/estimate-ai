@@ -13,7 +13,15 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
-from core.storage.catalog import filename_is_processed, normalize_import_filename
+from core.storage.catalog import (
+    STATUS_DUPLICATE_NAME as DB_STATUS_DUPLICATE_NAME,
+    STATUS_PENDING,
+    STATUS_SKIPPED,
+    filename_is_processed,
+    imported_file_exists_for_region,
+    normalize_import_filename,
+    record_imported_file,
+)
 
 EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm", ".xls"})
 STATUS_WILL_PROCESS = "will_process"
@@ -50,6 +58,19 @@ class RnmcZipDryRunResult:
     @property
     def duplicate_name_count(self) -> int:
         return _count_status(self.entries, STATUS_DUPLICATE_NAME)
+
+
+@dataclass(frozen=True)
+class RnmcZipImportLogResult:
+    dry_run: RnmcZipDryRunResult
+    pending_recorded: int
+    skipped_recorded: int
+    duplicates_recorded: int
+    existing_records_kept: int
+
+    @property
+    def total_recorded(self) -> int:
+        return self.pending_recorded + self.skipped_recorded + self.duplicates_recorded
 
 
 def analyze_rnmc_zip_dry_run(
@@ -106,6 +127,77 @@ def analyze_rnmc_zip_dry_run(
         raise ValueError("uploaded file is not a valid zip archive") from exc
 
     return RnmcZipDryRunResult(entries=entries, ignored_files=ignored_files)
+
+
+
+def commit_rnmc_zip_import_log(
+    connection: sqlite3.Connection,
+    zip_path: str,
+    *,
+    region_override: str = "",
+) -> RnmcZipImportLogResult:
+    """Record an RNMC zip import plan in imported_files without catalog rows.
+
+    New file names are recorded as pending. Already processed names are logged as
+    skipped only when the same region+filename row does not already exist, so a
+    later upload attempt cannot overwrite legacy FileLog history. Duplicate file
+    names inside the same zip are recorded as duplicate_name rule violations.
+    """
+    dry_run = analyze_rnmc_zip_dry_run(
+        connection,
+        zip_path,
+        region_override=region_override,
+    )
+    pending_recorded = 0
+    skipped_recorded = 0
+    duplicates_recorded = 0
+    existing_records_kept = 0
+
+    for entry in dry_run.entries:
+        if imported_file_exists_for_region(
+            connection,
+            region_folder=entry.region_folder,
+            filename=entry.filename,
+        ):
+            existing_records_kept += 1
+            continue
+
+        if entry.status == STATUS_WILL_PROCESS:
+            record_imported_file(
+                connection,
+                region_folder=entry.region_folder,
+                filename=entry.filename,
+                status=STATUS_PENDING,
+                failure_reason="Queued from RNMC zip upload; catalog rows not imported yet",
+            )
+            pending_recorded += 1
+        elif entry.status == STATUS_SKIPPED_PROCESSED:
+            record_imported_file(
+                connection,
+                region_folder=entry.region_folder,
+                filename=entry.filename,
+                status=STATUS_SKIPPED,
+                failure_reason="Skipped because filename already exists in imported_files",
+            )
+            skipped_recorded += 1
+        elif entry.status == STATUS_DUPLICATE_NAME:
+            record_imported_file(
+                connection,
+                region_folder=entry.region_folder,
+                filename=entry.filename,
+                status=DB_STATUS_DUPLICATE_NAME,
+                failure_reason="Duplicate filename inside uploaded zip",
+            )
+            duplicates_recorded += 1
+
+    connection.commit()
+    return RnmcZipImportLogResult(
+        dry_run=dry_run,
+        pending_recorded=pending_recorded,
+        skipped_recorded=skipped_recorded,
+        duplicates_recorded=duplicates_recorded,
+        existing_records_kept=existing_records_kept,
+    )
 
 
 def _normalize_archive_path(value: str) -> str:
