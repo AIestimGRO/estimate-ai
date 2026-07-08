@@ -613,6 +613,7 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
         '<th>ЛСР</th>'
         '<th>Начало</th>'
         '<th>Окончание</th>'
+        '<th>Коэф.</th>'
         '<th>OK</th>'
         '<th>Rejected</th>'
         '<th>Примеры строк</th>'
@@ -633,6 +634,7 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
             f'<td>{html.escape(entry.lsr_quarter)}</td>'
             f'<td>{html.escape(entry.planned_start)}</td>'
             f'<td>{html.escape(entry.planned_finish)}</td>'
+            f'<td>{_display_optional_number(entry.regional_coefficient)}</td>'
             f'<td>{entry.rows_ok}</td>'
             f'<td>{entry.rows_rejected}</td>'
             f'<td>{_render_rnmc_samples(entry.sample_rows)}</td>'
@@ -691,6 +693,7 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
         '<th>ЛСР</th>'
         '<th>Начало</th>'
         '<th>Окончание</th>'
+        '<th>Коэф.</th>'
         '<th>Добавлено</th>'
         '<th>Отклонено</th>'
         '</tr></thead><tbody>'
@@ -710,6 +713,7 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
             f'<td>{html.escape(entry.lsr_quarter)}</td>'
             f'<td>{html.escape(entry.planned_start)}</td>'
             f'<td>{html.escape(entry.planned_finish)}</td>'
+            f'<td>{_display_optional_number(entry.regional_coefficient)}</td>'
             f'<td>{entry.rows_imported}</td>'
             f'<td>{entry.rows_rejected}</td>'
             '</tr>'
@@ -844,6 +848,7 @@ def _render_import_detail_summary(record: ImportedFileRecord) -> str:
         ("ЛСР", record.lsr_quarter),
         ("Начало", record.planned_start),
         ("Окончание", record.planned_finish),
+        ("Региональный коэффициент", _display_optional_number(record.regional_coefficient)),
         ("Ошибка", record.failure_reason),
     ]
     body = ''.join(
@@ -863,6 +868,7 @@ def _render_import_metadata_form(record: ImportedFileRecord) -> str:
         f'<label>Год/квартал ЛСР<input type="text" name="lsr_quarter" value="{html.escape(record.lsr_quarter)}"></label>'
         f'<label>Планируемое начало<input type="text" name="planned_start" value="{html.escape(record.planned_start)}"></label>'
         f'<label>Планируемое окончание<input type="text" name="planned_finish" value="{html.escape(record.planned_finish)}"></label>'
+        f'<label>Региональный коэффициент<input type="text" name="regional_coefficient" value="{_display_optional_number(record.regional_coefficient)}"></label>'
         '<button type="submit">Сохранить данные файла</button>'
         '</form>'
     )
@@ -876,7 +882,7 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
         '<table class="preview"><thead><tr>'
         '<th>Excel row</th><th>Код</th><th>Ед.</th><th>Цена ед.</th>'
         '<th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
-        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Работа</th>'
+        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th>Работа</th>'
         '</tr></thead><tbody>'
     )
     body = []
@@ -892,6 +898,7 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
             f'<td>{_display_optional_number(row.labor_total)}</td>'
             f'<td>{_display_optional_number(row.machine_labor_unit)}</td>'
             f'<td>{_display_optional_number(row.machine_labor_total)}</td>'
+            f'<td>{_display_optional_number(row.regional_coefficient)}</td>'
             f'<td>{html.escape(row.work_name)}</td>'
             '</tr>'
         )

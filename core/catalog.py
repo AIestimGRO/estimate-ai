@@ -36,6 +36,7 @@ class CatalogRow:
     labor_total: object = None
     machine_labor_unit: object = None
     machine_labor_total: object = None
+    regional_coefficient: object = None
 
 
 @dataclass(frozen=True)

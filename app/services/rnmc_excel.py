@@ -92,6 +92,15 @@ PLANNED_FINISH_LABEL_PATTERNS = (
     "\u0414\u0430\u0442\u0430 \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
     "\u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442",
 )
+REGION_LABEL_PATTERNS = (
+    "\u0420\u0435\u0433\u0438\u043e\u043d \u0440\u0430\u0441\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u043e\u0431\u044a\u0435\u043a\u0442\u0430",
+    "\u0420\u0435\u0433\u0438\u043e\u043d \u043e\u0431\u044a\u0435\u043a\u0442\u0430",
+    "\u0420\u0435\u0433\u0438\u043e\u043d",
+)
+REGIONAL_COEFFICIENT_LABEL_PATTERNS = (
+    "\u0420\u0435\u0433\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442",
+    "\u041a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442",
+)
 
 STATUS_PREVIEW_OK = "preview_ok"
 STATUS_NO_TABLE = "no_table"
@@ -111,6 +120,8 @@ class RnmcWorkbookMetadata:
     lsr_quarter: str = ""
     planned_start: str = ""
     planned_finish: str = ""
+    region_folder: str = ""
+    regional_coefficient: float | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +145,7 @@ class RnmcWorkbookPreview:
     lsr_quarter: str
     planned_start: str
     planned_finish: str
+    regional_coefficient: float | None
     rows_ok: int
     rows_rejected: int
     sample_rows: list[RnmcRowSample]
@@ -210,6 +222,7 @@ class RnmcZipCatalogImportEntry:
     lsr_quarter: str
     planned_start: str
     planned_finish: str
+    regional_coefficient: float | None
     rows_imported: int
     rows_rejected: int
 
@@ -310,7 +323,13 @@ def analyze_rnmc_zip_row_preview(
                 else:
                     try:
                         data = archive.read(info)
-                        entries.append(_preview_workbook_bytes(data, path, filename, region))
+                        entries.append(_preview_workbook_bytes(
+                            data,
+                            path,
+                            filename,
+                            region,
+                            allow_metadata_region=manual_region == "",
+                        ))
                     except Exception as exc:  # pragma: no cover - defensive UI boundary
                         entries.append(
                             _empty_preview(
@@ -402,6 +421,7 @@ def import_rnmc_zip_catalog_rows(
                             path,
                             filename,
                             region,
+                            allow_metadata_region=manual_region == "",
                         )
                     except Exception as exc:  # pragma: no cover - defensive UI boundary
                         entry = _record_non_imported_file(
@@ -427,10 +447,13 @@ def _import_workbook_bytes(
     archive_path: str,
     filename: str,
     region_folder: str,
+    *,
+    allow_metadata_region: bool = True,
 ) -> RnmcZipCatalogImportEntry:
     workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
         metadata = _extract_workbook_metadata(workbook)
+        resolved_region = _resolve_workbook_region(region_folder, metadata, allow_metadata_region)
         task_number = _extract_task_number(workbook)
         for sheet in workbook.worksheets:
             header = _find_header_row(sheet)
@@ -440,14 +463,15 @@ def _import_workbook_bytes(
                 sheet,
                 header,
                 task_number,
-                region_folder,
+                resolved_region,
                 filename,
+                metadata.regional_coefficient,
             )
             rejected = len(rejected_rows)
             if not rows:
                 file_id = record_imported_file(
                     connection,
-                    region_folder=region_folder,
+                    region_folder=resolved_region,
                     filename=filename,
                     status=STATUS_NO_DATA,
                     rows_ok=0,
@@ -457,6 +481,7 @@ def _import_workbook_bytes(
                     lsr_quarter=metadata.lsr_quarter,
                     planned_start=metadata.planned_start,
                     planned_finish=metadata.planned_finish,
+                    regional_coefficient=metadata.regional_coefficient,
                 )
                 replace_import_row_logs(
                     connection,
@@ -469,7 +494,7 @@ def _import_workbook_bytes(
                 return _import_entry(
                     archive_path,
                     filename,
-                    region_folder,
+                    resolved_region,
                     STATUS_NO_DATA,
                     "Header found, but no valid catalog rows",
                     sheet_name=str(sheet.title),
@@ -478,6 +503,7 @@ def _import_workbook_bytes(
                     lsr_quarter=metadata.lsr_quarter,
                     planned_start=metadata.planned_start,
                     planned_finish=metadata.planned_finish,
+                    regional_coefficient=metadata.regional_coefficient,
                     rows_rejected=rejected,
                 )
 
@@ -486,18 +512,18 @@ def _import_workbook_bytes(
                 [
                     CatalogRowStorageItem(
                         catalog_row=row.catalog_row,
-                        source_region_folder=region_folder,
+                        source_region_folder=resolved_region,
                         source_filename=filename,
                         source_row_number=row.row_number,
                     )
                     for row in rows
                 ],
-                region_folder=region_folder,
+                region_folder=resolved_region,
                 filename=filename,
             )
             file_id = record_imported_file(
                 connection,
-                region_folder=region_folder,
+                region_folder=resolved_region,
                 filename=filename,
                 status=STATUS_SUCCESS,
                 rows_ok=result.rows_imported,
@@ -507,6 +533,7 @@ def _import_workbook_bytes(
                 lsr_quarter=metadata.lsr_quarter,
                 planned_start=metadata.planned_start,
                 planned_finish=metadata.planned_finish,
+                regional_coefficient=metadata.regional_coefficient,
             )
             replace_import_row_logs(
                 connection,
@@ -519,7 +546,7 @@ def _import_workbook_bytes(
             return _import_entry(
                 archive_path,
                 filename,
-                region_folder,
+                resolved_region,
                 STATUS_SUCCESS,
                 "Catalog rows imported",
                 sheet_name=str(sheet.title),
@@ -528,13 +555,14 @@ def _import_workbook_bytes(
                 lsr_quarter=metadata.lsr_quarter,
                 planned_start=metadata.planned_start,
                 planned_finish=metadata.planned_finish,
+                regional_coefficient=metadata.regional_coefficient,
                 rows_imported=result.rows_imported,
                 rows_rejected=rejected + result.rows_skipped,
             )
 
         file_id = record_imported_file(
             connection,
-            region_folder=region_folder,
+            region_folder=resolved_region,
             filename=filename,
             status=STATUS_NO_DATA,
             rows_ok=0,
@@ -544,18 +572,20 @@ def _import_workbook_bytes(
             lsr_quarter=metadata.lsr_quarter,
             planned_start=metadata.planned_start,
             planned_finish=metadata.planned_finish,
+            regional_coefficient=metadata.regional_coefficient,
         )
         replace_import_row_logs(connection, file_id, [])
         return _import_entry(
             archive_path,
             filename,
-            region_folder,
+            resolved_region,
             STATUS_NO_DATA,
             "Required headers were not found",
             task_number=task_number,
             lsr_quarter=metadata.lsr_quarter,
             planned_start=metadata.planned_start,
             planned_finish=metadata.planned_finish,
+            regional_coefficient=metadata.regional_coefficient,
         )
     finally:
         workbook.close()
@@ -567,6 +597,7 @@ def _extract_catalog_row_candidates(
     task_number: str,
     region_folder: str,
     filename: str,
+    regional_coefficient: float | None = None,
 ) -> tuple[list[RnmcCatalogRowCandidate], list[RnmcRejectedRow]]:
     num_col = _find_numbering_col(header.header_map) or 1
     code_col = _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)
@@ -638,6 +669,7 @@ def _extract_catalog_row_candidates(
             machine_labor_total=_parse_optional_value(
                 _cell_value(sheet, row_number, value_columns.machine_labor_total_col)
             ),
+            regional_coefficient=regional_coefficient,
         )
         issue = _catalog_row_issue(catalog_row)
         if issue != "":
@@ -682,6 +714,7 @@ def _import_entry(
     lsr_quarter: str = "",
     planned_start: str = "",
     planned_finish: str = "",
+    regional_coefficient: float | None = None,
     rows_imported: int = 0,
     rows_rejected: int = 0,
 ) -> RnmcZipCatalogImportEntry:
@@ -697,6 +730,7 @@ def _import_entry(
         lsr_quarter=lsr_quarter,
         planned_start=planned_start,
         planned_finish=planned_finish,
+        regional_coefficient=regional_coefficient,
         rows_imported=rows_imported,
         rows_rejected=rows_rejected,
     )
@@ -707,10 +741,13 @@ def _preview_workbook_bytes(
     archive_path: str,
     filename: str,
     region_folder: str,
+    *,
+    allow_metadata_region: bool = True,
 ) -> RnmcWorkbookPreview:
     workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
         metadata = _extract_workbook_metadata(workbook)
+        resolved_region = _resolve_workbook_region(region_folder, metadata, allow_metadata_region)
         task_number = _extract_task_number(workbook)
         for sheet in workbook.worksheets:
             header = _find_header_row(sheet)
@@ -722,7 +759,7 @@ def _preview_workbook_bytes(
             return RnmcWorkbookPreview(
                 archive_path=archive_path,
                 filename=filename,
-                region_folder=region_folder,
+                region_folder=resolved_region,
                 status=status,
                 reason=reason,
                 sheet_name=str(sheet.title),
@@ -731,6 +768,7 @@ def _preview_workbook_bytes(
                 lsr_quarter=metadata.lsr_quarter,
                 planned_start=metadata.planned_start,
                 planned_finish=metadata.planned_finish,
+                regional_coefficient=metadata.regional_coefficient,
                 rows_ok=rows_ok,
                 rows_rejected=rows_rejected,
                 sample_rows=samples,
@@ -739,13 +777,14 @@ def _preview_workbook_bytes(
         return _empty_preview(
             archive_path,
             filename,
-            region_folder,
+            resolved_region,
             STATUS_NO_TABLE,
             "Required headers were not found",
             task_number=task_number,
             lsr_quarter=metadata.lsr_quarter,
             planned_start=metadata.planned_start,
             planned_finish=metadata.planned_finish,
+            regional_coefficient=metadata.regional_coefficient,
         )
     finally:
         workbook.close()
@@ -875,6 +914,8 @@ def _extract_workbook_metadata(workbook) -> RnmcWorkbookMetadata:
     lsr_quarter = ""
     planned_start = ""
     planned_finish = ""
+    region_folder = ""
+    regional_coefficient: float | None = None
     for sheet in workbook.worksheets:
         if lsr_quarter == "":
             lsr_quarter = _find_metadata_value(
@@ -894,6 +935,10 @@ def _extract_workbook_metadata(workbook) -> RnmcWorkbookMetadata:
                 PLANNED_FINISH_LABEL_PATTERNS,
                 value_kind="date",
             )
+        if region_folder == "":
+            region_folder = _find_region_metadata_value(sheet)
+        if regional_coefficient is None:
+            regional_coefficient = _find_regional_coefficient_metadata_value(sheet)
 
         context = _find_metadata_context(sheet)
         if lsr_quarter == "":
@@ -902,12 +947,24 @@ def _extract_workbook_metadata(workbook) -> RnmcWorkbookMetadata:
             planned_start = context.planned_start
         if planned_finish == "":
             planned_finish = context.planned_finish
-        if lsr_quarter and planned_start and planned_finish:
+        if region_folder == "":
+            region_folder = context.region_folder
+        if regional_coefficient is None:
+            regional_coefficient = context.regional_coefficient
+        if (
+            lsr_quarter
+            and planned_start
+            and planned_finish
+            and region_folder
+            and regional_coefficient is not None
+        ):
             break
     return RnmcWorkbookMetadata(
         lsr_quarter=lsr_quarter,
         planned_start=planned_start,
         planned_finish=planned_finish,
+        region_folder=region_folder,
+        regional_coefficient=regional_coefficient,
     )
 
 
@@ -938,6 +995,104 @@ def _find_metadata_value(
                 if formatted:
                     return formatted
     return ""
+
+
+def _find_region_metadata_value(sheet: Worksheet) -> str:
+    normalized_patterns = tuple(_normalize_header(pattern) for pattern in REGION_LABEL_PATTERNS)
+    max_row = min(int(sheet.max_row or 0), 180)
+    max_col = min(int(sheet.max_column or 0), 80)
+    for row_number in range(1, max_row + 1):
+        for col_number in range(1, max_col + 1):
+            value = sheet.cell(row_number, col_number).value
+            normalized = _normalize_header(value)
+            if normalized == "" or not _region_label_matches(normalized, normalized_patterns):
+                continue
+            inline = _metadata_inline_value(value)
+            formatted = _format_region_metadata(inline)
+            if formatted:
+                return formatted
+            for candidate in _metadata_neighbor_values(sheet, row_number, col_number, max_row, max_col):
+                formatted = _format_region_metadata(candidate)
+                if formatted:
+                    return formatted
+    return ""
+
+
+def _find_regional_coefficient_metadata_value(sheet: Worksheet) -> float | None:
+    normalized_patterns = tuple(
+        _normalize_header(pattern) for pattern in REGIONAL_COEFFICIENT_LABEL_PATTERNS
+    )
+    max_row = min(int(sheet.max_row or 0), 180)
+    max_col = min(int(sheet.max_column or 0), 80)
+    for row_number in range(1, max_row + 1):
+        for col_number in range(1, max_col + 1):
+            value = sheet.cell(row_number, col_number).value
+            normalized = _normalize_header(value)
+            if normalized == "" or not _coefficient_label_matches(normalized, normalized_patterns):
+                continue
+            inline = _metadata_inline_value(value)
+            formatted = _format_coefficient_metadata(inline)
+            if formatted is not None:
+                return formatted
+            for candidate in _metadata_neighbor_values(sheet, row_number, col_number, max_row, max_col):
+                formatted = _format_coefficient_metadata(candidate)
+                if formatted is not None:
+                    return formatted
+    return None
+
+
+def _region_label_matches(normalized: str, normalized_patterns: tuple[str, ...]) -> bool:
+    if "\u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442" in normalized:
+        return False
+    for pattern in normalized_patterns:
+        if pattern == "":
+            continue
+        if normalized == pattern:
+            return True
+        if pattern != "\u0440\u0435\u0433\u0438\u043e\u043d" and pattern in normalized:
+            return True
+    return False
+
+
+def _coefficient_label_matches(normalized: str, normalized_patterns: tuple[str, ...]) -> bool:
+    for pattern in normalized_patterns:
+        if pattern and pattern in normalized:
+            return True
+    return False
+
+
+def _format_region_metadata(value: object) -> str:
+    text = _text(value)
+    if text == "":
+        return ""
+    if _parse_number(text) is not None:
+        return ""
+    normalized = " ".join(text.replace("\u00a0", " ").split())
+    folded = normalized.casefold()
+    if (
+        "\u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442" in folded
+        or folded in {"\u0440\u0435\u0433\u0438\u043e\u043d", "\u0440\u0435\u0433\u0438\u043e\u043d \u043e\u0431\u044a\u0435\u043a\u0442\u0430", "\u0440\u0435\u0433\u0438\u043e\u043d \u0440\u0430\u0441\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u043e\u0431\u044a\u0435\u043a\u0442\u0430"}
+        or "\u0434\u0430\u043d\u043d\u044b\u0435 \u0434\u043b\u044f \u043a\u043e\u043d\u0441\u043e\u043b\u0438\u0434\u0430\u0446\u0438\u0438" in folded
+    ):
+        return ""
+    return normalized
+
+
+def _format_coefficient_metadata(value: object) -> float | None:
+    number = _parse_number(value)
+    if number is None or number <= 0:
+        return None
+    return number
+
+
+def _resolve_workbook_region(
+    default_region: str,
+    metadata: RnmcWorkbookMetadata,
+    allow_metadata_region: bool,
+) -> str:
+    if allow_metadata_region and metadata.region_folder:
+        return metadata.region_folder
+    return default_region
 
 
 def _metadata_label_matches(normalized: str, normalized_patterns: tuple[str, ...]) -> bool:
@@ -1042,6 +1197,8 @@ def _find_metadata_context(sheet: Worksheet) -> RnmcWorkbookMetadata:
     lsr_quarter = ""
     planned_start = ""
     planned_finish = ""
+    region_folder = ""
+    regional_coefficient: float | None = None
     max_row = min(int(sheet.max_row or 0), 180)
     max_col = min(int(sheet.max_column or 0), 80)
     for row_number in range(1, max_row + 1):
@@ -1055,13 +1212,53 @@ def _find_metadata_context(sheet: Worksheet) -> RnmcWorkbookMetadata:
             start, finish = _parse_month_period_context(text)
             planned_start = planned_start or start
             planned_finish = planned_finish or finish
-        if lsr_quarter and planned_start and planned_finish:
+        if region_folder == "":
+            region_folder = _parse_region_context(text)
+        if regional_coefficient is None:
+            regional_coefficient = _parse_coefficient_context(text)
+        if (
+            lsr_quarter
+            and planned_start
+            and planned_finish
+            and region_folder
+            and regional_coefficient is not None
+        ):
             break
     return RnmcWorkbookMetadata(
         lsr_quarter=lsr_quarter,
         planned_start=planned_start,
         planned_finish=planned_finish,
+        region_folder=region_folder,
+        regional_coefficient=regional_coefficient,
     )
+
+
+def _parse_region_context(value: object) -> str:
+    text = _text(value)
+    if text == "":
+        return ""
+    match = re.search(
+        r"(?:\u0440\u0435\u0433\u0438\u043e\u043d(?:\s+\u0440\u0430\u0441\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u044f\s+\u043e\u0431\u044a\u0435\u043a\u0442\u0430|\s+\u043e\u0431\u044a\u0435\u043a\u0442\u0430)?)\s*[:=\-\u2014]\s*(?P<region>[^;,.]+)",
+        text.replace("\u00a0", " "),
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return ""
+    return _format_region_metadata(match.group("region"))
+
+
+def _parse_coefficient_context(value: object) -> float | None:
+    text = _text(value)
+    if text == "":
+        return None
+    match = re.search(
+        r"(?:\u0440\u0435\u0433\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0439\s+\u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442|\u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442)\s*[:=\-\u2014]\s*(?P<value>[0-9]+(?:[,.][0-9]+)?)",
+        text.replace("\u00a0", " "),
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return _format_coefficient_metadata(match.group("value"))
 
 
 def _parse_quarter_context(value: object) -> str:
@@ -1519,6 +1716,7 @@ def _empty_preview(
     lsr_quarter: str = "",
     planned_start: str = "",
     planned_finish: str = "",
+    regional_coefficient: float | None = None,
 ) -> RnmcWorkbookPreview:
     return RnmcWorkbookPreview(
         archive_path=archive_path,
@@ -1532,6 +1730,7 @@ def _empty_preview(
         lsr_quarter=lsr_quarter,
         planned_start=planned_start,
         planned_finish=planned_finish,
+        regional_coefficient=regional_coefficient,
         rows_ok=0,
         rows_rejected=0,
         sample_rows=[],

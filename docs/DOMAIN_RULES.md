@@ -227,7 +227,9 @@ Labor import mappings are deterministic: `ТЗ` and `ТЗр` unit/total values m
 `labor_unit` / `labor_total`; `ТЗм` unit/total values map to
 `machine_labor_unit` / `machine_labor_total`. Formula cells are read as cached
 calculated values, and numeric strings with comma or dot decimal separators are
-normalized to SQLite numeric values.
+normalized to SQLite numeric values. File-level regional coefficient from RNMC
+consolidation metadata is stored as metadata and copied to imported catalog rows;
+it does not modify stored catalog prices.
 
 ## 7. Name exclusion rules (Module7)
 
@@ -439,10 +441,12 @@ reinterpret them.
    - Rejected rows are written to `import_row_log` with Excel row number and a
      reason, not silently dropped.
 
-4. **Region comes from the immediate parent folder, with manual override.**
-   - Default region is the immediate parent folder inside the ZIP archive.
-   - The admin UI may override the region manually for an upload action.
-   - Automatic region detection from workbook content is deferred.
+4. **Region comes from manual override, workbook metadata, then ZIP folder.**
+   - Manual upload override has highest priority and applies to all files in the upload action.
+   - Without manual override, newer RNMC workbook labels such as `Регион расположения объекта`, `Регион объекта`, or `Регион` can supply the region.
+   - If workbook region is not detected, the immediate parent folder inside the ZIP archive is used.
+   - Detected region is stored on `imported_files.region_folder` and copied to imported catalog rows.
+   - `Региональный коэффициент` / `Коэффициент` is stored as metadata and copied to imported catalog rows, but catalog prices are not multiplied by it.
 
 5. **One task number per file and first matching worksheet are kept.**
    - The parser extracts one task number per workbook.

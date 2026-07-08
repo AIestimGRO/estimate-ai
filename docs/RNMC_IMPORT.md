@@ -14,7 +14,7 @@ Implemented in the `feature/admin-ui` branch:
 - real ZIP import into `catalog_items`;
 - import control center in `/admin/imports`;
 - per-file detail pages with catalog rows and rejected-row logs;
-- automatic detection of `lsr_quarter`, planned start, and planned finish from `.xlsx` / `.xlsm` workbooks;
+- automatic detection of `lsr_quarter`, planned start, planned finish, object region, and regional coefficient from `.xlsx` / `.xlsm` workbooks;
 - strict mapping of RNMC value columns: unit price, total cost, and labor columns;
 - manual metadata edits and retry unlock for `failed` / `no_data` records.
 
@@ -66,7 +66,7 @@ log are marked as `duplicate_name` after the first occurrence.
 
 ## Region handling
 
-Default region = immediate parent folder inside the ZIP.
+Default region = immediate parent folder inside the ZIP, unless a workbook consolidation block provides an object region.
 
 Example:
 
@@ -77,10 +77,13 @@ upload.zip
 ```
 
 The admin UI also accepts a manual region override. When provided, it applies to
-all files in that upload action.
+all files in that upload action and wins over workbook-detected region values.
 
-Future work may add automatic region detection from workbook content, but folder
-name remains the current default convention.
+For newer RNMC templates, the parser can read workbook labels such as `Регион
+расположения объекта`, `Регион объекта`, or `Регион`. When found and no manual
+override is provided, this value is used as the imported file region and copied
+to imported catalog rows. If no workbook region is detected, the ZIP folder name
+remains the fallback.
 
 ## Workbook parsing rules
 
@@ -90,8 +93,8 @@ The parser mirrors the legacy VBA importer where possible:
 - required logical headers: work name, unit, and quantity;
 - supported unit headers include `Ед.изм.`, `Ед.изм`, and `Единица измерения`;
 - extracts one task number per workbook from `№ задачи 1Ф` / `№ задачи`;
-- scans the first 120 rows and 60 columns for metadata labels such as
-  `Год Квартал ЛСР`, planned start, and planned finish;
+- scans the first rows/columns for metadata labels such as `Год Квартал ЛСР`,
+  planned start, planned finish, object region, and regional coefficient;
 - reads the first worksheet that has a matching header and accepted rows;
 - stops after 3 consecutive blank rows across number/name/unit/quantity;
 - ignores temporary Excel lock files starting with `~$`;
@@ -105,7 +108,9 @@ and real import:
 
 - `lsr_quarter`;
 - `planned_start`;
-- `planned_finish`.
+- `planned_finish`;
+- `region_folder`;
+- `regional_coefficient`.
 
 Detection is intentionally conservative and deterministic. It looks for known
 Russian labels in the workbook, then reads an inline value after a separator or
@@ -116,6 +121,13 @@ normalized to `2026 Q1`, `2025 Q4`, and `2025 Q2`. Legacy note text such as
 сентябрь 2026 г.` are also parsed. Month-only periods are stored as the first
 day of the month in ISO format. Excel serial date values near start/finish
 labels are converted to ISO dates.
+
+Newer consolidation blocks are also parsed. Region labels such as `Регион
+расположения объекта`, `Регион объекта`, or `Регион` can override the ZIP folder
+when no manual region override is supplied. `Региональный коэффициент` /
+`Коэффициент` is parsed as a numeric value with comma or dot decimals, stored on
+`imported_files.regional_coefficient`, and copied to imported
+`catalog_items.regional_coefficient` rows.
 
 Manual editing remains available on the import detail page because real RNMC
 layouts may require further iterations and additional label patterns.

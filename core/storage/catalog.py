@@ -82,6 +82,7 @@ class ImportedFileRecord:
     lsr_quarter: str
     planned_start: str
     planned_finish: str
+    regional_coefficient: float | None
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ class CatalogItemRecord:
     labor_total: float | None
     machine_labor_unit: float | None
     machine_labor_total: float | None
+    regional_coefficient: float | None
     source_row_number: int
 
 
@@ -213,7 +215,8 @@ def _imported_file_records_from_query(
             imported_files.legacy_note,
             imported_files.lsr_quarter,
             imported_files.planned_start,
-            imported_files.planned_finish
+            imported_files.planned_finish,
+            imported_files.regional_coefficient
         FROM imported_files
         LEFT JOIN catalog_sources ON catalog_sources.id = imported_files.source_id
         {where}
@@ -239,6 +242,7 @@ def _imported_file_records_from_query(
             lsr_quarter=str(row["lsr_quarter"]),
             planned_start=str(row["planned_start"]),
             planned_finish=str(row["planned_finish"]),
+            regional_coefficient=_optional_float(row["regional_coefficient"]),
         )
         for row in rows
     ]
@@ -255,7 +259,7 @@ def list_catalog_rows(
         SELECT
             task_id, region, code, unit, work_name, price, added_date,
             total_price, labor_unit, labor_total,
-            machine_labor_unit, machine_labor_total
+            machine_labor_unit, machine_labor_total, regional_coefficient
         FROM catalog_items
         WHERE source_id = ?
         ORDER BY id
@@ -424,6 +428,7 @@ def record_imported_file(
     lsr_quarter: str = "",
     planned_start: str = "",
     planned_finish: str = "",
+    regional_coefficient: object = None,
     source_name: str = RNMC_ZIP_SOURCE_NAME,
     source_kind: str = RNMC_ZIP_SOURCE_KIND,
 ) -> int:
@@ -442,6 +447,7 @@ def record_imported_file(
         lsr_quarter=lsr_quarter,
         planned_start=planned_start,
         planned_finish=planned_finish,
+        regional_coefficient=regional_coefficient,
     )
 
 
@@ -463,6 +469,7 @@ def update_imported_file_metadata(
     lsr_quarter: str,
     planned_start: str,
     planned_finish: str,
+    regional_coefficient: object = None,
 ) -> bool:
     cursor = connection.execute(
         """
@@ -471,7 +478,8 @@ def update_imported_file_metadata(
             task_number = ?,
             lsr_quarter = ?,
             planned_start = ?,
-            planned_finish = ?
+            planned_finish = ?,
+            regional_coefficient = ?
         WHERE id = ?
         """,
         (
@@ -480,6 +488,7 @@ def update_imported_file_metadata(
             _text(lsr_quarter),
             _text(planned_start),
             _text(planned_finish),
+            _parse_optional_number(regional_coefficient),
             int(import_id),
         ),
     )
@@ -524,6 +533,7 @@ def list_catalog_items_for_imported_file(
             catalog_items.labor_total,
             catalog_items.machine_labor_unit,
             catalog_items.machine_labor_total,
+            catalog_items.regional_coefficient,
             catalog_items.source_row_number
         FROM catalog_items
         WHERE catalog_items.source_region_folder = ?
@@ -549,6 +559,7 @@ def list_catalog_items_for_imported_file(
             labor_total=_optional_float(row["labor_total"]),
             machine_labor_unit=_optional_float(row["machine_labor_unit"]),
             machine_labor_total=_optional_float(row["machine_labor_total"]),
+            regional_coefficient=_optional_float(row["regional_coefficient"]),
             source_row_number=int(row["source_row_number"]),
         )
         for row in rows
@@ -651,6 +662,7 @@ def replace_catalog_rows_for_file(
                 _parse_optional_number(row.labor_total),
                 _parse_optional_number(row.machine_labor_unit),
                 _parse_optional_number(row.machine_labor_total),
+                _parse_optional_number(row.regional_coefficient),
                 _serialize_date(row.added_date),
                 _text(item.source_region_folder),
                 _text(item.source_filename),
@@ -664,9 +676,9 @@ def replace_catalog_rows_for_file(
             INSERT INTO catalog_items (
                 source_id, task_id, region, code, unit, work_name, price,
                 total_price, labor_unit, labor_total, machine_labor_unit,
-                machine_labor_total, added_date, source_region_folder,
+                machine_labor_total, regional_coefficient, added_date, source_region_folder,
                 source_filename, source_row_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             payload[offset : offset + BATCH_SIZE],
         )
@@ -864,14 +876,15 @@ def _record_imported_file(
     lsr_quarter: str = "",
     planned_start: str = "",
     planned_finish: str = "",
+    regional_coefficient: object = None,
 ) -> int:
     connection.execute(
         """
         INSERT INTO imported_files (
             source_id, region_folder, filename, status, task_number,
             rows_ok, rows_rejected, failure_reason, filename_key, legacy_note,
-            lsr_quarter, planned_start, planned_finish
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            lsr_quarter, planned_start, planned_finish, regional_coefficient
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(region_folder, filename) DO UPDATE SET
             source_id = excluded.source_id,
             status = excluded.status,
@@ -884,7 +897,8 @@ def _record_imported_file(
             legacy_note = excluded.legacy_note,
             lsr_quarter = excluded.lsr_quarter,
             planned_start = excluded.planned_start,
-            planned_finish = excluded.planned_finish
+            planned_finish = excluded.planned_finish,
+            regional_coefficient = excluded.regional_coefficient
         """,
         (
             source_id,
@@ -900,6 +914,7 @@ def _record_imported_file(
             lsr_quarter,
             planned_start,
             planned_finish,
+            _parse_optional_number(regional_coefficient),
         ),
     )
     row = connection.execute(
@@ -940,6 +955,7 @@ def _row_to_catalog_row(row: sqlite3.Row) -> CatalogRow:
         labor_total=row["labor_total"],
         machine_labor_unit=row["machine_labor_unit"],
         machine_labor_total=row["machine_labor_total"],
+        regional_coefficient=row["regional_coefficient"],
     )
 
 

@@ -76,6 +76,8 @@ flow.
   unlock for `failed` / `no_data`.
 - RNMC value mapping for unit price without VAT, total cost without VAT, and
   labor columns, including VAT normalization and average-value exclusion.
+- RNMC consolidation metadata detection for object region and regional
+  coefficient, with manual region override priority.
 
 See `docs/RNMC_IMPORT.md` for the import specification.
 
@@ -99,15 +101,15 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - [x] Initial automatic detection of `lsr_quarter`, planned start, and planned
   finish from RNMC workbooks.
 - [x] Strict RNMC value-column mapping with VAT normalization and labor fields.
+- [x] RNMC consolidation metadata detection for region and regional coefficient.
 
 ## Next milestone — RNMC import quality automation
 
-1. Add regional coefficient extraction/storage from the RNMC consolidation block.
-2. Improve rejected-row diagnostics and export/download of rejected rows.
-3. Add `.xls` support if real incoming files still require it.
-4. Decide whether to store original uploaded workbooks for true one-click retry
+1. Improve rejected-row diagnostics and export/download of rejected rows.
+2. Add `.xls` support if real incoming files still require it.
+3. Decide whether to store original uploaded workbooks for true one-click retry
    without re-uploading the ZIP.
-5. Add a duplicate-name review workflow for `duplicate_name` records.
+4. Add a duplicate-name review workflow for `duplicate_name` records.
 
 ## Later web service path
 

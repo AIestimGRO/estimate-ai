@@ -164,6 +164,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         lsr_quarter: str = Form(""),
         planned_start: str = Form(""),
         planned_finish: str = Form(""),
+        regional_coefficient: str = Form(""),
     ) -> RedirectResponse:
         connection = connect(default_database_path())
         try:
@@ -177,6 +178,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     lsr_quarter=lsr_quarter,
                     planned_start=planned_start,
                     planned_finish=planned_finish,
+                    regional_coefficient=regional_coefficient,
                 )
             except Exception as exc:
                 return RedirectResponse(

@@ -21,7 +21,8 @@ Implemented product flows:
   in `/admin`.
 - Import legacy `File_Log.xlsx` records into `imported_files`.
 - Upload RNMC ZIP archives, run dry-run checks, preview workbook rows, import
-  valid rows into `catalog_items`, and inspect per-file import details.
+  valid rows into `catalog_items`, detect workbook metadata, and inspect
+  per-file import details.
 - Approve price risks into `gesn_exceptions`.
 - Edit task color entries and name exclusion rules from the admin UI.
 

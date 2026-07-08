@@ -114,3 +114,7 @@ _rnmc_metadata_auto_detect_review/
 # RNMC strict value mapping delivery artifacts
 rnmc-strict-value-mapping-updated-files.zip
 _rnmc_strict_value_mapping_review/
+
+# RNMC consolidation metadata delivery artifacts
+rnmc-consolidation-metadata-updated-files.zip
+_rnmc_consolidation_metadata_review/

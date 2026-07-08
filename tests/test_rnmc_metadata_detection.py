@@ -200,3 +200,87 @@ def _workbook_with_serial_date_metadata() -> bytes:
     sheet.append([None, None, None, None])
     sheet.append([None, None, None, None])
     return _to_bytes(workbook)
+
+
+def test_consolidation_region_and_coefficient_are_detected_and_stored(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"FolderRegion/consolidation.xlsx": _workbook_with_consolidation_metadata()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        preview = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+        import_result = import_rnmc_zip_catalog_rows(connection, str(zip_path))
+        record = next(
+            item for item in list_imported_files(connection) if item.filename == "consolidation.xlsx"
+        )
+        from core.storage.catalog import RNMC_ZIP_SOURCE_NAME, list_catalog_rows
+
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+
+    preview_entry = preview.entries[0]
+    assert preview_entry.region_folder == "Якутия"
+    assert preview_entry.regional_coefficient == 1.4
+    assert import_result.success_count == 1
+    import_entry = import_result.entries[0]
+    assert import_entry.region_folder == "Якутия"
+    assert import_entry.regional_coefficient == 1.4
+    assert record.region_folder == "Якутия"
+    assert record.regional_coefficient == 1.4
+    assert len(rows) == 1
+    assert rows[0].region == "Якутия"
+    assert rows[0].regional_coefficient == 1.4
+
+
+def test_manual_region_override_wins_over_workbook_region(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"FolderRegion/manual-region.xlsx": _workbook_with_consolidation_metadata()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        preview = analyze_rnmc_zip_row_preview(
+            connection,
+            str(zip_path),
+            region_override="ManualRegion",
+        )
+    finally:
+        connection.close()
+
+    entry = preview.entries[0]
+    assert entry.region_folder == "ManualRegion"
+    assert entry.regional_coefficient == 1.4
+
+
+def _workbook_with_consolidation_metadata() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-CONSOLIDATION"
+    sheet["A2"] = "Данные для консолидации:"
+    sheet["A3"] = "Регион расположения объекта:"
+    sheet["B3"] = "Якутия"
+    sheet["A4"] = "Региональный коэффициент:"
+    sheet["B4"] = "1,4"
+    sheet["A5"] = "Год/квартал ЛСР"
+    sheet["B5"] = "IV кв.2025 г."
+    sheet["A6"] = "начало работ:"
+    sheet["B6"] = 46204
+    sheet["A7"] = "окончание работ:"
+    sheet["B7"] = 46266
+    sheet.append([])
+    sheet.append([
+        "№ п/п",
+        "Наименование работ",
+        "Единица измерения",
+        "Кол-во",
+        "ГЭСН/ФЕР/Перечень",
+        "Цена единицы работ, руб. без НДС",
+    ])
+    sheet.append([1, "Work A", "м", 10, "GESN01-01-001-01", 100])
+    sheet.append([None, None, None, None, None, None])
+    sheet.append([None, None, None, None, None, None])
+    sheet.append([None, None, None, None, None, None])
+    return _to_bytes(workbook)
