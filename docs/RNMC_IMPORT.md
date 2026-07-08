@@ -14,6 +14,7 @@ Implemented in the `feature/admin-ui` branch:
 - real ZIP import into `catalog_items`;
 - import control center in `/admin/imports`;
 - per-file detail pages with catalog rows and rejected-row logs;
+- automatic detection of `lsr_quarter`, planned start, and planned finish from `.xlsx` / `.xlsm` workbooks;
 - manual metadata edits and retry unlock for `failed` / `no_data` records.
 
 ## File identity and duplicates
@@ -56,11 +57,11 @@ log are marked as `duplicate_name` after the first occurrence.
    as `skipped`, and duplicate names as `duplicate_name`. No catalog rows are
    imported.
 3. **Row preview** — opens `.xlsx` / `.xlsm` files and shows detected rows,
-   task number, sheet name, header row, and rejected counts. No catalog rows are
-   imported.
+   task number, workbook metadata, sheet name, header row, and rejected counts.
+   No catalog rows are imported.
 4. **Import rows into catalog** — validates and writes accepted rows to
-   `catalog_items`, updates `imported_files`, and writes rejected-row details to
-   `import_row_log`.
+   `catalog_items`, updates `imported_files`, stores detected workbook metadata,
+   and writes rejected-row details to `import_row_log`.
 
 ## Region handling
 
@@ -87,11 +88,31 @@ The parser mirrors the legacy VBA importer where possible:
 - scans up to 400 rows and 150 columns for a header row;
 - required logical headers: work name, unit, and quantity;
 - extracts one task number per workbook from `№ задачи 1Ф` / `№ задачи`;
+- scans the first 120 rows and 60 columns for metadata labels such as
+  `Год Квартал ЛСР`, planned start, and planned finish;
 - reads the first worksheet that has a matching header and accepted rows;
 - stops after 3 consecutive blank rows across number/name/unit/quantity;
 - ignores temporary Excel lock files starting with `~$`;
 - `.xlsx` and `.xlsm` are supported for preview/import;
 - `.xls` is discovered as an Excel file, but detailed parsing is deferred.
+
+## Metadata detection
+
+The RNMC parser now detects and stores workbook-level metadata during preview
+and real import:
+
+- `lsr_quarter`;
+- `planned_start`;
+- `planned_finish`.
+
+Detection is intentionally conservative and deterministic. It looks for known
+Russian labels in the workbook, then reads an inline value after a separator or
+nearby values to the right / below the label. Parseable dates are normalized to
+ISO format (`YYYY-MM-DD`). Quarter values such as `1 квартал 2026` are
+normalized to `2026 Q1`.
+
+Manual editing remains available on the import detail page because real RNMC
+layouts may require further iterations and additional label patterns.
 
 ## Catalog row validation
 
@@ -142,8 +163,8 @@ original uploaded Excel files in a durable file store.
 
 ## Deferred improvements
 
-- automatic extraction of `lsr_quarter`, planned start, and planned finish from
-  real RNMC workbooks;
+- expand metadata label patterns based on real RNMC files that are not detected
+  yet;
 - `.xls` reader support;
 - durable storage of source files for one-click retry;
 - richer duplicate-name review UI;

@@ -7,10 +7,10 @@
 
 ## RNMC import — next decisions and improvements
 
-1. **Auto-detect `lsr_quarter`, planned start, and planned finish from RNMC
-   workbooks.** The database and admin edit fields exist, and legacy
-   `File_Log.xlsx` values are preserved. The next step is to learn these values
-   from real workbook layouts through several iterations.
+1. **Expand metadata detection from real RNMC workbooks.** Initial automatic
+   detection of `lsr_quarter`, planned start, and planned finish is implemented
+   for `.xlsx` / `.xlsm`. Keep adding deterministic label patterns when real
+   files expose new layouts or wording.
 
 2. **Support `.xls` detailed parsing if needed.** ZIP dry-run recognizes `.xls`
    as an Excel file, but row preview/import currently supports `.xlsx` and

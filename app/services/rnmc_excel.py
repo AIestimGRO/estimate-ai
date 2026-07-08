@@ -6,6 +6,7 @@ write catalog rows. It is used to preview what an RNMC zip import would find.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -68,6 +69,26 @@ ADDED_DATE_HEADER_PATTERNS = (
     "\u0414\u0430\u0442\u0430 \u0434\u043e\u0431",
 )
 
+LSR_QUARTER_LABEL_PATTERNS = (
+    "\u0413\u043e\u0434 \u041a\u0432\u0430\u0440\u0442\u0430\u043b \u041b\u0421\u0420",
+    "\u0413\u043e\u0434/\u043a\u0432\u0430\u0440\u0442\u0430\u043b \u041b\u0421\u0420",
+    "\u0413\u043e\u0434 \u0438 \u043a\u0432\u0430\u0440\u0442\u0430\u043b \u041b\u0421\u0420",
+    "\u041a\u0432\u0430\u0440\u0442\u0430\u043b \u041b\u0421\u0420",
+    "\u041b\u0421\u0420",
+)
+PLANNED_START_LABEL_PATTERNS = (
+    "\u041f\u043b\u0430\u043d\u0438\u0440\u0443\u043c\u044b\u0439 \u0441\u0440\u043e\u043a \u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0431\u043e\u0442",
+    "\u041f\u043b\u0430\u043d\u0438\u0440\u0443\u0435\u043c\u044b\u0439 \u0441\u0440\u043e\u043a \u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0431\u043e\u0442",
+    "\u041f\u043b\u0430\u043d\u043e\u0432\u044b\u0439 \u0441\u0440\u043e\u043a \u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0431\u043e\u0442",
+    "\u0414\u0430\u0442\u0430 \u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0431\u043e\u0442",
+)
+PLANNED_FINISH_LABEL_PATTERNS = (
+    "\u041f\u043b\u0430\u043d\u0438\u0440\u0443\u0435\u043c\u044b\u0439 \u0441\u0440\u043e\u043a \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
+    "\u041f\u043b\u0430\u043d\u0438\u0440\u0443\u043c\u044b\u0439 \u0441\u0440\u043e\u043a \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
+    "\u041f\u043b\u0430\u043d\u043e\u0432\u044b\u0439 \u0441\u0440\u043e\u043a \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
+    "\u0414\u0430\u0442\u0430 \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
+)
+
 STATUS_PREVIEW_OK = "preview_ok"
 STATUS_NO_TABLE = "no_table"
 STATUS_NO_ROWS = "no_rows"
@@ -77,6 +98,13 @@ STATUS_UNSUPPORTED_FORMAT = "unsupported_format"
 STATUS_PARSE_ERROR = "parse_error"
 
 SUPPORTED_PREVIEW_SUFFIXES = frozenset({".xlsx", ".xlsm"})
+
+
+@dataclass(frozen=True)
+class RnmcWorkbookMetadata:
+    lsr_quarter: str = ""
+    planned_start: str = ""
+    planned_finish: str = ""
 
 
 @dataclass(frozen=True)
@@ -97,6 +125,9 @@ class RnmcWorkbookPreview:
     sheet_name: str
     header_row: int
     task_number: str
+    lsr_quarter: str
+    planned_start: str
+    planned_finish: str
     rows_ok: int
     rows_rejected: int
     sample_rows: list[RnmcRowSample]
@@ -170,6 +201,9 @@ class RnmcZipCatalogImportEntry:
     sheet_name: str
     header_row: int
     task_number: str
+    lsr_quarter: str
+    planned_start: str
+    planned_finish: str
     rows_imported: int
     rows_rejected: int
 
@@ -390,6 +424,7 @@ def _import_workbook_bytes(
 ) -> RnmcZipCatalogImportEntry:
     workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
+        metadata = _extract_workbook_metadata(workbook)
         task_number = _extract_task_number(workbook)
         for sheet in workbook.worksheets:
             header = _find_header_row(sheet)
@@ -413,6 +448,9 @@ def _import_workbook_bytes(
                     rows_rejected=rejected,
                     failure_reason="Header found, but no valid catalog rows",
                     task_number=task_number,
+                    lsr_quarter=metadata.lsr_quarter,
+                    planned_start=metadata.planned_start,
+                    planned_finish=metadata.planned_finish,
                 )
                 replace_import_row_logs(
                     connection,
@@ -431,6 +469,9 @@ def _import_workbook_bytes(
                     sheet_name=str(sheet.title),
                     header_row=header.row_number,
                     task_number=task_number,
+                    lsr_quarter=metadata.lsr_quarter,
+                    planned_start=metadata.planned_start,
+                    planned_finish=metadata.planned_finish,
                     rows_rejected=rejected,
                 )
 
@@ -457,6 +498,9 @@ def _import_workbook_bytes(
                 rows_rejected=rejected + result.rows_skipped,
                 failure_reason="",
                 task_number=task_number,
+                lsr_quarter=metadata.lsr_quarter,
+                planned_start=metadata.planned_start,
+                planned_finish=metadata.planned_finish,
             )
             replace_import_row_logs(
                 connection,
@@ -475,6 +519,9 @@ def _import_workbook_bytes(
                 sheet_name=str(sheet.title),
                 header_row=header.row_number,
                 task_number=task_number,
+                lsr_quarter=metadata.lsr_quarter,
+                planned_start=metadata.planned_start,
+                planned_finish=metadata.planned_finish,
                 rows_imported=result.rows_imported,
                 rows_rejected=rejected + result.rows_skipped,
             )
@@ -488,6 +535,9 @@ def _import_workbook_bytes(
             rows_rejected=0,
             failure_reason="Required headers were not found",
             task_number=task_number,
+            lsr_quarter=metadata.lsr_quarter,
+            planned_start=metadata.planned_start,
+            planned_finish=metadata.planned_finish,
         )
         replace_import_row_logs(connection, file_id, [])
         return _import_entry(
@@ -497,6 +547,9 @@ def _import_workbook_bytes(
             STATUS_NO_DATA,
             "Required headers were not found",
             task_number=task_number,
+            lsr_quarter=metadata.lsr_quarter,
+            planned_start=metadata.planned_start,
+            planned_finish=metadata.planned_finish,
         )
     finally:
         workbook.close()
@@ -600,6 +653,9 @@ def _import_entry(
     sheet_name: str = "",
     header_row: int = 0,
     task_number: str = "",
+    lsr_quarter: str = "",
+    planned_start: str = "",
+    planned_finish: str = "",
     rows_imported: int = 0,
     rows_rejected: int = 0,
 ) -> RnmcZipCatalogImportEntry:
@@ -612,6 +668,9 @@ def _import_entry(
         sheet_name=sheet_name,
         header_row=header_row,
         task_number=task_number,
+        lsr_quarter=lsr_quarter,
+        planned_start=planned_start,
+        planned_finish=planned_finish,
         rows_imported=rows_imported,
         rows_rejected=rows_rejected,
     )
@@ -625,6 +684,7 @@ def _preview_workbook_bytes(
 ) -> RnmcWorkbookPreview:
     workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
+        metadata = _extract_workbook_metadata(workbook)
         task_number = _extract_task_number(workbook)
         for sheet in workbook.worksheets:
             header = _find_header_row(sheet)
@@ -642,6 +702,9 @@ def _preview_workbook_bytes(
                 sheet_name=str(sheet.title),
                 header_row=header.row_number,
                 task_number=task_number,
+                lsr_quarter=metadata.lsr_quarter,
+                planned_start=metadata.planned_start,
+                planned_finish=metadata.planned_finish,
                 rows_ok=rows_ok,
                 rows_rejected=rows_rejected,
                 sample_rows=samples,
@@ -654,6 +717,9 @@ def _preview_workbook_bytes(
             STATUS_NO_TABLE,
             "Required headers were not found",
             task_number=task_number,
+            lsr_quarter=metadata.lsr_quarter,
+            planned_start=metadata.planned_start,
+            planned_finish=metadata.planned_finish,
         )
     finally:
         workbook.close()
@@ -763,6 +829,163 @@ def _preview_table_rows(
                 )
             )
     return rows_ok, rows_rejected, samples
+
+
+def _extract_workbook_metadata(workbook) -> RnmcWorkbookMetadata:
+    lsr_quarter = ""
+    planned_start = ""
+    planned_finish = ""
+    for sheet in workbook.worksheets:
+        if lsr_quarter == "":
+            lsr_quarter = _find_metadata_value(
+                sheet,
+                LSR_QUARTER_LABEL_PATTERNS,
+                value_kind="quarter",
+            )
+        if planned_start == "":
+            planned_start = _find_metadata_value(
+                sheet,
+                PLANNED_START_LABEL_PATTERNS,
+                value_kind="date",
+            )
+        if planned_finish == "":
+            planned_finish = _find_metadata_value(
+                sheet,
+                PLANNED_FINISH_LABEL_PATTERNS,
+                value_kind="date",
+            )
+        if lsr_quarter and planned_start and planned_finish:
+            break
+    return RnmcWorkbookMetadata(
+        lsr_quarter=lsr_quarter,
+        planned_start=planned_start,
+        planned_finish=planned_finish,
+    )
+
+
+def _find_metadata_value(
+    sheet: Worksheet,
+    label_patterns: tuple[str, ...],
+    *,
+    value_kind: str,
+) -> str:
+    normalized_patterns = tuple(_normalize_header(pattern) for pattern in label_patterns)
+    max_row = min(int(sheet.max_row or 0), 120)
+    max_col = min(int(sheet.max_column or 0), 60)
+    for row_number in range(1, max_row + 1):
+        for col_number in range(1, max_col + 1):
+            value = sheet.cell(row_number, col_number).value
+            normalized = _normalize_header(value)
+            if normalized == "" or not _metadata_label_matches(normalized, normalized_patterns):
+                continue
+
+            inline = _metadata_inline_value(value)
+            if inline:
+                formatted = _format_metadata_value(inline, value_kind=value_kind)
+                if formatted:
+                    return formatted
+
+            for candidate in _metadata_neighbor_values(sheet, row_number, col_number, max_row, max_col):
+                formatted = _format_metadata_value(candidate, value_kind=value_kind)
+                if formatted:
+                    return formatted
+    return ""
+
+
+def _metadata_label_matches(normalized: str, normalized_patterns: tuple[str, ...]) -> bool:
+    return any(pattern != "" and (pattern in normalized or normalized in pattern) for pattern in normalized_patterns)
+
+
+def _metadata_inline_value(value: object) -> str:
+    text = _text(value)
+    if text == "":
+        return ""
+    for separator in (":", "—", "-", "="):
+        if separator in text:
+            tail = text.split(separator, 1)[1].strip()
+            if tail:
+                return tail
+    return ""
+
+
+def _metadata_neighbor_values(
+    sheet: Worksheet,
+    row_number: int,
+    col_number: int,
+    max_row: int,
+    max_col: int,
+) -> list[object]:
+    values: list[object] = []
+    for offset in range(1, 5):
+        column = col_number + offset
+        if column <= max_col:
+            values.append(sheet.cell(row_number, column).value)
+    if row_number + 1 <= max_row:
+        values.append(sheet.cell(row_number + 1, col_number).value)
+        for offset in range(1, 3):
+            column = col_number + offset
+            if column <= max_col:
+                values.append(sheet.cell(row_number + 1, column).value)
+    return values
+
+
+def _format_metadata_value(value: object, *, value_kind: str) -> str:
+    if value_kind == "date":
+        return _format_date_metadata(value)
+    if value_kind == "quarter":
+        return _format_quarter_metadata(value)
+    return _text(value)
+
+
+def _format_date_metadata(value: object) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+
+    text = _text(value)
+    if text == "":
+        return ""
+    normalized = text.replace("\u00a0", " ").strip()
+    for pattern in (
+        r"(?P<day>\d{1,2})[./-](?P<month>\d{1,2})[./-](?P<year>\d{4})",
+        r"(?P<year>\d{4})[./-](?P<month>\d{1,2})[./-](?P<day>\d{1,2})",
+    ):
+        match = re.search(pattern, normalized)
+        if not match:
+            continue
+        try:
+            parsed = date(
+                int(match.group("year")),
+                int(match.group("month")),
+                int(match.group("day")),
+            )
+        except ValueError:
+            continue
+        return parsed.isoformat()
+    return normalized
+
+
+def _format_quarter_metadata(value: object) -> str:
+    text = _text(value)
+    if text == "":
+        return ""
+    normalized = text.replace("\u00a0", " ").strip()
+    folded = normalized.casefold()
+
+    year_match = re.search(r"(20\d{2}|19\d{2})", folded)
+    quarter_match = re.search(r"(?:q|кв\.?|квартал)\s*([1-4])(?!\d)", folded)
+    if quarter_match is None:
+        quarter_match = re.search(r"(?<!\d)([1-4])\s*(?:q|кв\.?|квартал)", folded)
+    if quarter_match is None and year_match is not None:
+        around = folded.replace(year_match.group(1), " ")
+        quarter_match = re.search(r"\b([1-4])\b", around)
+
+    if year_match is not None and quarter_match is not None:
+        return f"{year_match.group(1)} Q{quarter_match.group(1)}"
+    return normalized
 
 
 def _extract_task_number(workbook) -> str:
@@ -924,6 +1147,9 @@ def _empty_preview(
     reason: str,
     *,
     task_number: str = "",
+    lsr_quarter: str = "",
+    planned_start: str = "",
+    planned_finish: str = "",
 ) -> RnmcWorkbookPreview:
     return RnmcWorkbookPreview(
         archive_path=archive_path,
@@ -934,6 +1160,9 @@ def _empty_preview(
         sheet_name="",
         header_row=0,
         task_number=task_number,
+        lsr_quarter=lsr_quarter,
+        planned_start=planned_start,
+        planned_finish=planned_finish,
         rows_ok=0,
         rows_rejected=0,
         sample_rows=[],

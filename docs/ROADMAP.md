@@ -94,11 +94,13 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - [x] Admin edit workflows for approvals, task colors, and name exclusions.
 - [x] RNMC legacy FileLog and ZIP import into the catalog.
 - [x] RNMC import control center with per-file details and rejected rows.
+- [x] Initial automatic detection of `lsr_quarter`, planned start, and planned
+  finish from RNMC workbooks.
 
 ## Next milestone — RNMC import quality automation
 
-1. Auto-detect `lsr_quarter`, planned start, and planned finish from real RNMC
-   workbooks.
+1. Expand metadata detection against more real RNMC layouts and add patterns as
+   needed.
 2. Improve rejected-row diagnostics and export/download of rejected rows.
 3. Add `.xls` support if real incoming files still require it.
 4. Decide whether to store original uploaded workbooks for true one-click retry

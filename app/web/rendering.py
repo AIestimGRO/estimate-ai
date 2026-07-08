@@ -610,6 +610,9 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
         '<th>Лист</th>'
         '<th>Header row</th>'
         '<th>Задача</th>'
+        '<th>ЛСР</th>'
+        '<th>Начало</th>'
+        '<th>Окончание</th>'
         '<th>OK</th>'
         '<th>Rejected</th>'
         '<th>Примеры строк</th>'
@@ -627,6 +630,9 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
             f'<td>{html.escape(entry.sheet_name)}</td>'
             f'<td>{entry.header_row}</td>'
             f'<td>{html.escape(entry.task_number)}</td>'
+            f'<td>{html.escape(entry.lsr_quarter)}</td>'
+            f'<td>{html.escape(entry.planned_start)}</td>'
+            f'<td>{html.escape(entry.planned_finish)}</td>'
             f'<td>{entry.rows_ok}</td>'
             f'<td>{entry.rows_rejected}</td>'
             f'<td>{_render_rnmc_samples(entry.sample_rows)}</td>'
@@ -682,6 +688,9 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
         '<th>Лист</th>'
         '<th>Header row</th>'
         '<th>Задача</th>'
+        '<th>ЛСР</th>'
+        '<th>Начало</th>'
+        '<th>Окончание</th>'
         '<th>Добавлено</th>'
         '<th>Отклонено</th>'
         '</tr></thead><tbody>'
@@ -698,12 +707,14 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
             f'<td>{html.escape(entry.sheet_name)}</td>'
             f'<td>{entry.header_row}</td>'
             f'<td>{html.escape(entry.task_number)}</td>'
+            f'<td>{html.escape(entry.lsr_quarter)}</td>'
+            f'<td>{html.escape(entry.planned_start)}</td>'
+            f'<td>{html.escape(entry.planned_finish)}</td>'
             f'<td>{entry.rows_imported}</td>'
             f'<td>{entry.rows_rejected}</td>'
             '</tr>'
         )
     return summary + header + ''.join(rows) + '</tbody></table></div>'
-
 
 def _render_import_status_filters(active_status: str) -> str:
     statuses = [

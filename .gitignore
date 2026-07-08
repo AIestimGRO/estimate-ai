@@ -106,3 +106,7 @@ _rnmc_import_control_center_review/
 # Docs roadmap RNMC delivery artifacts
 docs-roadmap-rnmc-update-files.zip
 _docs_roadmap_rnmc_review/
+
+# RNMC metadata auto-detect delivery artifacts
+rnmc-metadata-auto-detect-updated-files.zip
+_rnmc_metadata_auto_detect_review/
