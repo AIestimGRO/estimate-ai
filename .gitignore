@@ -102,3 +102,7 @@ _rnmc_zip_catalog_import_review/
 # RNMC import control center delivery artifacts
 rnmc-import-control-center-updated-files.zip
 _rnmc_import_control_center_review/
+
+# Docs roadmap RNMC delivery artifacts
+docs-roadmap-rnmc-update-files.zip
+_docs_roadmap_rnmc_review/

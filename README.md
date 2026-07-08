@@ -1,26 +1,62 @@
 # Estimate AI
 
-Construction pricing assistant. Helps process BOQ (ВОР) Excel files, find price
-analogs from historical data, and produce a price corridor (min / median / max /
-recommended) with risk flags for human review.
+Construction pricing assistant for estimators. The service processes BOQ / ВОР
+Excel files, matches rows against a historical RNMC catalog, calculates a price
+corridor, flags risky price spreads, and produces an Excel result for human
+review.
 
-The system does not replace the estimator. It produces a draft for review.
+The system does not replace the estimator. It prepares a deterministic draft and
+keeps risky decisions visible for review and approval.
 
 ## Current stage
 
-Phase 0: porting existing VBA macro logic into a tested Python core.
-No web server, no database yet. Everything runs locally on Excel files.
+The project now has a tested Python core, SQLite persistence, a FastAPI web UI,
+and an admin UI for catalog/import/risk control.
 
-## How to run (once core/ has code)
+Implemented product flows:
+
+- Upload an estimate file and produce a WA Excel result.
+- Use a catalog from SQLite or from an uploaded Excel file.
+- Review catalog sources, import history, risks, approvals, rules, and settings
+  in `/admin`.
+- Import legacy `File_Log.xlsx` records into `imported_files`.
+- Upload RNMC ZIP archives, run dry-run checks, preview workbook rows, import
+  valid rows into `catalog_items`, and inspect per-file import details.
+- Approve price risks into `gesn_exceptions`.
+- Edit task color entries and name exclusion rules from the admin UI.
+
+Matching/pricing remains deterministic. No LLM or semantic matching is used
+inside the matching/pricing path.
+
+## How to run
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-pytest
+python -m pytest -q
+python -m app.web
 ```
+
+Main web routes:
+
+- `/` — upload estimate/catalog and run matching.
+- `/admin` — admin dashboard.
+- `/admin/imports` — RNMC import dashboard and control center.
+- `/admin/sources` — catalog sources.
+- `/admin/risks` — price risk log.
+- `/admin/approvals` — approve open price risks.
+- `/admin/gesn-exceptions` — approved GESN ranges.
+- `/admin/task-colors` — blue-task metadata.
+- `/admin/name-exclusions` — exclusion rules.
+- `/admin/settings` — database/settings diagnostics.
 
 ## Project docs
 
-See `docs/AGENTS.md` for AI agent rules, `docs/DOMAIN_RULES.md` for business
-rules extracted from the original macros, `docs/MVP.md` for current scope.
+- `docs/AGENTS.md` — AI agent and coding rules.
+- `docs/DOMAIN_RULES.md` — business rules extracted from VBA and accepted
+  product decisions.
+- `docs/MVP.md` — current MVP scope.
+- `docs/ROADMAP.md` — completed milestones and next work.
+- `docs/RNMC_IMPORT.md` — RNMC ZIP/File_Log import workflow.
+- `docs/OPEN_ITEMS.md` — deliberately deferred decisions and follow-ups.

@@ -1,85 +1,85 @@
-# MVP Scope — Phase 0 (current)
+# MVP Scope — current
 
-Goal: port the existing, working VBA macro logic (Modules 1–7) into a
-tested Python library, with byte-for-byte-equivalent behavior on real
-files, before building any web layer. See `docs/DOMAIN_RULES.md` for the
-exact rules being ported — that file is the spec for this phase.
+The current MVP is no longer only a VBA-to-Python port. The project now includes
+a deterministic Python core, SQLite persistence, a FastAPI web UI, an admin UI,
+and a working RNMC ZIP import flow.
 
-## Why port-first, not redesign-first
+## MVP goal
 
-The macro logic is more mature than initially assumed (exact key matching,
-4% dedup, demolition filtering, name-exclusion rules, a human-approval
-workflow for price ranges). The safest path is: reproduce it faithfully in
-tested Python, confirm equivalence on real files, *then* decide deliberately
-what to improve (e.g. fuzzy matching, region-aware adjustment) as separate,
-reviewed changes — not silently during the port.
+Provide a local web service that lets an estimator:
 
-## In scope now — porting order
+1. maintain a historical RNMC catalog in SQLite;
+2. upload an estimate/BOQ Excel file;
+3. run deterministic analog matching;
+4. download a WA Excel result;
+5. review risky price ranges;
+6. approve ranges into `gesn_exceptions`;
+7. import new RNMC files from ZIP archives;
+8. inspect import history, rejected rows, and data-quality issues.
 
-Roughly matches dependency order in the VBA modules:
+## Non-negotiable boundaries
 
-1. **Normalization** (`core/normalize.py`) — `NormCode`, `NormUnit`,
-   `HasDemontazh`, `AnalogSearchKey`. Pure functions, easiest to test
-   exhaustively against real examples.
-2. **Name exclusion rules** (`core/exclusions.py`) — rule loading format
-   (Enabled/Scope/MatchMode/Pattern), `ALL_WORDS` / `CONTAINS` matching,
-   task color list. Config-driven, not hardcoded patterns.
-3. **Catalog building** (`core/catalog.py`) — reading catalog rows,
-   filtering invalid/excluded rows, building the
-   `{matching_key: {task_id: [entries]}}` structure, 4% dedup logic.
-4. **Matching** (`core/matching.py`) — looking up analogs for an estimate
-   row, demolition filter, task ordering for output columns.
-5. **Risk / price-spread checking** (`core/risk.py`) — ratio check,
-   GESN_Exceptions approved-range override logic, the
-   approve/widen-range workflow.
-6. **Pricing output** (`core/pricing.py`) — average-price calculation
-   logic (currently an Excel formula; decide in this phase whether the
-   Python port computes a value directly or still needs to emit a
-   formula for an Excel export), regional coefficient application.
-7. **Section code resolution** (`core/sections.py`) — GESN prefix → section
-   lookup table, demolition-priority override rule.
-8. Excel I/O (`core/excel_io.py`) — reading catalog/estimate files,
-   writing results back out. Built last, once the logic it wraps is
-   already tested independently of Excel.
-9. **Catalog ingestion** (`core/ingest.py`) — port of the folder-walk +
-   header-detection + row-mapping pipeline from
-   `reference/vba_original/Module8_catalog_import.bas` (see
-   DOMAIN_RULES.md §9), writing to the database (§"Database" below)
-   instead of an Excel sheet. The five open questions in DOMAIN_RULES.md
-   §9.6 must be explicitly decided (not silently assumed) before or
-   during this task.
+- Matching/pricing must stay deterministic.
+- No LLM, fuzzy, or semantic matching inside the core matching/pricing path.
+- Region is metadata for display/risk review, not a matching filter.
+- Human approvals are stored and auditable.
+- New domain rules require tests.
 
-## Database — DONE (SQLite, schema v2)
+## Done in the MVP
 
-SQLite storage is implemented in `core/storage/`:
+### Core and Excel result
 
-- `catalog_items` — RNMC catalog rows (import via `python -m app.cli import-catalog`).
-- `imported_files` / `import_row_log` — per-file import history.
-- `name_exclusion_rules` / `task_color_entries` — admin config (import via `import-rules`).
-- `gesn_exceptions` — approved price ranges per `(unit, code, demolition)` key.
-- `price_risk_log` — open/approved risk rows (replaces WA `Price_Check_Log` sheet).
+- Normalization, exact `(unit, code)` search key, demolition detection.
+- Name exclusion rules and task-color metadata.
+- Catalog grouping and 4% dedup.
+- Matching, pricing, risk calculation, approval-range override.
+- Flexible estimate layout detection and multi-sheet choice.
+- WA Excel writer with analogs, average formula, `/KR`, section code, and risk
+  colors.
 
-Config: `data/config/db.json` or env `ESTIMATE_AI_DB_PATH`. The web UI and
-`write_result.run_and_write` load catalog and `gesn_exceptions` from the DB
-when no catalog file is uploaded.
+### Database
 
-`core/ingest.py` remains storage-agnostic (plain Python structures); the CLI
-and future watched-folder workflow call the storage layer to persist results.
+- `catalog_items` and `catalog_sources`.
+- `imported_files` and `import_row_log`.
+- `name_exclusion_rules` and `task_color_entries`.
+- `price_risk_log` and `gesn_exceptions`.
 
-## Explicitly out of scope for now
+### Web/admin
 
-- Full admin UI (risk approval screen, import dashboard) — in progress on
-  `feature/admin-ui`; backend (`price_risk_log`, `approve_risk`) is ready.
-- Authentication, user roles.
-- Any matching logic beyond exact (unit, code) key match — no fuzzy/
-  semantic matching yet (see DOMAIN_RULES.md §8).
-- Watched-folder auto-import automation (manual `import-catalog` works).
-- Region-based filtering or price adjustment (region is descriptive only).
+- Main upload/run/download flow.
+- Admin dashboards for sources, imports, risks, approvals, rules, exceptions, and
+  settings.
+- Approve-risk workflow.
+- Edit workflows for task colors and name exclusions.
 
-## Definition of done for Phase 0
+### RNMC import
 
-For a given pair of real (anonymized) catalog + estimate fixture files,
-the Python pipeline produces the same analog assignments, same risk flags,
-and same recommended prices as the VBA macro would on the same inputs —
-verified by a test that compares against a captured "expected" output
-generated by running the macro once and saving its result.
+- Legacy `File_Log.xlsx` migration into `imported_files`.
+- ZIP dry-run, import-log recording, row preview, and real catalog import.
+- Filename-only dedup, with duplicate filenames marked as `duplicate_name`.
+- Region from parent ZIP folder or manual override.
+- Rejected-row logging and per-file import detail pages.
+- Retry unlock for `failed` / `no_data` records through the next ZIP upload.
+
+## Explicitly out of scope for the current MVP
+
+- Authentication and user roles.
+- Cloud deployment.
+- Semantic/fuzzy matching.
+- Automatic region-based price adjustment.
+- Automatic extraction of LSR quarter and planned dates from every RNMC format
+  (next milestone).
+- `.xls` detailed parsing (deferred unless real incoming files require it).
+- True one-click retry without re-uploading ZIP files.
+- Watched-folder/scheduled import automation.
+
+## Definition of done for the current MVP
+
+For representative real files, the service should be able to:
+
+1. import or use the RNMC catalog;
+2. process an estimate and produce the expected analog assignments and price
+   flags;
+3. persist open risks and approvals;
+4. import new RNMC ZIP files without duplicating already processed filenames;
+5. show import problems clearly enough for manual correction.
