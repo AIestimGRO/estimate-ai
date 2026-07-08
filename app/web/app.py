@@ -35,10 +35,15 @@ from app.services.write_result import run_and_write
 from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_import_log
 from app.services.rnmc_excel import analyze_rnmc_zip_row_preview, import_rnmc_zip_catalog_rows
 from core.storage.catalog import (
+    allow_import_retry,
     count_catalog_rows,
+    get_imported_file,
     import_legacy_file_log,
+    list_catalog_items_for_imported_file,
     list_catalog_sources,
+    list_import_row_logs,
     list_imported_files,
+    update_imported_file_metadata,
 )
 from core.storage.risk_log import (
     STATUS_OPEN,
@@ -61,6 +66,7 @@ from app.web.rendering import (
     XLSX_MIME,
     render_admin_approvals,
     render_admin_gesn_exceptions,
+    render_admin_import_detail,
     render_admin_imports,
     render_admin_name_exclusions,
     render_admin_index,
@@ -122,8 +128,91 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
     def admin_index() -> HTMLResponse:
         return HTMLResponse(render_admin_index())
 
+    @app.get("/admin/imports/{import_id}", response_class=HTMLResponse)
+    def admin_import_detail(import_id: int, message: str = "", error: str = "") -> HTMLResponse:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            record = get_imported_file(connection, import_id)
+            if record is None:
+                return HTMLResponse(
+                    render_error(
+                        "Импорт не найден",
+                        f"Запись imported_files #{import_id} не найдена.",
+                    ),
+                    status_code=404,
+                )
+            catalog_rows = list_catalog_items_for_imported_file(connection, import_id)
+            row_logs = list_import_row_logs(connection, import_id)
+            return HTMLResponse(
+                render_admin_import_detail(
+                    record,
+                    catalog_rows,
+                    row_logs,
+                    notice=message,
+                    error=error,
+                )
+            )
+        finally:
+            connection.close()
+
+    @app.post("/admin/imports/update", response_class=HTMLResponse)
+    def admin_import_update(
+        import_id: int = Form(...),
+        region_folder: str = Form(""),
+        task_number: str = Form(""),
+        lsr_quarter: str = Form(""),
+        planned_start: str = Form(""),
+        planned_finish: str = Form(""),
+    ) -> RedirectResponse:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                changed = update_imported_file_metadata(
+                    connection,
+                    import_id,
+                    region_folder=region_folder,
+                    task_number=task_number,
+                    lsr_quarter=lsr_quarter,
+                    planned_start=planned_start,
+                    planned_finish=planned_finish,
+                )
+            except Exception as exc:
+                return RedirectResponse(
+                    f"/admin/imports/{import_id}?error={quote('Не удалось сохранить: ' + str(exc))}",
+                    status_code=303,
+                )
+        finally:
+            connection.close()
+        message = "Данные импорта обновлены." if changed else "Запись импорта не найдена."
+        return RedirectResponse(
+            f"/admin/imports/{import_id}?message={quote(message)}",
+            status_code=303,
+        )
+
+    @app.post("/admin/imports/allow-retry", response_class=HTMLResponse)
+    def admin_import_allow_retry(import_id: int = Form(...)) -> RedirectResponse:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            changed = allow_import_retry(connection, import_id)
+        finally:
+            connection.close()
+        if changed:
+            message = "Повторная обработка разрешена. Загрузите ZIP еще раз, и этот файл будет обработан снова."
+            return RedirectResponse(
+                f"/admin/imports/{import_id}?message={quote(message)}",
+                status_code=303,
+            )
+        error = "Retry доступен только для статусов failed и no_data."
+        return RedirectResponse(
+            f"/admin/imports/{import_id}?error={quote(error)}",
+            status_code=303,
+        )
+
     @app.get("/admin/{section_slug}", response_class=HTMLResponse)
-    def admin_section(section_slug: str, message: str = "") -> HTMLResponse:
+    def admin_section(section_slug: str, message: str = "", status: str = "") -> HTMLResponse:
         if section_slug not in ADMIN_SECTION_SLUGS:
             return HTMLResponse(
                 render_error(
@@ -140,8 +229,14 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 sources = list_catalog_sources(connection)
                 return HTMLResponse(render_admin_sources(sources))
             if section_slug == "imports":
-                imports = list_imported_files(connection)
-                return HTMLResponse(render_admin_imports(imports, notice=message))
+                imports = list_imported_files(connection, status=status)
+                return HTMLResponse(
+                    render_admin_imports(
+                        imports,
+                        notice=message,
+                        status_filter=status,
+                    )
+                )
             if section_slug == "risks":
                 risks = list_price_risks(connection)
                 return HTMLResponse(render_admin_risks(risks))

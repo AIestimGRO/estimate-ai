@@ -28,6 +28,7 @@ STATUS_FAILED = "failed"
 STATUS_DUPLICATE_NAME = "duplicate_name"
 STATUS_MANUAL_CHECKED = "manual_checked"
 STATUS_PENDING = "pending"
+ROW_LOG_STATUS_REJECTED = "rejected"
 RNMC_ZIP_SOURCE_NAME = "rnmc_zip_upload"
 RNMC_ZIP_SOURCE_KIND = "rnmc_zip"
 PROCESSED_FILE_STATUSES = frozenset(
@@ -81,6 +82,27 @@ class ImportedFileRecord:
     lsr_quarter: str
     planned_start: str
     planned_finish: str
+
+
+@dataclass(frozen=True)
+class CatalogItemRecord:
+    id: int
+    task_id: str
+    region: str
+    code: str
+    unit: str
+    work_name: str
+    price: float
+    source_row_number: int
+
+
+@dataclass(frozen=True)
+class ImportRowLogRecord:
+    id: int
+    file_id: int
+    row_number: int
+    status: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -149,7 +171,25 @@ def list_catalog_sources(connection: sqlite3.Connection) -> list[CatalogSource]:
     ]
 
 
-def list_imported_files(connection: sqlite3.Connection) -> list[ImportedFileRecord]:
+def list_imported_files(
+    connection: sqlite3.Connection,
+    *,
+    status: str = "",
+) -> list[ImportedFileRecord]:
+    status_filter = _text(status)
+    where = ""
+    params: tuple[object, ...] = ()
+    if status_filter:
+        where = "WHERE imported_files.status = ?"
+        params = (status_filter,)
+    return _imported_file_records_from_query(connection, where, params)
+
+
+def _imported_file_records_from_query(
+    connection: sqlite3.Connection,
+    where: str = "",
+    params: tuple[object, ...] = (),
+) -> list[ImportedFileRecord]:
     rows = connection.execute(
         """
         SELECT
@@ -171,8 +211,10 @@ def list_imported_files(connection: sqlite3.Connection) -> list[ImportedFileReco
             imported_files.planned_finish
         FROM imported_files
         LEFT JOIN catalog_sources ON catalog_sources.id = imported_files.source_id
+        {where}
         ORDER BY imported_files.imported_at DESC, imported_files.id DESC
-        """
+        """.format(where=where),
+        params,
     ).fetchall()
     return [
         ImportedFileRecord(
@@ -376,9 +418,9 @@ def record_imported_file(
     planned_finish: str = "",
     source_name: str = RNMC_ZIP_SOURCE_NAME,
     source_kind: str = RNMC_ZIP_SOURCE_KIND,
-) -> None:
+) -> int:
     source_id = _get_or_create_source(connection, source_name, kind=source_kind)
-    _record_imported_file(
+    return _record_imported_file(
         connection,
         source_id=source_id,
         region_folder=region_folder,
@@ -393,6 +435,150 @@ def record_imported_file(
         planned_start=planned_start,
         planned_finish=planned_finish,
     )
+
+
+def get_imported_file(connection: sqlite3.Connection, import_id: int) -> ImportedFileRecord | None:
+    records = _imported_file_records_from_query(
+        connection,
+        "WHERE imported_files.id = ?",
+        (int(import_id),),
+    )
+    return records[0] if records else None
+
+
+def update_imported_file_metadata(
+    connection: sqlite3.Connection,
+    import_id: int,
+    *,
+    region_folder: str,
+    task_number: str,
+    lsr_quarter: str,
+    planned_start: str,
+    planned_finish: str,
+) -> bool:
+    cursor = connection.execute(
+        """
+        UPDATE imported_files
+        SET region_folder = ?,
+            task_number = ?,
+            lsr_quarter = ?,
+            planned_start = ?,
+            planned_finish = ?
+        WHERE id = ?
+        """,
+        (
+            _text(region_folder),
+            _text(task_number),
+            _text(lsr_quarter),
+            _text(planned_start),
+            _text(planned_finish),
+            int(import_id),
+        ),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def allow_import_retry(connection: sqlite3.Connection, import_id: int) -> bool:
+    cursor = connection.execute(
+        """
+        UPDATE imported_files
+        SET status = ?,
+            failure_reason = 'Retry allowed; upload the ZIP again to reprocess this file'
+        WHERE id = ?
+          AND status IN (?, ?)
+        """,
+        (STATUS_PENDING, int(import_id), STATUS_FAILED, STATUS_NO_DATA),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def list_catalog_items_for_imported_file(
+    connection: sqlite3.Connection,
+    import_id: int,
+) -> list[CatalogItemRecord]:
+    record = get_imported_file(connection, import_id)
+    if record is None:
+        return []
+    rows = connection.execute(
+        """
+        SELECT
+            catalog_items.id,
+            catalog_items.task_id,
+            catalog_items.region,
+            catalog_items.code,
+            catalog_items.unit,
+            catalog_items.work_name,
+            catalog_items.price,
+            catalog_items.source_row_number
+        FROM catalog_items
+        WHERE catalog_items.source_region_folder = ?
+          AND catalog_items.source_filename = ?
+          AND catalog_items.source_id = (
+              SELECT id FROM catalog_sources WHERE name = ? LIMIT 1
+          )
+        ORDER BY catalog_items.source_row_number, catalog_items.id
+        """,
+        (record.region_folder, record.filename, RNMC_ZIP_SOURCE_NAME),
+    ).fetchall()
+    return [
+        CatalogItemRecord(
+            id=int(row["id"]),
+            task_id=str(row["task_id"]),
+            region=str(row["region"]),
+            code=str(row["code"]),
+            unit=str(row["unit"]),
+            work_name=str(row["work_name"]),
+            price=float(row["price"]),
+            source_row_number=int(row["source_row_number"]),
+        )
+        for row in rows
+    ]
+
+
+def list_import_row_logs(
+    connection: sqlite3.Connection,
+    import_id: int,
+) -> list[ImportRowLogRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, file_id, row_number, status, reason
+        FROM import_row_log
+        WHERE file_id = ?
+        ORDER BY row_number, id
+        """,
+        (int(import_id),),
+    ).fetchall()
+    return [
+        ImportRowLogRecord(
+            id=int(row["id"]),
+            file_id=int(row["file_id"]),
+            row_number=int(row["row_number"]),
+            status=str(row["status"]),
+            reason=str(row["reason"]),
+        )
+        for row in rows
+    ]
+
+
+def replace_import_row_logs(
+    connection: sqlite3.Connection,
+    import_id: int,
+    row_logs: list[tuple[int, str, str]],
+) -> None:
+    connection.execute("DELETE FROM import_row_log WHERE file_id = ?", (int(import_id),))
+    if row_logs:
+        connection.executemany(
+            """
+            INSERT INTO import_row_log(file_id, row_number, status, reason)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (int(import_id), int(row_number), _text(status), _text(reason))
+                for row_number, status, reason in row_logs
+            ],
+        )
 
 
 def normalize_import_filename(filename: str) -> str:
@@ -653,7 +839,7 @@ def _record_imported_file(
     lsr_quarter: str = "",
     planned_start: str = "",
     planned_finish: str = "",
-) -> None:
+) -> int:
     connection.execute(
         """
         INSERT INTO imported_files (
@@ -691,6 +877,17 @@ def _record_imported_file(
             planned_finish,
         ),
     )
+    row = connection.execute(
+        """
+        SELECT id FROM imported_files
+        WHERE region_folder = ? AND filename = ?
+        LIMIT 1
+        """,
+        (region_folder, filename),
+    ).fetchone()
+    if row is None:  # pragma: no cover - sqlite upsert defensive boundary
+        raise RuntimeError("imported file row was not recorded")
+    return int(row["id"])
 
 
 def _is_storable_row(catalog_row: CatalogRow) -> bool:

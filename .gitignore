@@ -98,3 +98,7 @@ _rnmc_zip_row_preview_review/
 # RNMC zip catalog import delivery artifacts
 rnmc-zip-catalog-import-updated-files.zip
 _rnmc_zip_catalog_import_review/
+
+# RNMC import control center delivery artifacts
+rnmc-import-control-center-updated-files.zip
+_rnmc_import_control_center_review/

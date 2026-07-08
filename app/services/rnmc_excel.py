@@ -21,6 +21,7 @@ from app.services.rnmc_zip import EXCEL_SUFFIXES
 from core.catalog import CatalogRow
 from core.normalize import NormCode, NormUnit
 from core.storage.catalog import (
+    ROW_LOG_STATUS_REJECTED,
     STATUS_DUPLICATE_NAME as DB_STATUS_DUPLICATE_NAME,
     STATUS_FAILED,
     STATUS_NO_DATA,
@@ -32,6 +33,7 @@ from core.storage.catalog import (
     normalize_import_filename,
     record_imported_file,
     replace_catalog_rows_for_file,
+    replace_import_row_logs,
 )
 
 HEADER_NAME_WORKS = "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442"
@@ -144,6 +146,12 @@ class RnmcZipRowPreviewResult:
     @property
     def rows_rejected_total(self) -> int:
         return sum(entry.rows_rejected for entry in self.entries)
+
+
+@dataclass(frozen=True)
+class RnmcRejectedRow:
+    row_number: int
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -387,15 +395,16 @@ def _import_workbook_bytes(
             header = _find_header_row(sheet)
             if header is None:
                 continue
-            rows, rejected = _extract_catalog_row_candidates(
+            rows, rejected_rows = _extract_catalog_row_candidates(
                 sheet,
                 header,
                 task_number,
                 region_folder,
                 filename,
             )
+            rejected = len(rejected_rows)
             if not rows:
-                record_imported_file(
+                file_id = record_imported_file(
                     connection,
                     region_folder=region_folder,
                     filename=filename,
@@ -404,6 +413,14 @@ def _import_workbook_bytes(
                     rows_rejected=rejected,
                     failure_reason="Header found, but no valid catalog rows",
                     task_number=task_number,
+                )
+                replace_import_row_logs(
+                    connection,
+                    file_id,
+                    [
+                        (row.row_number, ROW_LOG_STATUS_REJECTED, row.reason)
+                        for row in rejected_rows
+                    ],
                 )
                 return _import_entry(
                     archive_path,
@@ -431,7 +448,7 @@ def _import_workbook_bytes(
                 region_folder=region_folder,
                 filename=filename,
             )
-            record_imported_file(
+            file_id = record_imported_file(
                 connection,
                 region_folder=region_folder,
                 filename=filename,
@@ -440,6 +457,14 @@ def _import_workbook_bytes(
                 rows_rejected=rejected + result.rows_skipped,
                 failure_reason="",
                 task_number=task_number,
+            )
+            replace_import_row_logs(
+                connection,
+                file_id,
+                [
+                    (row.row_number, ROW_LOG_STATUS_REJECTED, row.reason)
+                    for row in rejected_rows
+                ],
             )
             return _import_entry(
                 archive_path,
@@ -454,7 +479,7 @@ def _import_workbook_bytes(
                 rows_rejected=rejected + result.rows_skipped,
             )
 
-        record_imported_file(
+        file_id = record_imported_file(
             connection,
             region_folder=region_folder,
             filename=filename,
@@ -464,6 +489,7 @@ def _import_workbook_bytes(
             failure_reason="Required headers were not found",
             task_number=task_number,
         )
+        replace_import_row_logs(connection, file_id, [])
         return _import_entry(
             archive_path,
             filename,
@@ -482,14 +508,14 @@ def _extract_catalog_row_candidates(
     task_number: str,
     region_folder: str,
     filename: str,
-) -> tuple[list[RnmcCatalogRowCandidate], int]:
+) -> tuple[list[RnmcCatalogRowCandidate], list[RnmcRejectedRow]]:
     num_col = _find_numbering_col(header.header_map) or 1
     code_col = _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)
     price_col = _find_pattern_col(header.header_map, PRICE_HEADER_PATTERNS)
     date_col = _find_pattern_col(header.header_map, ADDED_DATE_HEADER_PATTERNS)
     max_row = int(sheet.max_row or 0)
     rows: list[RnmcCatalogRowCandidate] = []
-    rejected = 0
+    rejected: list[RnmcRejectedRow] = []
     started = False
     blank_streak = 0
 
@@ -520,7 +546,7 @@ def _extract_catalog_row_candidates(
             continue
 
         if _is_blank(unit_value) and _is_blank(qty_value):
-            rejected += 1
+            rejected.append(RnmcRejectedRow(row_number, "missing_unit_and_quantity"))
             continue
 
         price_value = _cell_value(sheet, row_number, price_col)
@@ -534,8 +560,9 @@ def _extract_catalog_row_candidates(
             region=region_folder,
             added_date=_cell_value(sheet, row_number, date_col),
         )
-        if _catalog_row_issue(catalog_row) != "":
-            rejected += 1
+        issue = _catalog_row_issue(catalog_row)
+        if issue != "":
+            rejected.append(RnmcRejectedRow(row_number, issue))
             continue
         rows.append(RnmcCatalogRowCandidate(row_number=row_number, catalog_row=catalog_row))
 
@@ -550,7 +577,7 @@ def _record_non_imported_file(
     status: str,
     reason: str,
 ) -> RnmcZipCatalogImportEntry:
-    record_imported_file(
+    file_id = record_imported_file(
         connection,
         region_folder=region_folder,
         filename=filename,
@@ -559,6 +586,7 @@ def _record_non_imported_file(
         rows_rejected=0,
         failure_reason=reason,
     )
+    replace_import_row_logs(connection, file_id, [])
     return _import_entry(archive_path, filename, region_folder, status, reason)
 
 

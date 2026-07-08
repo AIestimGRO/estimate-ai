@@ -19,7 +19,7 @@ from app.services.rnmc_zip import RnmcZipDryRunResult
 from app.services.rnmc_excel import RnmcZipCatalogImportResult, RnmcZipRowPreviewResult
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
-from core.storage.catalog import CatalogSource, ImportedFileRecord
+from core.storage.catalog import CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord
 from core.storage.risk_log import PriceRiskLogEntry
 from core.exclusions import NameExclusionRule, TaskColorEntry
 
@@ -444,6 +444,7 @@ def render_admin_imports(
     dry_run_result: RnmcZipDryRunResult | None = None,
     row_preview_result: RnmcZipRowPreviewResult | None = None,
     catalog_import_result: RnmcZipCatalogImportResult | None = None,
+    status_filter: str = "",
 ) -> str:
     notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
     error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
@@ -461,6 +462,7 @@ def render_admin_imports(
         f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
         f'{_render_rnmc_zip_row_preview_result(row_preview_result)}'
         f'{_render_rnmc_zip_catalog_import_result(catalog_import_result)}'
+        f'{_render_import_status_filters(status_filter)}'
         f'{_render_imported_file_table(imports)}'
         '</section>'
     )
@@ -703,6 +705,32 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
     return summary + header + ''.join(rows) + '</tbody></table></div>'
 
 
+def _render_import_status_filters(active_status: str) -> str:
+    statuses = [
+        ("", "Все"),
+        ("success", "success"),
+        ("pending", "pending"),
+        ("failed", "failed"),
+        ("no_data", "no_data"),
+        ("duplicate_name", "duplicate_name"),
+        ("skipped", "skipped"),
+        ("legacy_imported", "legacy_imported"),
+    ]
+    links = []
+    for status, label in statuses:
+        href = "/admin/imports" if status == "" else f"/admin/imports?status={quote(status)}"
+        active = " active" if status == active_status else ""
+        links.append(
+            f'<a class="admin-nav-link{active}" href="{href}">{html.escape(label)}</a>'
+        )
+    return (
+        '<div class="admin-form">'
+        '<h2 class="section">Фильтры журнала</h2>'
+        '<div class="admin-nav">' + ''.join(links) + '</div>'
+        '</div>'
+    )
+
+
 def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
     if not imports:
         return '<p class="muted">Импорты пока не записаны.</p>'
@@ -724,6 +752,7 @@ def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
         '<th>Окончание</th>'
         '<th>Импорт</th>'
         '<th>Ошибка</th>'
+        '<th>Действия</th>'
         '</tr></thead><tbody>'
     )
     rows = []
@@ -745,9 +774,137 @@ def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
             f'<td>{html.escape(item.planned_finish)}</td>'
             f'<td>{html.escape(item.imported_at)}</td>'
             f'<td>{html.escape(item.failure_reason)}</td>'
+            f'<td><a href="/admin/imports/{item.id}">Детали</a></td>'
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table>'
+
+
+def render_admin_import_detail(
+    record: ImportedFileRecord,
+    catalog_rows: list[CatalogItemRecord],
+    row_logs: list[ImportRowLogRecord],
+    *,
+    notice: str = "",
+    error: str = "",
+) -> str:
+    notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
+    error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
+    retry_form = ""
+    if record.status in {"failed", "no_data"}:
+        retry_form = (
+            '<form class="admin-form" action="/admin/imports/allow-retry" method="post">'
+            '<h2 class="section">Повторная обработка</h2>'
+            '<p class="muted">Кнопка переводит файл в pending. После этого загрузите ZIP еще раз, и файл будет обработан повторно.</p>'
+            f'<input type="hidden" name="import_id" value="{record.id}">'
+            '<button type="submit">Разрешить повторную обработку</button>'
+            '</form>'
+        )
+    content = (
+        '<section class="admin-panel">'
+        f'<p><a href="/admin/imports">← Назад к импортам</a></p>'
+        '<h2 class="section">Детали импорта</h2>'
+        f'{notice_html}{error_html}'
+        f'{_render_import_detail_summary(record)}'
+        f'{_render_import_metadata_form(record)}'
+        f'{retry_form}'
+        f'{_render_import_catalog_rows(catalog_rows)}'
+        f'{_render_import_row_logs(row_logs)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title=f"Импорт #{record.id}",
+        subtitle="Контроль конкретного файла РНМЦ.",
+        admin_nav=_render_admin_nav(active_slug="imports"),
+        content=content,
+    )
+
+
+def _render_import_detail_summary(record: ImportedFileRecord) -> str:
+    rows = [
+        ("ID", str(record.id)),
+        ("Файл", record.filename),
+        ("Регион", record.region_folder),
+        ("Статус", record.status),
+        ("Задача", record.task_number),
+        ("OK-строки", str(record.rows_ok)),
+        ("Rejected-строки", str(record.rows_rejected)),
+        ("ЛСР", record.lsr_quarter),
+        ("Начало", record.planned_start),
+        ("Окончание", record.planned_finish),
+        ("Ошибка", record.failure_reason),
+    ]
+    body = ''.join(
+        f'<div><dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd></div>'
+        for label, value in rows
+    )
+    return f'<dl class="stats">{body}</dl>'
+
+
+def _render_import_metadata_form(record: ImportedFileRecord) -> str:
+    return (
+        '<form class="admin-form" action="/admin/imports/update" method="post">'
+        '<h2 class="section">Ручная правка данных файла</h2>'
+        f'<input type="hidden" name="import_id" value="{record.id}">'
+        f'<label>Регион<input type="text" name="region_folder" value="{html.escape(record.region_folder)}"></label>'
+        f'<label>Номер задачи<input type="text" name="task_number" value="{html.escape(record.task_number)}"></label>'
+        f'<label>Год/квартал ЛСР<input type="text" name="lsr_quarter" value="{html.escape(record.lsr_quarter)}"></label>'
+        f'<label>Планируемое начало<input type="text" name="planned_start" value="{html.escape(record.planned_start)}"></label>'
+        f'<label>Планируемое окончание<input type="text" name="planned_finish" value="{html.escape(record.planned_finish)}"></label>'
+        '<button type="submit">Сохранить данные файла</button>'
+        '</form>'
+    )
+
+
+def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
+    if not rows:
+        return '<div class="admin-form"><h2 class="section">Импортированные строки</h2><p class="muted">Для этого файла строки catalog_items не найдены.</p></div>'
+    header = (
+        '<div class="admin-form"><h2 class="section">Импортированные строки</h2>'
+        '<table class="preview"><thead><tr>'
+        '<th>Excel row</th><th>Код</th><th>Ед.</th><th>Цена</th><th>Работа</th>'
+        '</tr></thead><tbody>'
+    )
+    body = []
+    for row in rows[:200]:
+        body.append(
+            '<tr>'
+            f'<td>{row.source_row_number}</td>'
+            f'<td>{html.escape(row.code)}</td>'
+            f'<td>{html.escape(row.unit)}</td>'
+            f'<td>{row.price:g}</td>'
+            f'<td>{html.escape(row.work_name)}</td>'
+            '</tr>'
+        )
+    tail = '</tbody></table>'
+    if len(rows) > 200:
+        tail += f'<p class="muted">Показаны первые 200 строк из {len(rows)}.</p>'
+    return header + ''.join(body) + tail + '</div>'
+
+
+def _render_import_row_logs(rows: list[ImportRowLogRecord]) -> str:
+    if not rows:
+        return '<div class="admin-form"><h2 class="section">Rejected-лог</h2><p class="muted">Rejected-строки по файлу не записаны.</p></div>'
+    header = (
+        '<div class="admin-form"><h2 class="section">Rejected-лог</h2>'
+        '<table class="preview"><thead><tr>'
+        '<th>Excel row</th><th>Статус</th><th>Причина</th>'
+        '</tr></thead><tbody>'
+    )
+    body = []
+    for row in rows[:300]:
+        body.append(
+            '<tr>'
+            f'<td>{row.row_number}</td>'
+            f'<td>{html.escape(row.status)}</td>'
+            f'<td>{html.escape(row.reason)}</td>'
+            '</tr>'
+        )
+    tail = '</tbody></table>'
+    if len(rows) > 300:
+        tail += f'<p class="muted">Показаны первые 300 записей из {len(rows)}.</p>'
+    return header + ''.join(body) + tail + '</div>'
 
 
 def render_admin_risks(risks: list[PriceRiskLogEntry]) -> str:
