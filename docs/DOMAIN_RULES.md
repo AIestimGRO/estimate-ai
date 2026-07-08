@@ -212,6 +212,23 @@ encode business rules that must be preserved:
   grey (`dupFill`) = a second-or-later price within the same task
   (visual de-emphasis, not a data quality flag).
 
+## 6.1 RNMC catalog import value normalization
+
+For RNMC ZIP imports, `catalog_items.price` stores unit price without VAT. Unit
+price headers with auxiliary materials are valid source columns when the header
+still describes a unit price. Unit-price source values marked `с НДС` are
+divided by 1.2 before storage; values marked `без НДС` are stored as-is.
+
+`Итого стоимость` is stored separately as `total_price` and follows the same VAT
+normalization rule. Average values are not source values: headers containing
+`средняя` or `ср знач` are ignored for both unit price and total price.
+
+Labor import mappings are deterministic: `ТЗ` and `ТЗр` unit/total values map to
+`labor_unit` / `labor_total`; `ТЗм` unit/total values map to
+`machine_labor_unit` / `machine_labor_total`. Formula cells are read as cached
+calculated values, and numeric strings with comma or dot decimal separators are
+normalized to SQLite numeric values.
+
 ## 7. Name exclusion rules (Module7)
 
 A configurable rule table on sheet `Name_Exclusions`, columns:

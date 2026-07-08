@@ -110,3 +110,7 @@ _docs_roadmap_rnmc_review/
 # RNMC metadata auto-detect delivery artifacts
 rnmc-metadata-auto-detect-updated-files.zip
 _rnmc_metadata_auto_detect_review/
+
+# RNMC strict value mapping delivery artifacts
+rnmc-strict-value-mapping-updated-files.zip
+_rnmc_strict_value_mapping_review/

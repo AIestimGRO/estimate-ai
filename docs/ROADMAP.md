@@ -74,6 +74,8 @@ flow.
 - Real ZIP import into `catalog_items`.
 - Per-file detail page with metadata, imported rows, rejected-row log, and retry
   unlock for `failed` / `no_data`.
+- RNMC value mapping for unit price without VAT, total cost without VAT, and
+  labor columns, including VAT normalization and average-value exclusion.
 
 See `docs/RNMC_IMPORT.md` for the import specification.
 
@@ -96,11 +98,11 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - [x] RNMC import control center with per-file details and rejected rows.
 - [x] Initial automatic detection of `lsr_quarter`, planned start, and planned
   finish from RNMC workbooks.
+- [x] Strict RNMC value-column mapping with VAT normalization and labor fields.
 
 ## Next milestone — RNMC import quality automation
 
-1. Expand metadata detection against more real RNMC layouts and add patterns as
-   needed.
+1. Add regional coefficient extraction/storage from the RNMC consolidation block.
 2. Improve rejected-row diagnostics and export/download of rejected rows.
 3. Add `.xls` support if real incoming files still require it.
 4. Decide whether to store original uploaded workbooks for true one-click retry

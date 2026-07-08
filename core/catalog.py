@@ -31,6 +31,11 @@ class CatalogRow:
     work_name: object
     region: object = ""
     added_date: object = None
+    total_price: object = None
+    labor_unit: object = None
+    labor_total: object = None
+    machine_labor_unit: object = None
+    machine_labor_total: object = None
 
 
 @dataclass(frozen=True)

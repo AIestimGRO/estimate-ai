@@ -874,7 +874,9 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
     header = (
         '<div class="admin-form"><h2 class="section">Импортированные строки</h2>'
         '<table class="preview"><thead><tr>'
-        '<th>Excel row</th><th>Код</th><th>Ед.</th><th>Цена</th><th>Работа</th>'
+        '<th>Excel row</th><th>Код</th><th>Ед.</th><th>Цена ед.</th>'
+        '<th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
+        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Работа</th>'
         '</tr></thead><tbody>'
     )
     body = []
@@ -885,6 +887,11 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
             f'<td>{html.escape(row.code)}</td>'
             f'<td>{html.escape(row.unit)}</td>'
             f'<td>{row.price:g}</td>'
+            f'<td>{_display_optional_number(row.total_price)}</td>'
+            f'<td>{_display_optional_number(row.labor_unit)}</td>'
+            f'<td>{_display_optional_number(row.labor_total)}</td>'
+            f'<td>{_display_optional_number(row.machine_labor_unit)}</td>'
+            f'<td>{_display_optional_number(row.machine_labor_total)}</td>'
             f'<td>{html.escape(row.work_name)}</td>'
             '</tr>'
         )
@@ -892,6 +899,12 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
     if len(rows) > 200:
         tail += f'<p class="muted">Показаны первые 200 строк из {len(rows)}.</p>'
     return header + ''.join(body) + tail + '</div>'
+
+
+def _display_optional_number(value: float | None) -> str:
+    if value is None:
+        return ''
+    return f'{value:g}'
 
 
 def _render_import_row_logs(rows: list[ImportRowLogRecord]) -> str:

@@ -9,8 +9,9 @@
 
 1. **Expand metadata detection from real RNMC workbooks.** Initial automatic
    detection of `lsr_quarter`, planned start, and planned finish is implemented
-   for `.xlsx` / `.xlsm`. Keep adding deterministic label patterns when real
-   files expose new layouts or wording.
+   for `.xlsx` / `.xlsm`; real legacy note text and Excel serial date values are
+   now covered. Keep adding deterministic label patterns when real files expose
+   new layouts or wording.
 
 2. **Support `.xls` detailed parsing if needed.** ZIP dry-run recognizes `.xls`
    as an Excel file, but row preview/import currently supports `.xlsx` and
@@ -28,22 +29,28 @@
 5. **Rejected-row export.** Rejected rows are stored in `import_row_log` and shown
    on the detail page. A download/export path would make manual cleanup easier.
 
+
+6. **Regional coefficient import is still pending.** Real RNMC files may contain
+   a consolidation block with object region and regional coefficient. Region
+   still defaults to the ZIP folder or manual override; coefficient storage and
+   display should be added in a separate schema/UI block.
+
 ## From excel_io.py
 
-6. **Silent empty result when estimate header row is not found.**
+7. **Silent empty result when estimate header row is not found.**
    `read_estimate_rows` returns `[]` with no error/warning if the header row
    detection fails. Higher layers should surface this as a clear message.
 
-7. **Formula cells are read as formula text, not computed values. — RESOLVED
+8. **Formula cells are read as formula text, not computed values. — RESOLVED
    (2026-07).** Reading now uses `data_only=True` where needed. Caveat:
    `data_only=True` depends on Excel-cached values being present.
 
 ## From catalog.py (lower priority)
 
-8. `_parse_iso_date` only accepts strict ISO format (`YYYY-MM-DD`) for string
+9. `_parse_iso_date` only accepts strict ISO format (`YYYY-MM-DD`) for string
    dates. Revisit if source files provide dates as non-ISO plain text.
 
-9. Dedup within a single task_id in `BuildCatalog` is O(n^2). Fine for current
+10. Dedup within a single task_id in `BuildCatalog` is O(n^2). Fine for current
    catalog sizes; revisit only if groups grow large.
 
 ## Flexible layout resolution — deferred rules

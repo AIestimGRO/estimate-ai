@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from numbers import Real
 from pathlib import PurePosixPath
@@ -40,6 +40,8 @@ from core.storage.catalog import (
 HEADER_NAME_WORKS = "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442"
 HEADER_NAME_SHORT = "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435"
 HEADER_UNIT = "\u0415\u0434.\u0438\u0437\u043c."
+HEADER_UNIT_NO_DOT = "\u0415\u0434.\u0438\u0437\u043c"
+HEADER_UNIT_LONG = "\u0415\u0434\u0438\u043d\u0438\u0446\u0430 \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u044f"
 HEADER_QTY_SHORT = "\u041a\u043e\u043b-\u0432\u043e"
 HEADER_QTY_LONG = "\u041a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e"
 TASK_LABEL_FULL = "\u2116 \u0437\u0430\u0434\u0430\u0447\u0438 1\u0424"
@@ -81,12 +83,14 @@ PLANNED_START_LABEL_PATTERNS = (
     "\u041f\u043b\u0430\u043d\u0438\u0440\u0443\u0435\u043c\u044b\u0439 \u0441\u0440\u043e\u043a \u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0431\u043e\u0442",
     "\u041f\u043b\u0430\u043d\u043e\u0432\u044b\u0439 \u0441\u0440\u043e\u043a \u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0431\u043e\u0442",
     "\u0414\u0430\u0442\u0430 \u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0431\u043e\u0442",
+    "\u043d\u0430\u0447\u0430\u043b\u043e \u0440\u0430\u0431\u043e\u0442",
 )
 PLANNED_FINISH_LABEL_PATTERNS = (
     "\u041f\u043b\u0430\u043d\u0438\u0440\u0443\u0435\u043c\u044b\u0439 \u0441\u0440\u043e\u043a \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
     "\u041f\u043b\u0430\u043d\u0438\u0440\u0443\u043c\u044b\u0439 \u0441\u0440\u043e\u043a \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
     "\u041f\u043b\u0430\u043d\u043e\u0432\u044b\u0439 \u0441\u0440\u043e\u043a \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
     "\u0414\u0430\u0442\u0430 \u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f \u0440\u0430\u0431\u043e\u0442",
+    "\u043e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442",
 )
 
 STATUS_PREVIEW_OK = "preview_ok"
@@ -98,6 +102,8 @@ STATUS_UNSUPPORTED_FORMAT = "unsupported_format"
 STATUS_PARSE_ERROR = "parse_error"
 
 SUPPORTED_PREVIEW_SUFFIXES = frozenset({".xlsx", ".xlsm"})
+EXCEL_DATE_BASE = date(1899, 12, 30)
+VALUE_WITH_VAT_DIVISOR = 1.2
 
 
 @dataclass(frozen=True)
@@ -564,7 +570,7 @@ def _extract_catalog_row_candidates(
 ) -> tuple[list[RnmcCatalogRowCandidate], list[RnmcRejectedRow]]:
     num_col = _find_numbering_col(header.header_map) or 1
     code_col = _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)
-    price_col = _find_pattern_col(header.header_map, PRICE_HEADER_PATTERNS)
+    value_columns = _detect_value_columns(header.header_map)
     date_col = _find_pattern_col(header.header_map, ADDED_DATE_HEADER_PATTERNS)
     max_row = int(sheet.max_row or 0)
     rows: list[RnmcCatalogRowCandidate] = []
@@ -602,8 +608,15 @@ def _extract_catalog_row_candidates(
             rejected.append(RnmcRejectedRow(row_number, "missing_unit_and_quantity"))
             continue
 
-        price_value = _cell_value(sheet, row_number, price_col)
+        price_value = _cell_value(sheet, row_number, value_columns.unit_price.column)
         parsed_price = _parse_positive_number(price_value)
+        if parsed_price is not None:
+            parsed_price = parsed_price / value_columns.unit_price.divisor
+
+        total_price = _parse_optional_value(
+            _cell_value(sheet, row_number, value_columns.total_price.column),
+            divisor=value_columns.total_price.divisor,
+        )
         catalog_row = CatalogRow(
             task_id=task_number,
             price=parsed_price if parsed_price is not None else price_value,
@@ -612,6 +625,19 @@ def _extract_catalog_row_candidates(
             work_name=name_value,
             region=region_folder,
             added_date=_cell_value(sheet, row_number, date_col),
+            total_price=total_price,
+            labor_unit=_parse_optional_value(
+                _cell_value(sheet, row_number, value_columns.labor_unit_col)
+            ),
+            labor_total=_parse_optional_value(
+                _cell_value(sheet, row_number, value_columns.labor_total_col)
+            ),
+            machine_labor_unit=_parse_optional_value(
+                _cell_value(sheet, row_number, value_columns.machine_labor_unit_col)
+            ),
+            machine_labor_total=_parse_optional_value(
+                _cell_value(sheet, row_number, value_columns.machine_labor_total_col)
+            ),
         )
         issue = _catalog_row_issue(catalog_row)
         if issue != "":
@@ -734,6 +760,22 @@ class _HeaderMatch:
     header_map: dict[str, int]
 
 
+@dataclass(frozen=True)
+class _ValueColumn:
+    column: int
+    divisor: float = 1.0
+
+
+@dataclass(frozen=True)
+class _HeaderValueColumns:
+    unit_price: _ValueColumn
+    total_price: _ValueColumn
+    labor_unit_col: int
+    labor_total_col: int
+    machine_labor_unit_col: int
+    machine_labor_total_col: int
+
+
 def _find_header_row(sheet: Worksheet) -> _HeaderMatch | None:
     max_row = min(int(sheet.max_row or 0), 400)
     max_col = min(int(sheet.max_column or 0), 150)
@@ -753,16 +795,14 @@ def _find_header_row(sheet: Worksheet) -> _HeaderMatch | None:
         qty_col = 0
         header_map: dict[str, int] = {}
         for index, value in enumerate(row, start=1):
-            normalized = _normalize_header(value)
-            if normalized == "":
-                continue
-            header_map[normalized] = index
-            if _is_name_header(normalized):
-                name_col = index
-            if _is_unit_header(normalized):
-                unit_col = index
-            if _is_qty_header(normalized):
-                qty_col = index
+            for normalized in _header_keys(value):
+                header_map.setdefault(normalized, index)
+                if _is_name_header(normalized):
+                    name_col = index
+                if _is_unit_header(normalized):
+                    unit_col = index
+                if _is_qty_header(normalized):
+                    qty_col = index
         if name_col and unit_col and qty_col:
             return _HeaderMatch(
                 row_number=row_number,
@@ -854,6 +894,14 @@ def _extract_workbook_metadata(workbook) -> RnmcWorkbookMetadata:
                 PLANNED_FINISH_LABEL_PATTERNS,
                 value_kind="date",
             )
+
+        context = _find_metadata_context(sheet)
+        if lsr_quarter == "":
+            lsr_quarter = context.lsr_quarter
+        if planned_start == "":
+            planned_start = context.planned_start
+        if planned_finish == "":
+            planned_finish = context.planned_finish
         if lsr_quarter and planned_start and planned_finish:
             break
     return RnmcWorkbookMetadata(
@@ -893,7 +941,14 @@ def _find_metadata_value(
 
 
 def _metadata_label_matches(normalized: str, normalized_patterns: tuple[str, ...]) -> bool:
-    return any(pattern != "" and (pattern in normalized or normalized in pattern) for pattern in normalized_patterns)
+    for pattern in normalized_patterns:
+        if pattern == "":
+            continue
+        if pattern in normalized:
+            return True
+        if len(normalized) >= 8 and normalized in pattern:
+            return True
+    return False
 
 
 def _metadata_inline_value(value: object) -> str:
@@ -944,6 +999,9 @@ def _format_date_metadata(value: object) -> str:
         return value.date().isoformat()
     if isinstance(value, date):
         return value.isoformat()
+    serial_date = _excel_serial_date(value)
+    if serial_date:
+        return serial_date
 
     text = _text(value)
     if text == "":
@@ -965,27 +1023,187 @@ def _format_date_metadata(value: object) -> str:
         except ValueError:
             continue
         return parsed.isoformat()
-    return normalized
+    start, finish = _parse_month_period_context(normalized)
+    return start or finish
 
 
 def _format_quarter_metadata(value: object) -> str:
     text = _text(value)
     if text == "":
         return ""
+    parsed = _parse_quarter_context(text)
+    if parsed:
+        return parsed
     normalized = text.replace("\u00a0", " ").strip()
-    folded = normalized.casefold()
-
-    year_match = re.search(r"(20\d{2}|19\d{2})", folded)
-    quarter_match = re.search(r"(?:q|кв\.?|квартал)\s*([1-4])(?!\d)", folded)
-    if quarter_match is None:
-        quarter_match = re.search(r"(?<!\d)([1-4])\s*(?:q|кв\.?|квартал)", folded)
-    if quarter_match is None and year_match is not None:
-        around = folded.replace(year_match.group(1), " ")
-        quarter_match = re.search(r"\b([1-4])\b", around)
-
-    if year_match is not None and quarter_match is not None:
-        return f"{year_match.group(1)} Q{quarter_match.group(1)}"
     return normalized
+
+
+def _find_metadata_context(sheet: Worksheet) -> RnmcWorkbookMetadata:
+    lsr_quarter = ""
+    planned_start = ""
+    planned_finish = ""
+    max_row = min(int(sheet.max_row or 0), 180)
+    max_col = min(int(sheet.max_column or 0), 80)
+    for row_number in range(1, max_row + 1):
+        values = [sheet.cell(row_number, col_number).value for col_number in range(1, max_col + 1)]
+        text = " ".join(_text(value) for value in values if _text(value))
+        if text == "":
+            continue
+        if lsr_quarter == "":
+            lsr_quarter = _parse_quarter_context(text)
+        if planned_start == "" or planned_finish == "":
+            start, finish = _parse_month_period_context(text)
+            planned_start = planned_start or start
+            planned_finish = planned_finish or finish
+        if lsr_quarter and planned_start and planned_finish:
+            break
+    return RnmcWorkbookMetadata(
+        lsr_quarter=lsr_quarter,
+        planned_start=planned_start,
+        planned_finish=planned_finish,
+    )
+
+
+def _parse_quarter_context(value: object) -> str:
+    text = _text(value)
+    if text == "":
+        return ""
+    folded = text.replace("\u00a0", " ").casefold()
+    year_pattern = "(?P<year>(?:20|19)?\\d{2})"
+    roman_pattern = "(?P<roman>iv|iii|ii|i)"
+    number_pattern = "(?P<number>[1-4])"
+    quarter_word = "(?:\\u043a\\u0432\\.?|\\u043a\\u0432\\u0430\\u0440\\u0442\\u0430\\u043b\\w*)"
+    patterns = (
+        roman_pattern + "\\s*" + quarter_word + "[^0-9]{0,20}" + year_pattern,
+        number_pattern + "\\s*" + quarter_word + "[^0-9]{0,20}" + year_pattern,
+        quarter_word + "\\s*" + number_pattern + "[^0-9]{0,20}" + year_pattern,
+    )
+    for pattern in patterns:
+        match = re.search(pattern, folded)
+        if match is None:
+            continue
+        year = _normalize_year(match.group("year"))
+        quarter = match.groupdict().get("number") or _roman_quarter(match.groupdict().get("roman", ""))
+        if quarter:
+            return f"{year} Q{quarter}"
+    return ""
+
+
+def _roman_quarter(value: str) -> str:
+    return {"i": "1", "ii": "2", "iii": "3", "iv": "4"}.get(value.casefold(), "")
+
+
+def _normalize_year(value: str) -> str:
+    text = _text(value)
+    if text == "":
+        return ""
+    if len(text) == 2:
+        return f"20{text}"
+    return text
+
+
+def _parse_month_period_context(value: object) -> tuple[str, str]:
+    text = _text(value)
+    if text == "":
+        return "", ""
+    folded = text.replace("\u00a0", " ").casefold()
+    tokens = _month_tokens(folded)
+    if not tokens:
+        return "", ""
+    years = [_normalize_year(item) for item in re.findall(r"(?:20|19)?\d{2}", folded)]
+    if not _looks_like_period_text(folded) and not years:
+        return "", ""
+    if len(tokens) == 1:
+        month, year = tokens[0]
+        year = year or (years[0] if years else "")
+        if year:
+            value = _month_date(year, month)
+            return value, value
+        return "", ""
+    start_month, start_year = tokens[0]
+    finish_month, finish_year = tokens[1]
+    if start_year == "" and finish_year:
+        start_year = finish_year
+    if finish_year == "" and start_year:
+        finish_year = start_year
+    if start_year == "" and finish_year == "" and years:
+        start_year = years[0]
+        finish_year = years[-1]
+    if start_year and finish_year:
+        return _month_date(start_year, start_month), _month_date(finish_year, finish_month)
+    return "", ""
+
+
+def _looks_like_period_text(value: str) -> bool:
+    return any(
+        token in value
+        for token in (
+            "\u043f\u0435\u0440\u0438\u043e\u0434",
+            "\u043d\u0430\u0447\u0430\u043b",
+            "\u043e\u043a\u043e\u043d\u0447",
+            "\u0440\u0430\u0431\u043e\u0442",
+        )
+    ) or " \u043f\u043e " in value or "-" in value or "\u2013" in value or "\u2014" in value
+
+
+def _month_tokens(value: str) -> list[tuple[int, str]]:
+    month_pattern = (
+        "(?P<month>"
+        "\\u044f\\u043d\\u0432\\u0430\\u0440\\w*|"
+        "\\u0444\\u0435\\u0432\\u0440\\u0430\\u043b\\w*|"
+        "\\u043c\\u0430\\u0440\\u0442\\w*|"
+        "\\u0430\\u043f\\u0440\\u0435\\u043b\\w*|"
+        "\\u043c\\u0430(?:\\u0439|\\u044f|\\u0435|\\u044e|\\u0435\\u043c)?|"
+        "\\u0438\\u044e\\u043d\\w*|"
+        "\\u0438\\u044e\\u043b\\w*|"
+        "\\u0430\\u0432\\u0433\\u0443\\u0441\\u0442\\w*|"
+        "\\u0441\\u0435\\u043d\\u0442\\u044f\\u0431\\u0440\\w*|"
+        "\\u043e\\u043a\\u0442\\u044f\\u0431\\u0440\\w*|"
+        "\\u043d\\u043e\\u044f\\u0431\\u0440\\w*|"
+        "\\u0434\\u0435\\u043a\\u0430\\u0431\\u0440\\w*)"
+        "\\s*(?P<year>(?:20|19)?\\d{2})?"
+    )
+    tokens: list[tuple[int, str]] = []
+    for match in re.finditer(month_pattern, value):
+        month = _month_number(match.group("month"))
+        if month:
+            tokens.append((month, _normalize_year(match.group("year") or "")))
+    return tokens
+
+
+def _month_number(value: str) -> int:
+    folded = value.casefold()
+    prefixes = (
+        ("\u044f\u043d\u0432\u0430\u0440", 1),
+        ("\u0444\u0435\u0432\u0440\u0430\u043b", 2),
+        ("\u043c\u0430\u0440\u0442", 3),
+        ("\u0430\u043f\u0440\u0435\u043b", 4),
+        ("\u043c\u0430", 5),
+        ("\u0438\u044e\u043d", 6),
+        ("\u0438\u044e\u043b", 7),
+        ("\u0430\u0432\u0433\u0443\u0441\u0442", 8),
+        ("\u0441\u0435\u043d\u0442\u044f\u0431\u0440", 9),
+        ("\u043e\u043a\u0442\u044f\u0431\u0440", 10),
+        ("\u043d\u043e\u044f\u0431\u0440", 11),
+        ("\u0434\u0435\u043a\u0430\u0431\u0440", 12),
+    )
+    for prefix, month in prefixes:
+        if folded.startswith(prefix):
+            return month
+    return 0
+
+
+def _month_date(year: str, month: int) -> str:
+    return date(int(year), int(month), 1).isoformat()
+
+
+def _excel_serial_date(value: object) -> str:
+    if not isinstance(value, Real) or isinstance(value, bool):
+        return ""
+    serial = float(value)
+    if serial < 20000 or serial > 80000:
+        return ""
+    return (EXCEL_DATE_BASE + timedelta(days=int(serial))).isoformat()
 
 
 def _extract_task_number(workbook) -> str:
@@ -1042,6 +1260,123 @@ def _find_numbering_col(header_map: dict[str, int]) -> int:
 
 
 
+
+def _detect_value_columns(header_map: dict[str, int]) -> _HeaderValueColumns:
+    unit_price_candidates: list[_ValueColumn] = []
+    total_price_candidates: list[_ValueColumn] = []
+    labor_unit_col = 0
+    labor_total_col = 0
+    machine_labor_unit_col = 0
+    machine_labor_total_col = 0
+
+    for key, column in header_map.items():
+        if _is_average_value_header(key):
+            continue
+        if machine_labor_unit_col == 0 and _is_machine_labor_unit_header(key):
+            machine_labor_unit_col = int(column)
+            continue
+        if machine_labor_total_col == 0 and _is_machine_labor_total_header(key):
+            machine_labor_total_col = int(column)
+            continue
+        if labor_unit_col == 0 and _is_labor_unit_header(key):
+            labor_unit_col = int(column)
+            continue
+        if labor_total_col == 0 and _is_labor_total_header(key):
+            labor_total_col = int(column)
+            continue
+        if _is_unit_price_header(key):
+            unit_price_candidates.append(_ValueColumn(int(column), _vat_divisor(key)))
+            continue
+        if _is_total_price_header(key):
+            total_price_candidates.append(_ValueColumn(int(column), _vat_divisor(key)))
+
+    return _HeaderValueColumns(
+        unit_price=_prefer_without_vat(unit_price_candidates),
+        total_price=_prefer_without_vat(total_price_candidates),
+        labor_unit_col=labor_unit_col,
+        labor_total_col=labor_total_col,
+        machine_labor_unit_col=machine_labor_unit_col,
+        machine_labor_total_col=machine_labor_total_col,
+    )
+
+
+def _prefer_without_vat(candidates: list[_ValueColumn]) -> _ValueColumn:
+    if not candidates:
+        return _ValueColumn(0, 1.0)
+    for candidate in candidates:
+        if candidate.divisor == 1.0:
+            return candidate
+    return candidates[0]
+
+
+def _vat_divisor(normalized_header: str) -> float:
+    without_vat = "\u0431\u0435\u0437\u043d\u0434\u0441"
+    with_vat = "\u0441\u043d\u0434\u0441"
+    if with_vat in normalized_header and without_vat not in normalized_header:
+        return VALUE_WITH_VAT_DIVISOR
+    return 1.0
+
+
+def _is_average_value_header(normalized_header: str) -> bool:
+    return any(
+        token in normalized_header
+        for token in (
+            "\u0441\u0440\u0435\u0434",
+            "\u0441\u0440\u0437\u043d\u0430\u0447",
+            "\u0441\u0440.\u0437\u043d\u0430\u0447",
+        )
+    )
+
+
+def _is_unit_price_header(normalized_header: str) -> bool:
+    if _is_total_price_header(normalized_header):
+        return False
+    price = "\u0446\u0435\u043d\u0430"
+    cost = "\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442"
+    if normalized_header == price:
+        return True
+    if "\u0431\u0430\u0437\u043e\u0432\u0430\u044f\u0446\u0435\u043d\u0430" in normalized_header:
+        return True
+    unit_markers = (
+        "\u0435\u0434\u0438\u043d\u0438\u0446",
+        "\u0437\u0430\u0435\u0434",
+        "\u0437\u04301",
+        "\u0435\u0434.",
+    )
+    return (price in normalized_header or cost in normalized_header) and any(
+        marker in normalized_header for marker in unit_markers
+    )
+
+
+def _is_total_price_header(normalized_header: str) -> bool:
+    return (
+        "\u0438\u0442\u043e\u0433\u043e" in normalized_header
+        and "\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442" in normalized_header
+    )
+
+
+def _is_labor_unit_header(normalized_header: str) -> bool:
+    return (
+        "\u0442\u0437\u043d\u0430\u0435\u0434" in normalized_header
+        or "\u0442\u0437\u0440\u043d\u0430\u0435\u0434" in normalized_header
+    )
+
+
+def _is_labor_total_header(normalized_header: str) -> bool:
+    return (
+        "\u0442\u0437\u0432\u0441\u0435\u0433\u043e" in normalized_header
+        or "\u0442\u0437\u0440\u0432\u0441\u0435\u0433\u043e" in normalized_header
+    )
+
+
+def _is_machine_labor_unit_header(normalized_header: str) -> bool:
+    return "\u0442\u0437\u043c\u043d\u0430\u0435\u0434" in normalized_header
+
+
+def _is_machine_labor_total_header(normalized_header: str) -> bool:
+    return "\u0442\u0437\u043c\u0432\u0441\u0435\u0433\u043e" in normalized_header
+
+
 def _find_pattern_col(header_map: dict[str, int], patterns: tuple[str, ...]) -> int:
     normalized_patterns = tuple(_normalize_header(pattern) for pattern in patterns)
     for pattern in normalized_patterns:
@@ -1070,28 +1405,46 @@ def _catalog_row_issue(row: CatalogRow) -> str:
 
 
 def _parse_positive_number(value: object) -> float | None:
+    number = _parse_number(value)
+    if number is None or number <= 0:
+        return None
+    return number
+
+
+def _parse_optional_value(value: object, *, divisor: float = 1.0) -> float | None:
+    number = _parse_number(value)
+    if number is None:
+        return None
+    return number / divisor
+
+
+def _parse_number(value: object) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, Real):
-        number = float(value)
-    elif isinstance(value, (date, datetime)):
+        return float(value)
+    if isinstance(value, (date, datetime)):
         return None
+    text = str(value).strip()
+    if text == "":
+        return None
+    text = text.replace(" ", " ").replace(" ", "")
+    text = "".join(char for char in text if char.isdigit() or char in {".", ",", "-"})
+    if text in {"", ".", ",", "-"}:
+        return None
+    if "," in text and "." in text:
+        comma_pos = text.rfind(",")
+        dot_pos = text.rfind(".")
+        decimal_sep = "," if comma_pos > dot_pos else "."
+        thousands_sep = "." if decimal_sep == "," else ","
+        text = text.replace(thousands_sep, "")
+        text = text.replace(decimal_sep, ".")
     else:
-        text = str(value).strip()
-        if text == "":
-            return None
-        text = text.replace("\u00a0", " ").replace(" ", "")
-        if "," in text and "." in text:
-            text = text.replace(".", "").replace(",", ".")
-        else:
-            text = text.replace(",", ".")
-        try:
-            number = float(text)
-        except ValueError:
-            return None
-    if number <= 0:
+        text = text.replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
         return None
-    return number
 
 
 def _count_import_status(entries: list[RnmcZipCatalogImportEntry], status: str) -> int:
@@ -1105,12 +1458,28 @@ def _is_name_header(value: str) -> bool:
 
 
 def _is_unit_header(value: str) -> bool:
-    unit = _normalize_header(HEADER_UNIT)
-    return value.startswith(unit) or unit in value
+    units = {
+        _normalize_header(HEADER_UNIT),
+        _normalize_header(HEADER_UNIT_NO_DOT),
+        _normalize_header(HEADER_UNIT_LONG),
+    }
+    return any(value.startswith(unit) or unit in value for unit in units if unit)
 
 
 def _is_qty_header(value: str) -> bool:
     return _normalize_header(HEADER_QTY_SHORT) in value or _normalize_header(HEADER_QTY_LONG) in value
+
+
+def _header_keys(value: object) -> list[str]:
+    text = _text(value)
+    if text == "":
+        return []
+    keys: list[str] = []
+    for part in (text, text.splitlines()[0] if text.splitlines() else ""):
+        normalized = _normalize_header(part)
+        if normalized and normalized not in keys:
+            keys.append(normalized)
+    return keys
 
 
 def _normalize_header(value: object) -> str:

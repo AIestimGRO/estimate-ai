@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS catalog_items (
     unit TEXT NOT NULL,
     work_name TEXT NOT NULL DEFAULT '',
     price REAL NOT NULL,
+    total_price REAL,
+    labor_unit REAL,
+    labor_total REAL,
+    machine_labor_unit REAL,
+    machine_labor_total REAL,
     added_date TEXT,
     source_region_folder TEXT NOT NULL DEFAULT '',
     source_filename TEXT NOT NULL DEFAULT '',

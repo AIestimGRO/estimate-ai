@@ -93,6 +93,11 @@ class CatalogItemRecord:
     unit: str
     work_name: str
     price: float
+    total_price: float | None
+    labor_unit: float | None
+    labor_total: float | None
+    machine_labor_unit: float | None
+    machine_labor_total: float | None
     source_row_number: int
 
 
@@ -247,7 +252,10 @@ def list_catalog_rows(
     source_id = _require_source_id(connection, source_name)
     rows = connection.execute(
         """
-        SELECT task_id, region, code, unit, work_name, price, added_date
+        SELECT
+            task_id, region, code, unit, work_name, price, added_date,
+            total_price, labor_unit, labor_total,
+            machine_labor_unit, machine_labor_total
         FROM catalog_items
         WHERE source_id = ?
         ORDER BY id
@@ -511,6 +519,11 @@ def list_catalog_items_for_imported_file(
             catalog_items.unit,
             catalog_items.work_name,
             catalog_items.price,
+            catalog_items.total_price,
+            catalog_items.labor_unit,
+            catalog_items.labor_total,
+            catalog_items.machine_labor_unit,
+            catalog_items.machine_labor_total,
             catalog_items.source_row_number
         FROM catalog_items
         WHERE catalog_items.source_region_folder = ?
@@ -531,6 +544,11 @@ def list_catalog_items_for_imported_file(
             unit=str(row["unit"]),
             work_name=str(row["work_name"]),
             price=float(row["price"]),
+            total_price=_optional_float(row["total_price"]),
+            labor_unit=_optional_float(row["labor_unit"]),
+            labor_total=_optional_float(row["labor_total"]),
+            machine_labor_unit=_optional_float(row["machine_labor_unit"]),
+            machine_labor_total=_optional_float(row["machine_labor_total"]),
             source_row_number=int(row["source_row_number"]),
         )
         for row in rows
@@ -628,6 +646,11 @@ def replace_catalog_rows_for_file(
                 _text(row.unit),
                 _text(row.work_name),
                 price,
+                _parse_optional_number(row.total_price),
+                _parse_optional_number(row.labor_unit),
+                _parse_optional_number(row.labor_total),
+                _parse_optional_number(row.machine_labor_unit),
+                _parse_optional_number(row.machine_labor_total),
                 _serialize_date(row.added_date),
                 _text(item.source_region_folder),
                 _text(item.source_filename),
@@ -640,8 +663,10 @@ def replace_catalog_rows_for_file(
             """
             INSERT INTO catalog_items (
                 source_id, task_id, region, code, unit, work_name, price,
-                added_date, source_region_folder, source_filename, source_row_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                total_price, labor_unit, labor_total, machine_labor_unit,
+                machine_labor_total, added_date, source_region_folder,
+                source_filename, source_row_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             payload[offset : offset + BATCH_SIZE],
         )
@@ -910,6 +935,11 @@ def _row_to_catalog_row(row: sqlite3.Row) -> CatalogRow:
         work_name=row["work_name"],
         region=row["region"],
         added_date=None if added_date is None else str(added_date),
+        total_price=row["total_price"],
+        labor_unit=row["labor_unit"],
+        labor_total=row["labor_total"],
+        machine_labor_unit=row["machine_labor_unit"],
+        machine_labor_total=row["machine_labor_total"],
     )
 
 
@@ -920,21 +950,43 @@ def _text(value: object) -> str:
 
 
 def _parse_positive_price(value: object) -> float | None:
+    number = _parse_optional_number(value)
+    if number is None or number <= 0:
+        return None
+    return number
+
+
+def _parse_optional_number(value: object) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, Real):
-        number = float(value)
-    else:
-        text = str(value).strip()
-        if text == "":
-            return None
-        try:
-            number = float(text)
-        except ValueError:
-            return None
-    if number <= 0:
+        return float(value)
+    text = str(value).strip()
+    if text == "":
         return None
-    return number
+    text = text.replace(" ", " ").replace(" ", "")
+    text = "".join(char for char in text if char.isdigit() or char in {".", ",", "-"})
+    if text in {"", ".", ",", "-"}:
+        return None
+    if "," in text and "." in text:
+        comma_pos = text.rfind(",")
+        dot_pos = text.rfind(".")
+        decimal_sep = "," if comma_pos > dot_pos else "."
+        thousands_sep = "." if decimal_sep == "," else ","
+        text = text.replace(thousands_sep, "")
+        text = text.replace(decimal_sep, ".")
+    else:
+        text = text.replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _serialize_date(value: object) -> str | None:

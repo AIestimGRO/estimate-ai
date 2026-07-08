@@ -127,3 +127,76 @@ def _to_bytes(workbook: Workbook) -> bytes:
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def test_metadata_is_detected_from_legacy_note_text(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Moscow/legacy-note.xlsx": _workbook_with_legacy_note_metadata()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+    finally:
+        connection.close()
+
+    entry = result.entries[0]
+    assert entry.lsr_quarter == "2025 Q4"
+    assert entry.planned_start == "2026-06-01"
+    assert entry.planned_finish == "2026-09-01"
+
+
+def test_metadata_accepts_excel_serial_dates_near_labels(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Kazan/serial-dates.xlsx": _workbook_with_serial_date_metadata()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+    finally:
+        connection.close()
+
+    entry = result.entries[0]
+    assert entry.lsr_quarter == "2025 Q2"
+    assert entry.planned_start == "2026-07-01"
+    assert entry.planned_finish == "2026-09-01"
+
+
+def _workbook_with_legacy_note_metadata() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-LEGACY"
+    sheet["A2"] = (
+        "Расчет выполнен на основании предоставленных смет (в ценах IV кв.2025 г.) "
+        "с применением индексов фактической инфляции и дефлятора, рассчитанных "
+        "на период выполнения работ – с июня 2026 г. по сентябрь 2026 г."
+    )
+    sheet.append([])
+    sheet.append(["№ п/п", "Наименование работ", "Ед.изм.", "Кол-во"])
+    sheet.append([1, "Work A", "м", 10])
+    sheet.append([None, None, None, None])
+    sheet.append([None, None, None, None])
+    sheet.append([None, None, None, None])
+    return _to_bytes(workbook)
+
+
+def _workbook_with_serial_date_metadata() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-SERIAL"
+    sheet["A2"] = "1.1. Предоставленных смет в ценах:"
+    sheet["B2"] = "2 кв. 25г."
+    sheet["A3"] = "начало работ:"
+    sheet["B3"] = 46204
+    sheet["A4"] = "окончание работ:"
+    sheet["B4"] = 46266
+    sheet.append([])
+    sheet.append(["№ п/п", "Наименование работ", "Ед.изм.", "Кол-во"])
+    sheet.append([1, "Work A", "м", 10])
+    sheet.append([None, None, None, None])
+    sheet.append([None, None, None, None])
+    sheet.append([None, None, None, None])
+    return _to_bytes(workbook)

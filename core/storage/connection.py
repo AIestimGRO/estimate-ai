@@ -63,6 +63,11 @@ def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "imported_files", "lsr_quarter", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "imported_files", "planned_start", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "imported_files", "planned_finish", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "catalog_items", "total_price", "REAL")
+    _ensure_column(connection, "catalog_items", "labor_unit", "REAL")
+    _ensure_column(connection, "catalog_items", "labor_total", "REAL")
+    _ensure_column(connection, "catalog_items", "machine_labor_unit", "REAL")
+    _ensure_column(connection, "catalog_items", "machine_labor_total", "REAL")
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_imported_files_filename_key "
         "ON imported_files(filename_key)"
