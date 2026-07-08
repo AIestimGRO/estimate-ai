@@ -434,40 +434,65 @@ def _render_catalog_source_table(sources: list[CatalogSource]) -> str:
         )
     return header + ''.join(rows) + '</tbody></table>'
 
-def render_admin_imports(imports: list[ImportedFileRecord]) -> str:
+def render_admin_imports(
+    imports: list[ImportedFileRecord],
+    *,
+    notice: str = "",
+    error: str = "",
+) -> str:
+    notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
+    error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
     content = (
         '<section class="admin-panel">'
-        '<h2 class="section">\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u0444\u0430\u0439\u043b\u043e\u0432</h2>'
-        '<p>\u0416\u0443\u0440\u043d\u0430\u043b \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442, \u043a\u0430\u043a\u0438\u0435 \u0444\u0430\u0439\u043b\u044b \u0431\u044b\u043b\u0438 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u044b, \u0438\u0437 \u043a\u0430\u043a\u043e\u0433\u043e \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0430 \u0438 \u0441\u043a\u043e\u043b\u044c\u043a\u043e \u0441\u0442\u0440\u043e\u043a \u043f\u0440\u0438\u043d\u044f\u0442\u043e.</p>'
+        '<h2 class="section">Импорты файлов</h2>'
+        '<p>Журнал показывает, какие файлы были загружены, из какого источника и сколько строк принято.</p>'
+        f'{notice_html}'
+        f'{error_html}'
+        f'{_render_file_log_import_form()}'
         f'{_render_imported_file_table(imports)}'
         '</section>'
     )
     return render(
         "admin.html",
-        title="\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u0444\u0430\u0439\u043b\u043e\u0432",
-        subtitle="\u0420\u0430\u0437\u0434\u0435\u043b \u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f \u0430\u0432\u0442\u043e\u043f\u043e\u0434\u0431\u043e\u0440\u0449\u0438\u043a\u0430.",
+        title="Импорты файлов",
+        subtitle="Раздел администрирования автоподборщика.",
         admin_nav=_render_admin_nav(active_slug="imports"),
         content=content,
     )
 
 
+def _render_file_log_import_form() -> str:
+    return (
+        '<form class="admin-form" action="/admin/imports/file-log" method="post" enctype="multipart/form-data">'
+        '<h2 class="section">Импорт старого File_Log.xlsx</h2>'
+        '<p class="muted">Файлы из старого лога будут считаться уже обработанными. Повтор имени файла будет отмечен как duplicate_name.</p>'
+        '<label>File_Log.xlsx<input type="file" name="file_log" accept=".xlsx,.xlsm" required></label>'
+        '<button type="submit">Импортировать FileLog</button>'
+        '</form>'
+    )
+
+
 def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
     if not imports:
-        return '<p class="muted">\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u043f\u043e\u043a\u0430 \u043d\u0435 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u044b.</p>'
+        return '<p class="muted">Импорты пока не записаны.</p>'
 
     header = (
         '<table class="preview"><thead><tr>'
         '<th>ID</th>'
-        '<th>\u0424\u0430\u0439\u043b</th>'
-        '<th>\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a</th>'
-        '<th>\u0422\u0438\u043f</th>'
-        '<th>\u0420\u0435\u0433\u0438\u043e\u043d</th>'
-        '<th>\u0417\u0430\u0434\u0430\u0447\u0430</th>'
-        '<th>\u0421\u0442\u0430\u0442\u0443\u0441</th>'
+        '<th>Файл</th>'
+        '<th>Источник</th>'
+        '<th>Тип</th>'
+        '<th>Регион</th>'
+        '<th>Задача</th>'
+        '<th>Статус</th>'
         '<th>OK</th>'
         '<th>Rejected</th>'
-        '<th>\u0418\u043c\u043f\u043e\u0440\u0442</th>'
-        '<th>\u041e\u0448\u0438\u0431\u043a\u0430</th>'
+        '<th>Legacy</th>'
+        '<th>ЛСР</th>'
+        '<th>Начало</th>'
+        '<th>Окончание</th>'
+        '<th>Импорт</th>'
+        '<th>Ошибка</th>'
         '</tr></thead><tbody>'
     )
     rows = []
@@ -483,6 +508,10 @@ def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
             f'<td>{html.escape(item.status)}</td>'
             f'<td>{item.rows_ok}</td>'
             f'<td>{item.rows_rejected}</td>'
+            f'<td>{html.escape(item.legacy_note)}</td>'
+            f'<td>{html.escape(item.lsr_quarter)}</td>'
+            f'<td>{html.escape(item.planned_start)}</td>'
+            f'<td>{html.escape(item.planned_finish)}</td>'
             f'<td>{html.escape(item.imported_at)}</td>'
             f'<td>{html.escape(item.failure_reason)}</td>'
             '</tr>'

@@ -17,6 +17,7 @@ Flow:
 
 import tempfile
 import uuid
+from urllib.parse import quote
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -33,6 +34,7 @@ from app.services.read_estimate import (
 from app.services.write_result import run_and_write
 from core.storage.catalog import (
     count_catalog_rows,
+    import_legacy_file_log,
     list_catalog_sources,
     list_imported_files,
 )
@@ -119,7 +121,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         return HTMLResponse(render_admin_index())
 
     @app.get("/admin/{section_slug}", response_class=HTMLResponse)
-    def admin_section(section_slug: str) -> HTMLResponse:
+    def admin_section(section_slug: str, message: str = "") -> HTMLResponse:
         if section_slug not in ADMIN_SECTION_SLUGS:
             return HTMLResponse(
                 render_error(
@@ -137,7 +139,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 return HTMLResponse(render_admin_sources(sources))
             if section_slug == "imports":
                 imports = list_imported_files(connection)
-                return HTMLResponse(render_admin_imports(imports))
+                return HTMLResponse(render_admin_imports(imports, notice=message))
             if section_slug == "risks":
                 risks = list_price_risks(connection)
                 return HTMLResponse(render_admin_risks(risks))
@@ -160,6 +162,54 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             connection.close()
 
         return HTMLResponse(render_admin_section(section_slug))
+
+
+    @app.post("/admin/imports/file-log", response_class=HTMLResponse)
+    async def admin_import_file_log(file_log: UploadFile = File(...)):
+        raw_name = file_log.filename or ""
+        if _safe_name(raw_name) == "":
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(
+                        imports,
+                        error="Файл File_Log.xlsx не выбран.",
+                    ),
+                    status_code=400,
+                )
+            finally:
+                connection.close()
+
+        upload_dir = app.state.app_state.base_dir / "admin_imports"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        saved_path = _save(
+            upload_dir,
+            f"file_log_{uuid.uuid4().hex}{Path(_safe_name(raw_name)).suffix or '.xlsx'}",
+            await file_log.read(),
+        )
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                result = import_legacy_file_log(connection, saved_path)
+            except Exception as exc:
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(
+                        imports,
+                        error=f"Не удалось импортировать File_Log.xlsx: {exc}",
+                    ),
+                    status_code=400,
+                )
+        finally:
+            connection.close()
+        message = (
+            f"File_Log.xlsx импортирован: {result.rows_imported} записей, "
+            f"дубликатов имен: {result.duplicates}."
+        )
+        return RedirectResponse(f"/admin/imports?message={quote(message)}", status_code=303)
 
     @app.post("/admin/approvals/approve", response_class=HTMLResponse)
     def admin_approval_approve(exception_key: str = Form("")):

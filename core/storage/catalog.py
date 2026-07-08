@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from numbers import Real
 from pathlib import Path
+from typing import BinaryIO
+
+from openpyxl import load_workbook
 
 from core.catalog import CatalogRow
 from core.excel_io import Settings, read_catalog_rows_with_positions
@@ -15,6 +18,26 @@ from core.normalize import NormCode, NormUnit
 
 BATCH_SIZE = 2000
 DEFAULT_SOURCE_NAME = "main"
+LEGACY_FILE_LOG_SOURCE_NAME = "legacy_file_log"
+LEGACY_FILE_LOG_SOURCE_KIND = "legacy_file_log"
+STATUS_LEGACY_IMPORTED = "legacy_imported"
+STATUS_SUCCESS = "success"
+STATUS_SKIPPED = "skipped"
+STATUS_NO_DATA = "no_data"
+STATUS_FAILED = "failed"
+STATUS_DUPLICATE_NAME = "duplicate_name"
+STATUS_MANUAL_CHECKED = "manual_checked"
+PROCESSED_FILE_STATUSES = frozenset(
+    {
+        STATUS_LEGACY_IMPORTED,
+        STATUS_SUCCESS,
+        STATUS_SKIPPED,
+        STATUS_NO_DATA,
+        STATUS_DUPLICATE_NAME,
+        STATUS_MANUAL_CHECKED,
+    }
+)
+
 
 
 @dataclass(frozen=True)
@@ -39,6 +62,19 @@ class ImportedFileRecord:
     rows_ok: int
     rows_rejected: int
     failure_reason: str
+    filename_key: str
+    legacy_note: str
+    lsr_quarter: str
+    planned_start: str
+    planned_finish: str
+
+
+@dataclass(frozen=True)
+class LegacyFileLogImportResult:
+    rows_seen: int
+    rows_imported: int
+    duplicates: int
+    empty_rows: int
 
 
 @dataclass(frozen=True)
@@ -95,7 +131,12 @@ def list_imported_files(connection: sqlite3.Connection) -> list[ImportedFileReco
             imported_files.task_number,
             imported_files.rows_ok,
             imported_files.rows_rejected,
-            imported_files.failure_reason
+            imported_files.failure_reason,
+            imported_files.filename_key,
+            imported_files.legacy_note,
+            imported_files.lsr_quarter,
+            imported_files.planned_start,
+            imported_files.planned_finish
         FROM imported_files
         LEFT JOIN catalog_sources ON catalog_sources.id = imported_files.source_id
         ORDER BY imported_files.imported_at DESC, imported_files.id DESC
@@ -114,6 +155,11 @@ def list_imported_files(connection: sqlite3.Connection) -> list[ImportedFileReco
             rows_ok=int(row["rows_ok"]),
             rows_rejected=int(row["rows_rejected"]),
             failure_reason=str(row["failure_reason"]),
+            filename_key=str(row["filename_key"]),
+            legacy_note=str(row["legacy_note"]),
+            lsr_quarter=str(row["lsr_quarter"]),
+            planned_start=str(row["planned_start"]),
+            planned_finish=str(row["planned_finish"]),
         )
         for row in rows
     ]
@@ -153,6 +199,102 @@ def count_catalog_rows(
     ).fetchone()
     return 0 if row is None else int(row["row_count"])
 
+
+
+
+def import_legacy_file_log(
+    connection: sqlite3.Connection,
+    workbook_path: str | Path | BinaryIO,
+    *,
+    source_name: str = LEGACY_FILE_LOG_SOURCE_NAME,
+) -> LegacyFileLogImportResult:
+    source_id = _get_or_create_source(
+        connection,
+        source_name,
+        kind=LEGACY_FILE_LOG_SOURCE_KIND,
+    )
+    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    try:
+        sheet = workbook["FileLog"] if "FileLog" in workbook.sheetnames else workbook.active
+        headers = _legacy_file_log_headers(sheet)
+        seen: dict[str, str] = {}
+        rows_seen = 0
+        rows_imported = 0
+        duplicates = 0
+        empty_rows = 0
+
+        for values in sheet.iter_rows(min_row=2, values_only=True):
+            row = _legacy_file_log_row(values, headers)
+            if _row_is_empty(row):
+                empty_rows += 1
+                continue
+            filename = _text(row.get("filename"))
+            if filename == "":
+                empty_rows += 1
+                continue
+            rows_seen += 1
+
+            region = _region_from_folder_text(row.get("region_folder"))
+            key = normalize_import_filename(filename)
+            legacy_note = _text(row.get("legacy_note"))
+            rows_ok = _legacy_rows_ok(legacy_note)
+            failure_reason = ""
+            status = STATUS_LEGACY_IMPORTED
+
+            previous_region = seen.get(key)
+            if previous_region is not None:
+                duplicates += 1
+                status = STATUS_DUPLICATE_NAME
+                failure_reason = f"Duplicate filename in FileLog; first region: {previous_region}"
+            else:
+                seen[key] = region
+
+            _record_imported_file(
+                connection,
+                source_id=source_id,
+                region_folder=region,
+                filename=filename,
+                status=status,
+                rows_ok=rows_ok,
+                rows_rejected=0,
+                failure_reason=failure_reason,
+                legacy_note=legacy_note,
+                lsr_quarter=_text(row.get("lsr_quarter")),
+                planned_start=_text(row.get("planned_start")),
+                planned_finish=_text(row.get("planned_finish")),
+            )
+            rows_imported += 1
+        connection.commit()
+        return LegacyFileLogImportResult(
+            rows_seen=rows_seen,
+            rows_imported=rows_imported,
+            duplicates=duplicates,
+            empty_rows=empty_rows,
+        )
+    finally:
+        workbook.close()
+
+
+def filename_is_processed(connection: sqlite3.Connection, filename: str) -> bool:
+    key = normalize_import_filename(filename)
+    if key == "":
+        return False
+    placeholders = ", ".join("?" for _ in PROCESSED_FILE_STATUSES)
+    row = connection.execute(
+        f"""
+        SELECT 1
+        FROM imported_files
+        WHERE filename_key = ?
+          AND status IN ({placeholders})
+        LIMIT 1
+        """,
+        (key, *sorted(PROCESSED_FILE_STATUSES)),
+    ).fetchone()
+    return row is not None
+
+
+def normalize_import_filename(filename: str) -> str:
+    return Path(str(filename).replace("\\", "/")).name.strip().casefold()
 
 def import_catalog_from_excel(
     connection: sqlite3.Connection,
@@ -212,7 +354,7 @@ def import_catalog_from_excel(
         source_id=source_id,
         region_folder="",
         filename=path.name,
-        status="success",
+        status=STATUS_SUCCESS,
         rows_ok=len(payload),
         rows_rejected=skipped,
     )
@@ -225,6 +367,71 @@ def import_catalog_from_excel(
         rows_skipped=skipped,
         source_filename=path.name,
     )
+
+
+def _legacy_file_log_headers(sheet) -> dict[str, int]:
+    raw_headers = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), ())
+    normalized = {_normalize_header(value): index for index, value in enumerate(raw_headers)}
+    return {
+        "region_folder": _find_header(normalized, ["folder"]),
+        "filename": _find_header(normalized, ["file"]),
+        "legacy_note": _find_header(normalized, ["status"]),
+        "lsr_quarter": _find_header(normalized, ["год квартал лср"]),
+        "planned_start": _find_header(
+            normalized,
+            [
+                "планирумый срок начала работ",
+                "планируемый срок начала работ",
+            ],
+        ),
+        "planned_finish": _find_header(
+            normalized,
+            ["планируемый срок окончания работ"],
+        ),
+    }
+
+
+def _legacy_file_log_row(values: tuple[object, ...], headers: dict[str, int]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for name, index in headers.items():
+        result[name] = values[index] if 0 <= index < len(values) else None
+    return result
+
+
+def _find_header(normalized_headers: dict[str, int], aliases: list[str]) -> int:
+    for alias in aliases:
+        if alias in normalized_headers:
+            return normalized_headers[alias]
+    return -1
+
+
+def _normalize_header(value: object) -> str:
+    return " ".join(_text(value).casefold().split())
+
+
+def _row_is_empty(row: dict[str, object]) -> bool:
+    return all(_text(value) == "" for value in row.values())
+
+
+def _region_from_folder_text(value: object) -> str:
+    text = _text(value)
+    if text == "":
+        return ""
+    parts = [part.strip() for part in text.replace("/", "\\").split("\\") if part.strip()]
+    return parts[-1] if parts else text
+
+
+def _legacy_rows_ok(value: object) -> int:
+    if value is None or isinstance(value, bool):
+        return 0
+    if isinstance(value, Real):
+        return max(0, int(value))
+    text = _text(value).replace(",", ".")
+    try:
+        return max(0, int(float(text)))
+    except ValueError:
+        return 0
+
 
 
 def _get_or_create_source(
@@ -268,13 +475,18 @@ def _record_imported_file(
     rows_rejected: int,
     failure_reason: str = "",
     task_number: str = "",
+    legacy_note: str = "",
+    lsr_quarter: str = "",
+    planned_start: str = "",
+    planned_finish: str = "",
 ) -> None:
     connection.execute(
         """
         INSERT INTO imported_files (
             source_id, region_folder, filename, status, task_number,
-            rows_ok, rows_rejected, failure_reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            rows_ok, rows_rejected, failure_reason, filename_key, legacy_note,
+            lsr_quarter, planned_start, planned_finish
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(region_folder, filename) DO UPDATE SET
             source_id = excluded.source_id,
             status = excluded.status,
@@ -282,7 +494,12 @@ def _record_imported_file(
             task_number = excluded.task_number,
             rows_ok = excluded.rows_ok,
             rows_rejected = excluded.rows_rejected,
-            failure_reason = excluded.failure_reason
+            failure_reason = excluded.failure_reason,
+            filename_key = excluded.filename_key,
+            legacy_note = excluded.legacy_note,
+            lsr_quarter = excluded.lsr_quarter,
+            planned_start = excluded.planned_start,
+            planned_finish = excluded.planned_finish
         """,
         (
             source_id,
@@ -293,6 +510,11 @@ def _record_imported_file(
             rows_ok,
             rows_rejected,
             failure_reason,
+            normalize_import_filename(filename),
+            legacy_note,
+            lsr_quarter,
+            planned_start,
+            planned_finish,
         ),
     )
 

@@ -49,11 +49,39 @@ def init_database(connection: sqlite3.Connection) -> None:
         return
 
     connection.executescript(DDL)
+    _apply_additive_migrations(connection)
     connection.execute(
         "INSERT OR REPLACE INTO schema_migrations(version) VALUES (?)",
         (SCHEMA_VERSION,),
     )
     connection.commit()
+
+
+def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
+    _ensure_column(connection, "imported_files", "filename_key", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "imported_files", "legacy_note", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "imported_files", "lsr_quarter", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "imported_files", "planned_start", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "imported_files", "planned_finish", "TEXT NOT NULL DEFAULT ''")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_imported_files_filename_key "
+        "ON imported_files(filename_key)"
+    )
+    connection.execute(
+        "UPDATE imported_files SET filename_key = lower(filename) "
+        "WHERE filename_key = ''"
+    )
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    declaration: str,
+) -> None:
+    columns = {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table_name})")}
+    if column_name not in columns:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {declaration}")
 
 
 def _schema_is_current(connection: sqlite3.Connection) -> bool:

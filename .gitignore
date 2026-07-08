@@ -78,3 +78,7 @@ _admin_readonly_block_review/
 # Admin name-exclusions edit delivery artifacts
 admin-name-exclusions-edit-updated-files.zip
 _admin_name_exclusions_edit_review/
+
+# RNMC FileLog foundation delivery artifacts
+rnmc-file-log-foundation-updated-files.zip
+_rnmc_file_log_review/
