@@ -33,6 +33,7 @@ from app.services.read_estimate import (
 )
 from app.services.write_result import run_and_write
 from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_import_log
+from app.services.rnmc_excel import analyze_rnmc_zip_row_preview
 from core.storage.catalog import (
     count_catalog_rows,
     import_legacy_file_log,
@@ -281,6 +282,63 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     imports,
                     notice=message,
                     dry_run_result=result.dry_run,
+                )
+            )
+        finally:
+            connection.close()
+
+
+    @app.post("/admin/imports/rnmc-row-preview", response_class=HTMLResponse)
+    async def admin_imports_rnmc_row_preview(
+        rnmc_zip: UploadFile = File(...),
+        region_override: str = Form(""),
+    ):
+        raw_name = rnmc_zip.filename or ""
+        if _safe_name(raw_name) == "":
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(
+                        imports,
+                        error="ZIP-архив РНМЦ не выбран.",
+                    ),
+                    status_code=400,
+                )
+            finally:
+                connection.close()
+
+        upload_dir = app.state.app_state.base_dir / "admin_imports"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        saved_path = _save(
+            upload_dir,
+            f"rnmc_row_preview_{uuid.uuid4().hex}.zip",
+            await rnmc_zip.read(),
+        )
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            imports = list_imported_files(connection)
+            try:
+                row_preview_result = analyze_rnmc_zip_row_preview(
+                    connection,
+                    str(saved_path),
+                    region_override=region_override,
+                )
+            except ValueError as exc:
+                return HTMLResponse(
+                    render_admin_imports(
+                        imports,
+                        error=f"Не удалось разобрать ZIP: {exc}",
+                    ),
+                    status_code=400,
+                )
+            return HTMLResponse(
+                render_admin_imports(
+                    imports,
+                    notice="ZIP разобран без записи строк в каталог.",
+                    row_preview_result=row_preview_result,
                 )
             )
         finally:

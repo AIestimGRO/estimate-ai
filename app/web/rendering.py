@@ -16,6 +16,7 @@ from urllib.parse import quote
 from app.services.write_result import RunAndWriteResult
 from app.services.catalog_source import catalog_status_label, database_has_catalog
 from app.services.rnmc_zip import RnmcZipDryRunResult
+from app.services.rnmc_excel import RnmcZipRowPreviewResult
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogSource, ImportedFileRecord
@@ -441,6 +442,7 @@ def render_admin_imports(
     notice: str = "",
     error: str = "",
     dry_run_result: RnmcZipDryRunResult | None = None,
+    row_preview_result: RnmcZipRowPreviewResult | None = None,
 ) -> str:
     notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
     error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
@@ -453,7 +455,9 @@ def render_admin_imports(
         f'{_render_file_log_import_form()}'
         f'{_render_rnmc_zip_dry_run_form()}'
         f'{_render_rnmc_zip_import_log_form()}'
+        f'{_render_rnmc_zip_row_preview_form()}'
         f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
+        f'{_render_rnmc_zip_row_preview_result(row_preview_result)}'
         f'{_render_imported_file_table(imports)}'
         '</section>'
     )
@@ -502,6 +506,18 @@ def _render_rnmc_zip_import_log_form() -> str:
     )
 
 
+def _render_rnmc_zip_row_preview_form() -> str:
+    return (
+        '<form class="admin-form" action="/admin/imports/rnmc-row-preview" method="post" enctype="multipart/form-data">'
+        '<h2 class="section">Предпросмотр строк РНМЦ из ZIP</h2>'
+        '<p class="muted">Этот режим открывает Excel-файлы, ищет таблицу работ и считает строки по правилам VBA. В каталог ничего не записывается.</p>'
+        '<label>ZIP-архив РНМЦ<input type="file" name="rnmc_zip" accept=".zip" required></label>'
+        '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Оставьте пустым, чтобы взять регион из папки"></label>'
+        '<button type="submit">Разобрать строки без записи в каталог</button>'
+        '</form>'
+    )
+
+
 def _render_rnmc_zip_dry_run_result(result: RnmcZipDryRunResult | None) -> str:
     if result is None:
         return ""
@@ -541,6 +557,79 @@ def _render_rnmc_zip_dry_run_result(result: RnmcZipDryRunResult | None) -> str:
             '</tr>'
         )
     return summary + header + ''.join(rows) + '</tbody></table></div>'
+
+def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) -> str:
+    if result is None:
+        return ""
+
+    summary = (
+        '<div class="admin-form">'
+        '<h2 class="section">Предпросмотр строк РНМЦ</h2>'
+        '<dl class="stats">'
+        f'<div><dt>Excel-файлов найдено</dt><dd>{result.total_excel_files}</dd></div>'
+        f'<div><dt>Файлов с найденными строками</dt><dd>{result.preview_ok_count}</dd></div>'
+        f'<div><dt>OK-строк найдено</dt><dd>{result.rows_ok_total}</dd></div>'
+        f'<div><dt>Rejected-строк</dt><dd>{result.rows_rejected_total}</dd></div>'
+        f'<div><dt>Уже обработано</dt><dd>{result.skipped_processed_count}</dd></div>'
+        f'<div><dt>Дубликаты имени</dt><dd>{result.duplicate_name_count}</dd></div>'
+        f'<div><dt>Без таблицы</dt><dd>{result.no_table_count}</dd></div>'
+        f'<div><dt>Без строк</dt><dd>{result.no_rows_count}</dd></div>'
+        f'<div><dt>Неподдерживаемый формат</dt><dd>{result.unsupported_format_count}</dd></div>'
+        f'<div><dt>Ошибки чтения</dt><dd>{result.parse_error_count}</dd></div>'
+        f'<div><dt>Прочих файлов проигнорировано</dt><dd>{result.ignored_files}</dd></div>'
+        '</dl>'
+    )
+    if not result.entries:
+        return summary + '<p class="muted">В ZIP не найдено Excel-файлов РНМЦ.</p></div>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Путь в ZIP</th>'
+        '<th>Файл</th>'
+        '<th>Регион</th>'
+        '<th>Статус</th>'
+        '<th>Причина</th>'
+        '<th>Лист</th>'
+        '<th>Header row</th>'
+        '<th>Задача</th>'
+        '<th>OK</th>'
+        '<th>Rejected</th>'
+        '<th>Примеры строк</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for entry in result.entries:
+        rows.append(
+            '<tr>'
+            f'<td>{html.escape(entry.archive_path)}</td>'
+            f'<td>{html.escape(entry.filename)}</td>'
+            f'<td>{html.escape(entry.region_folder)}</td>'
+            f'<td>{html.escape(entry.status)}</td>'
+            f'<td>{html.escape(entry.reason)}</td>'
+            f'<td>{html.escape(entry.sheet_name)}</td>'
+            f'<td>{entry.header_row}</td>'
+            f'<td>{html.escape(entry.task_number)}</td>'
+            f'<td>{entry.rows_ok}</td>'
+            f'<td>{entry.rows_rejected}</td>'
+            f'<td>{_render_rnmc_samples(entry.sample_rows)}</td>'
+            '</tr>'
+        )
+    return summary + header + ''.join(rows) + '</tbody></table></div>'
+
+
+def _render_rnmc_samples(samples) -> str:
+    if not samples:
+        return ''
+    parts = []
+    for sample in samples:
+        parts.append(
+            f'{sample.row_number}: '
+            f'{html.escape(sample.work_name)} | '
+            f'{html.escape(sample.unit)} | '
+            f'{html.escape(sample.quantity)}'
+        )
+    return '<br>'.join(parts)
+
 
 def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
     if not imports:

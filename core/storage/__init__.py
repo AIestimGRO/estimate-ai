@@ -3,6 +3,7 @@
 from core.storage.connection import connect, default_database_path, init_database
 from core.storage.catalog import (
     filename_is_processed,
+    filename_is_final_for_preview,
     imported_file_exists_for_region,
     import_catalog_from_excel,
     import_legacy_file_log,
@@ -43,6 +44,7 @@ __all__ = [
     "default_database_path",
     "init_database",
     "filename_is_processed",
+    "filename_is_final_for_preview",
     "imported_file_exists_for_region",
     "import_catalog_from_excel",
     "import_legacy_file_log",

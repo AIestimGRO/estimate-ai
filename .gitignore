@@ -90,3 +90,7 @@ _rnmc_zip_dry_run_review/
 # RNMC zip log delivery artifacts
 rnmc-zip-log-updated-files.zip
 _rnmc_zip_log_review/
+
+# RNMC zip row preview delivery artifacts
+rnmc-zip-row-preview-updated-files.zip
+_rnmc_zip_row_preview_review/

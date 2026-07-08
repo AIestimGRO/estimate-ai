@@ -41,6 +41,16 @@ PROCESSED_FILE_STATUSES = frozenset(
         STATUS_PENDING,
     }
 )
+FINAL_PREVIEW_SKIP_STATUSES = frozenset(
+    {
+        STATUS_LEGACY_IMPORTED,
+        STATUS_SUCCESS,
+        STATUS_SKIPPED,
+        STATUS_NO_DATA,
+        STATUS_DUPLICATE_NAME,
+        STATUS_MANUAL_CHECKED,
+    }
+)
 
 
 
@@ -280,10 +290,27 @@ def import_legacy_file_log(
 
 
 def filename_is_processed(connection: sqlite3.Connection, filename: str) -> bool:
+    return _filename_has_status(connection, filename, PROCESSED_FILE_STATUSES)
+
+
+def filename_is_final_for_preview(connection: sqlite3.Connection, filename: str) -> bool:
+    """Return True when a file name should not be parsed in row preview.
+
+    Pending and failed files are intentionally not final: a later preview/retry
+    can parse them again from a newly uploaded zip.
+    """
+    return _filename_has_status(connection, filename, FINAL_PREVIEW_SKIP_STATUSES)
+
+
+def _filename_has_status(
+    connection: sqlite3.Connection,
+    filename: str,
+    statuses: frozenset[str],
+) -> bool:
     key = normalize_import_filename(filename)
     if key == "":
         return False
-    placeholders = ", ".join("?" for _ in PROCESSED_FILE_STATUSES)
+    placeholders = ", ".join("?" for _ in statuses)
     row = connection.execute(
         f"""
         SELECT 1
@@ -292,7 +319,7 @@ def filename_is_processed(connection: sqlite3.Connection, filename: str) -> bool
           AND status IN ({placeholders})
         LIMIT 1
         """,
-        (key, *sorted(PROCESSED_FILE_STATUSES)),
+        (key, *sorted(statuses)),
     ).fetchone()
     return row is not None
 
