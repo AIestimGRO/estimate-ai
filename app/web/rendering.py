@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 from app.services.write_result import RunAndWriteResult
 from app.services.catalog_source import catalog_status_label, database_has_catalog
+from app.services.rnmc_zip import RnmcZipDryRunResult
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogSource, ImportedFileRecord
@@ -439,6 +440,7 @@ def render_admin_imports(
     *,
     notice: str = "",
     error: str = "",
+    dry_run_result: RnmcZipDryRunResult | None = None,
 ) -> str:
     notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
     error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
@@ -449,6 +451,8 @@ def render_admin_imports(
         f'{notice_html}'
         f'{error_html}'
         f'{_render_file_log_import_form()}'
+        f'{_render_rnmc_zip_dry_run_form()}'
+        f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
         f'{_render_imported_file_table(imports)}'
         '</section>'
     )
@@ -471,6 +475,59 @@ def _render_file_log_import_form() -> str:
         '</form>'
     )
 
+
+
+def _render_rnmc_zip_dry_run_form() -> str:
+    return (
+        '<form class="admin-form" action="/admin/imports/rnmc-dry-run" method="post" enctype="multipart/form-data">'
+        '<h2 class="section">Проверка ZIP с новыми РНМЦ</h2>'
+        '<p class="muted">Dry-run ничего не пишет в каталог. Он только показывает, какие Excel-файлы будут обработаны, пропущены или отмечены как дубликаты имени.</p>'
+        '<label>ZIP-архив РНМЦ<input type="file" name="rnmc_zip" accept=".zip" required></label>'
+        '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Оставьте пустым, чтобы взять регион из папки"></label>'
+        '<button type="submit">Проверить ZIP без импорта</button>'
+        '</form>'
+    )
+
+
+def _render_rnmc_zip_dry_run_result(result: RnmcZipDryRunResult | None) -> str:
+    if result is None:
+        return ""
+
+    summary = (
+        '<div class="admin-form">'
+        '<h2 class="section">Результат dry-run ZIP</h2>'
+        '<dl class="stats">'
+        f'<div><dt>Excel-файлов найдено</dt><dd>{result.total_excel_files}</dd></div>'
+        f'<div><dt>Будет обработано</dt><dd>{result.will_process_count}</dd></div>'
+        f'<div><dt>Уже было обработано</dt><dd>{result.skipped_processed_count}</dd></div>'
+        f'<div><dt>Дубликаты имени в ZIP</dt><dd>{result.duplicate_name_count}</dd></div>'
+        f'<div><dt>Прочих файлов проигнорировано</dt><dd>{result.ignored_files}</dd></div>'
+        '</dl>'
+    )
+    if not result.entries:
+        return summary + '<p class="muted">В ZIP не найдено Excel-файлов РНМЦ.</p></div>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Путь в ZIP</th>'
+        '<th>Файл</th>'
+        '<th>Регион</th>'
+        '<th>Статус</th>'
+        '<th>Причина</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for entry in result.entries:
+        rows.append(
+            '<tr>'
+            f'<td>{html.escape(entry.archive_path)}</td>'
+            f'<td>{html.escape(entry.filename)}</td>'
+            f'<td>{html.escape(entry.region_folder)}</td>'
+            f'<td>{html.escape(entry.status)}</td>'
+            f'<td>{html.escape(entry.reason)}</td>'
+            '</tr>'
+        )
+    return summary + header + ''.join(rows) + '</tbody></table></div>'
 
 def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
     if not imports:
