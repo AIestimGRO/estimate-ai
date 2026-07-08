@@ -16,7 +16,7 @@ from urllib.parse import quote
 from app.services.write_result import RunAndWriteResult
 from app.services.catalog_source import catalog_status_label, database_has_catalog
 from app.services.rnmc_zip import RnmcZipDryRunResult
-from app.services.rnmc_excel import RnmcZipRowPreviewResult
+from app.services.rnmc_excel import RnmcZipCatalogImportResult, RnmcZipRowPreviewResult
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogSource, ImportedFileRecord
@@ -443,6 +443,7 @@ def render_admin_imports(
     error: str = "",
     dry_run_result: RnmcZipDryRunResult | None = None,
     row_preview_result: RnmcZipRowPreviewResult | None = None,
+    catalog_import_result: RnmcZipCatalogImportResult | None = None,
 ) -> str:
     notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
     error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
@@ -456,8 +457,10 @@ def render_admin_imports(
         f'{_render_rnmc_zip_dry_run_form()}'
         f'{_render_rnmc_zip_import_log_form()}'
         f'{_render_rnmc_zip_row_preview_form()}'
+        f'{_render_rnmc_zip_catalog_import_form()}'
         f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
         f'{_render_rnmc_zip_row_preview_result(row_preview_result)}'
+        f'{_render_rnmc_zip_catalog_import_result(catalog_import_result)}'
         f'{_render_imported_file_table(imports)}'
         '</section>'
     )
@@ -514,6 +517,19 @@ def _render_rnmc_zip_row_preview_form() -> str:
         '<label>ZIP-архив РНМЦ<input type="file" name="rnmc_zip" accept=".zip" required></label>'
         '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Оставьте пустым, чтобы взять регион из папки"></label>'
         '<button type="submit">Разобрать строки без записи в каталог</button>'
+        '</form>'
+    )
+
+
+
+def _render_rnmc_zip_catalog_import_form() -> str:
+    return (
+        '<form class="admin-form" action="/admin/imports/rnmc-import" method="post" enctype="multipart/form-data">'
+        '<h2 class="section">Импорт строк РНМЦ из ZIP в каталог</h2>'
+        '<p class="muted">Этот режим пишет валидные строки в catalog_items и обновляет imported_files. Уже обработанные имена файлов пропускаются, повторы внутри ZIP получают duplicate_name.</p>'
+        '<label>ZIP-архив РНМЦ<input type="file" name="rnmc_zip" accept=".zip" required></label>'
+        '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Оставьте пустым, чтобы взять регион из папки"></label>'
+        '<button type="submit">Импортировать строки в каталог</button>'
         '</form>'
     )
 
@@ -629,6 +645,62 @@ def _render_rnmc_samples(samples) -> str:
             f'{html.escape(sample.quantity)}'
         )
     return '<br>'.join(parts)
+
+
+
+def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | None) -> str:
+    if result is None:
+        return ""
+
+    summary = (
+        '<div class="admin-form">'
+        '<h2 class="section">Результат импорта ZIP в каталог</h2>'
+        '<dl class="stats">'
+        f'<div><dt>Excel-файлов найдено</dt><dd>{result.total_excel_files}</dd></div>'
+        f'<div><dt>Успешных файлов</dt><dd>{result.success_count}</dd></div>'
+        f'<div><dt>Строк добавлено</dt><dd>{result.rows_imported_total}</dd></div>'
+        f'<div><dt>Строк отклонено</dt><dd>{result.rows_rejected_total}</dd></div>'
+        f'<div><dt>Без данных</dt><dd>{result.no_data_count}</dd></div>'
+        f'<div><dt>Пропущено</dt><dd>{result.skipped_count}</dd></div>'
+        f'<div><dt>Дубликаты имени</dt><dd>{result.duplicate_name_count}</dd></div>'
+        f'<div><dt>Ошибки</dt><dd>{result.failed_count}</dd></div>'
+        f'<div><dt>Прочих файлов проигнорировано</dt><dd>{result.ignored_files}</dd></div>'
+        '</dl>'
+    )
+    if not result.entries:
+        return summary + '<p class="muted">В ZIP не найдено Excel-файлов РНМЦ.</p></div>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Путь в ZIP</th>'
+        '<th>Файл</th>'
+        '<th>Регион</th>'
+        '<th>Статус</th>'
+        '<th>Причина</th>'
+        '<th>Лист</th>'
+        '<th>Header row</th>'
+        '<th>Задача</th>'
+        '<th>Добавлено</th>'
+        '<th>Отклонено</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for entry in result.entries:
+        rows.append(
+            '<tr>'
+            f'<td>{html.escape(entry.archive_path)}</td>'
+            f'<td>{html.escape(entry.filename)}</td>'
+            f'<td>{html.escape(entry.region_folder)}</td>'
+            f'<td>{html.escape(entry.status)}</td>'
+            f'<td>{html.escape(entry.reason)}</td>'
+            f'<td>{html.escape(entry.sheet_name)}</td>'
+            f'<td>{entry.header_row}</td>'
+            f'<td>{html.escape(entry.task_number)}</td>'
+            f'<td>{entry.rows_imported}</td>'
+            f'<td>{entry.rows_rejected}</td>'
+            '</tr>'
+        )
+    return summary + header + ''.join(rows) + '</tbody></table></div>'
 
 
 def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:

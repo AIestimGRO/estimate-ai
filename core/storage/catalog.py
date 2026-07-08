@@ -100,6 +100,24 @@ class CatalogImportResult:
     source_filename: str
 
 
+@dataclass(frozen=True)
+class CatalogRowStorageItem:
+    catalog_row: CatalogRow
+    source_region_folder: str
+    source_filename: str
+    source_row_number: int
+
+
+@dataclass(frozen=True)
+class CatalogFileRowsImportResult:
+    source_name: str
+    source_id: int
+    rows_imported: int
+    rows_skipped: int
+    source_filename: str
+    region_folder: str
+
+
 def list_catalog_sources(connection: sqlite3.Connection) -> list[CatalogSource]:
     rows = connection.execute(
         """
@@ -379,6 +397,78 @@ def record_imported_file(
 
 def normalize_import_filename(filename: str) -> str:
     return Path(str(filename).replace("\\", "/")).name.strip().casefold()
+
+
+def replace_catalog_rows_for_file(
+    connection: sqlite3.Connection,
+    items: list[CatalogRowStorageItem],
+    *,
+    region_folder: str,
+    filename: str,
+    source_name: str = RNMC_ZIP_SOURCE_NAME,
+    source_kind: str = RNMC_ZIP_SOURCE_KIND,
+) -> CatalogFileRowsImportResult:
+    source_id = _get_or_create_source(connection, source_name, kind=source_kind)
+    region = _text(region_folder)
+    source_filename = _text(filename)
+
+    connection.execute(
+        """
+        DELETE FROM catalog_items
+        WHERE source_id = ?
+          AND source_region_folder = ?
+          AND source_filename = ?
+        """,
+        (source_id, region, source_filename),
+    )
+
+    payload: list[tuple] = []
+    skipped = 0
+    for item in items:
+        row = item.catalog_row
+        if not _is_storable_row(row):
+            skipped += 1
+            continue
+        price = _parse_positive_price(row.price)
+        if price is None:
+            skipped += 1
+            continue
+        payload.append(
+            (
+                source_id,
+                _text(row.task_id),
+                _text(row.region),
+                _text(row.code),
+                _text(row.unit),
+                _text(row.work_name),
+                price,
+                _serialize_date(row.added_date),
+                _text(item.source_region_folder),
+                _text(item.source_filename),
+                int(item.source_row_number),
+            )
+        )
+
+    for offset in range(0, len(payload), BATCH_SIZE):
+        connection.executemany(
+            """
+            INSERT INTO catalog_items (
+                source_id, task_id, region, code, unit, work_name, price,
+                added_date, source_region_folder, source_filename, source_row_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            payload[offset : offset + BATCH_SIZE],
+        )
+
+    return CatalogFileRowsImportResult(
+        source_name=source_name,
+        source_id=source_id,
+        rows_imported=len(payload),
+        rows_skipped=skipped,
+        source_filename=source_filename,
+        region_folder=region,
+    )
+
 
 def import_catalog_from_excel(
     connection: sqlite3.Connection,

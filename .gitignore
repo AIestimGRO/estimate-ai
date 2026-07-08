@@ -94,3 +94,7 @@ _rnmc_zip_log_review/
 # RNMC zip row preview delivery artifacts
 rnmc-zip-row-preview-updated-files.zip
 _rnmc_zip_row_preview_review/
+
+# RNMC zip catalog import delivery artifacts
+rnmc-zip-catalog-import-updated-files.zip
+_rnmc_zip_catalog_import_review/

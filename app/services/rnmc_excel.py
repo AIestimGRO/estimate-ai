@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import date, datetime
 from io import BytesIO
+from numbers import Real
 from pathlib import PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
@@ -16,7 +18,21 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.services.rnmc_zip import EXCEL_SUFFIXES
-from core.storage.catalog import filename_is_final_for_preview, normalize_import_filename
+from core.catalog import CatalogRow
+from core.normalize import NormCode, NormUnit
+from core.storage.catalog import (
+    STATUS_DUPLICATE_NAME as DB_STATUS_DUPLICATE_NAME,
+    STATUS_FAILED,
+    STATUS_NO_DATA,
+    STATUS_SKIPPED,
+    STATUS_SUCCESS,
+    CatalogRowStorageItem,
+    filename_is_final_for_preview,
+    imported_file_exists_for_region,
+    normalize_import_filename,
+    record_imported_file,
+    replace_catalog_rows_for_file,
+)
 
 HEADER_NAME_WORKS = "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0440\u0430\u0431\u043e\u0442"
 HEADER_NAME_SHORT = "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435"
@@ -25,6 +41,30 @@ HEADER_QTY_SHORT = "\u041a\u043e\u043b-\u0432\u043e"
 HEADER_QTY_LONG = "\u041a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e"
 TASK_LABEL_FULL = "\u2116 \u0437\u0430\u0434\u0430\u0447\u0438 1\u0424"
 TASK_LABEL_SHORT = "\u2116 \u0437\u0430\u0434\u0430\u0447\u0438"
+
+CODE_HEADER_PATTERNS = (
+    "\u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c",
+    "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d",
+    "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c",
+    "\u041e\u0431\u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0435",
+    "\u0428\u0438\u0444\u0440",
+    "\u041a\u043e\u0434",
+)
+PRICE_HEADER_PATTERNS = (
+    "\u0426\u0435\u043d\u0430 \u0435\u0434\u0438\u043d\u0438\u0446\u044b \u0440\u0430\u0431\u043e\u0442",
+    "\u0426\u0435\u043d\u0430 \u0435\u0434\u0438\u043d\u0438\u0446\u044b",
+    "\u0426\u0435\u043d\u0430 \u0437\u0430 \u0435\u0434",
+    "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c \u0435\u0434\u0438\u043d\u0438\u0446\u044b",
+    "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c \u0437\u0430 \u0435\u0434",
+    "\u0411\u0430\u0437\u043e\u0432\u0430\u044f \u0446\u0435\u043d\u0430",
+    "\u0426\u0435\u043d\u0430 \u0437\u0430 1",
+    "\u0426\u0435\u043d\u0430",
+)
+ADDED_DATE_HEADER_PATTERNS = (
+    "CatalogAddedDate",
+    "\u0414\u0430\u0442\u0430 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u044f",
+    "\u0414\u0430\u0442\u0430 \u0434\u043e\u0431",
+)
 
 STATUS_PREVIEW_OK = "preview_ok"
 STATUS_NO_TABLE = "no_table"
@@ -106,6 +146,64 @@ class RnmcZipRowPreviewResult:
         return sum(entry.rows_rejected for entry in self.entries)
 
 
+@dataclass(frozen=True)
+class RnmcCatalogRowCandidate:
+    row_number: int
+    catalog_row: CatalogRow
+
+
+@dataclass(frozen=True)
+class RnmcZipCatalogImportEntry:
+    archive_path: str
+    filename: str
+    region_folder: str
+    status: str
+    reason: str
+    sheet_name: str
+    header_row: int
+    task_number: str
+    rows_imported: int
+    rows_rejected: int
+
+
+@dataclass(frozen=True)
+class RnmcZipCatalogImportResult:
+    entries: list[RnmcZipCatalogImportEntry]
+    ignored_files: int
+
+    @property
+    def total_excel_files(self) -> int:
+        return len(self.entries)
+
+    @property
+    def success_count(self) -> int:
+        return _count_import_status(self.entries, STATUS_SUCCESS)
+
+    @property
+    def no_data_count(self) -> int:
+        return _count_import_status(self.entries, STATUS_NO_DATA)
+
+    @property
+    def failed_count(self) -> int:
+        return _count_import_status(self.entries, STATUS_FAILED)
+
+    @property
+    def skipped_count(self) -> int:
+        return _count_import_status(self.entries, STATUS_SKIPPED)
+
+    @property
+    def duplicate_name_count(self) -> int:
+        return _count_import_status(self.entries, DB_STATUS_DUPLICATE_NAME)
+
+    @property
+    def rows_imported_total(self) -> int:
+        return sum(entry.rows_imported for entry in self.entries)
+
+    @property
+    def rows_rejected_total(self) -> int:
+        return sum(entry.rows_rejected for entry in self.entries)
+
+
 def analyze_rnmc_zip_row_preview(
     connection: sqlite3.Connection,
     zip_path: str,
@@ -180,6 +278,315 @@ def analyze_rnmc_zip_row_preview(
         raise ValueError("uploaded file is not a valid zip archive") from exc
 
     return RnmcZipRowPreviewResult(entries=entries, ignored_files=ignored_files)
+
+
+def import_rnmc_zip_catalog_rows(
+    connection: sqlite3.Connection,
+    zip_path: str,
+    *,
+    region_override: str = "",
+) -> RnmcZipCatalogImportResult:
+    """Import valid RNMC rows from a zip archive into catalog_items."""
+    manual_region = _text(region_override)
+    entries: list[RnmcZipCatalogImportEntry] = []
+    ignored_files = 0
+    seen_keys: set[str] = set()
+
+    try:
+        with ZipFile(zip_path) as archive:
+            for info in archive.infolist():
+                if info.is_dir():
+                    continue
+                path = _normalize_archive_path(info.filename)
+                if not _is_supported_excel_path(path):
+                    ignored_files += 1
+                    continue
+                filename = PurePosixPath(path).name
+                key = normalize_import_filename(filename)
+                region = manual_region or _region_from_archive_path(path)
+
+                if key in seen_keys:
+                    entry = _record_non_imported_file(
+                        connection,
+                        path,
+                        filename,
+                        region,
+                        DB_STATUS_DUPLICATE_NAME,
+                        "Duplicate filename inside uploaded zip",
+                    )
+                elif filename_is_final_for_preview(connection, filename):
+                    if imported_file_exists_for_region(
+                        connection,
+                        region_folder=region,
+                        filename=filename,
+                    ):
+                        entry = _import_entry(
+                            path,
+                            filename,
+                            region,
+                            STATUS_SKIPPED,
+                            "Filename already has a final imported_files status",
+                        )
+                    else:
+                        entry = _record_non_imported_file(
+                            connection,
+                            path,
+                            filename,
+                            region,
+                            STATUS_SKIPPED,
+                            "Skipped because filename already exists in imported_files",
+                        )
+                elif PurePosixPath(path).suffix.casefold() not in SUPPORTED_PREVIEW_SUFFIXES:
+                    entry = _record_non_imported_file(
+                        connection,
+                        path,
+                        filename,
+                        region,
+                        STATUS_FAILED,
+                        "Import supports .xlsx and .xlsm; legacy .xls will need a separate reader",
+                    )
+                else:
+                    try:
+                        data = archive.read(info)
+                        entry = _import_workbook_bytes(
+                            connection,
+                            data,
+                            path,
+                            filename,
+                            region,
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive UI boundary
+                        entry = _record_non_imported_file(
+                            connection,
+                            path,
+                            filename,
+                            region,
+                            STATUS_FAILED,
+                            str(exc),
+                        )
+                seen_keys.add(key)
+                entries.append(entry)
+    except BadZipFile as exc:
+        raise ValueError("uploaded file is not a valid zip archive") from exc
+
+    connection.commit()
+    return RnmcZipCatalogImportResult(entries=entries, ignored_files=ignored_files)
+
+
+def _import_workbook_bytes(
+    connection: sqlite3.Connection,
+    data: bytes,
+    archive_path: str,
+    filename: str,
+    region_folder: str,
+) -> RnmcZipCatalogImportEntry:
+    workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
+    try:
+        task_number = _extract_task_number(workbook)
+        for sheet in workbook.worksheets:
+            header = _find_header_row(sheet)
+            if header is None:
+                continue
+            rows, rejected = _extract_catalog_row_candidates(
+                sheet,
+                header,
+                task_number,
+                region_folder,
+                filename,
+            )
+            if not rows:
+                record_imported_file(
+                    connection,
+                    region_folder=region_folder,
+                    filename=filename,
+                    status=STATUS_NO_DATA,
+                    rows_ok=0,
+                    rows_rejected=rejected,
+                    failure_reason="Header found, but no valid catalog rows",
+                    task_number=task_number,
+                )
+                return _import_entry(
+                    archive_path,
+                    filename,
+                    region_folder,
+                    STATUS_NO_DATA,
+                    "Header found, but no valid catalog rows",
+                    sheet_name=str(sheet.title),
+                    header_row=header.row_number,
+                    task_number=task_number,
+                    rows_rejected=rejected,
+                )
+
+            result = replace_catalog_rows_for_file(
+                connection,
+                [
+                    CatalogRowStorageItem(
+                        catalog_row=row.catalog_row,
+                        source_region_folder=region_folder,
+                        source_filename=filename,
+                        source_row_number=row.row_number,
+                    )
+                    for row in rows
+                ],
+                region_folder=region_folder,
+                filename=filename,
+            )
+            record_imported_file(
+                connection,
+                region_folder=region_folder,
+                filename=filename,
+                status=STATUS_SUCCESS,
+                rows_ok=result.rows_imported,
+                rows_rejected=rejected + result.rows_skipped,
+                failure_reason="",
+                task_number=task_number,
+            )
+            return _import_entry(
+                archive_path,
+                filename,
+                region_folder,
+                STATUS_SUCCESS,
+                "Catalog rows imported",
+                sheet_name=str(sheet.title),
+                header_row=header.row_number,
+                task_number=task_number,
+                rows_imported=result.rows_imported,
+                rows_rejected=rejected + result.rows_skipped,
+            )
+
+        record_imported_file(
+            connection,
+            region_folder=region_folder,
+            filename=filename,
+            status=STATUS_NO_DATA,
+            rows_ok=0,
+            rows_rejected=0,
+            failure_reason="Required headers were not found",
+            task_number=task_number,
+        )
+        return _import_entry(
+            archive_path,
+            filename,
+            region_folder,
+            STATUS_NO_DATA,
+            "Required headers were not found",
+            task_number=task_number,
+        )
+    finally:
+        workbook.close()
+
+
+def _extract_catalog_row_candidates(
+    sheet: Worksheet,
+    header: _HeaderMatch,
+    task_number: str,
+    region_folder: str,
+    filename: str,
+) -> tuple[list[RnmcCatalogRowCandidate], int]:
+    num_col = _find_numbering_col(header.header_map) or 1
+    code_col = _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)
+    price_col = _find_pattern_col(header.header_map, PRICE_HEADER_PATTERNS)
+    date_col = _find_pattern_col(header.header_map, ADDED_DATE_HEADER_PATTERNS)
+    max_row = int(sheet.max_row or 0)
+    rows: list[RnmcCatalogRowCandidate] = []
+    rejected = 0
+    started = False
+    blank_streak = 0
+
+    for row_number in range(header.row_number + 1, max_row + 1):
+        num_value = sheet.cell(row_number, num_col).value
+        name_value = sheet.cell(row_number, header.name_col).value
+        unit_value = sheet.cell(row_number, header.unit_col).value
+        qty_value = sheet.cell(row_number, header.qty_col).value
+
+        if not started:
+            if _is_blank(num_value) and _is_blank(unit_value) and _is_blank(qty_value):
+                continue
+            started = True
+
+        is_end_blank = (
+            _is_blank(num_value)
+            and _is_blank(name_value)
+            and _is_blank(unit_value)
+            and _is_blank(qty_value)
+        )
+        if is_end_blank:
+            blank_streak += 1
+        else:
+            blank_streak = 0
+        if blank_streak >= 3:
+            break
+        if is_end_blank:
+            continue
+
+        if _is_blank(unit_value) and _is_blank(qty_value):
+            rejected += 1
+            continue
+
+        price_value = _cell_value(sheet, row_number, price_col)
+        parsed_price = _parse_positive_number(price_value)
+        catalog_row = CatalogRow(
+            task_id=task_number,
+            price=parsed_price if parsed_price is not None else price_value,
+            code=_cell_value(sheet, row_number, code_col),
+            unit=unit_value,
+            work_name=name_value,
+            region=region_folder,
+            added_date=_cell_value(sheet, row_number, date_col),
+        )
+        if _catalog_row_issue(catalog_row) != "":
+            rejected += 1
+            continue
+        rows.append(RnmcCatalogRowCandidate(row_number=row_number, catalog_row=catalog_row))
+
+    return rows, rejected
+
+
+def _record_non_imported_file(
+    connection: sqlite3.Connection,
+    archive_path: str,
+    filename: str,
+    region_folder: str,
+    status: str,
+    reason: str,
+) -> RnmcZipCatalogImportEntry:
+    record_imported_file(
+        connection,
+        region_folder=region_folder,
+        filename=filename,
+        status=status,
+        rows_ok=0,
+        rows_rejected=0,
+        failure_reason=reason,
+    )
+    return _import_entry(archive_path, filename, region_folder, status, reason)
+
+
+def _import_entry(
+    archive_path: str,
+    filename: str,
+    region_folder: str,
+    status: str,
+    reason: str,
+    *,
+    sheet_name: str = "",
+    header_row: int = 0,
+    task_number: str = "",
+    rows_imported: int = 0,
+    rows_rejected: int = 0,
+) -> RnmcZipCatalogImportEntry:
+    return RnmcZipCatalogImportEntry(
+        archive_path=archive_path,
+        filename=filename,
+        region_folder=region_folder,
+        status=status,
+        reason=reason,
+        sheet_name=sheet_name,
+        header_row=header_row,
+        task_number=task_number,
+        rows_imported=rows_imported,
+        rows_rejected=rows_rejected,
+    )
 
 
 def _preview_workbook_bytes(
@@ -381,6 +788,63 @@ def _find_numbering_col(header_map: dict[str, int]) -> int:
         ):
             return int(column)
     return 0
+
+
+
+def _find_pattern_col(header_map: dict[str, int], patterns: tuple[str, ...]) -> int:
+    normalized_patterns = tuple(_normalize_header(pattern) for pattern in patterns)
+    for pattern in normalized_patterns:
+        for key, column in header_map.items():
+            if key == pattern or pattern in key:
+                return int(column)
+    return 0
+
+
+def _cell_value(sheet: Worksheet, row_number: int, col_number: int) -> object:
+    if col_number <= 0:
+        return None
+    return sheet.cell(row_number, col_number).value
+
+
+def _catalog_row_issue(row: CatalogRow) -> str:
+    if _text(row.task_id) == "":
+        return "missing_task_number"
+    if NormCode(row.code) == "":
+        return "missing_or_invalid_code"
+    if NormUnit(row.unit) == "":
+        return "missing_or_invalid_unit"
+    if _parse_positive_number(row.price) is None:
+        return "missing_or_invalid_price"
+    return ""
+
+
+def _parse_positive_number(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, Real):
+        number = float(value)
+    elif isinstance(value, (date, datetime)):
+        return None
+    else:
+        text = str(value).strip()
+        if text == "":
+            return None
+        text = text.replace("\u00a0", " ").replace(" ", "")
+        if "," in text and "." in text:
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", ".")
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+    if number <= 0:
+        return None
+    return number
+
+
+def _count_import_status(entries: list[RnmcZipCatalogImportEntry], status: str) -> int:
+    return sum(1 for entry in entries if entry.status == status)
 
 
 def _is_name_header(value: str) -> bool:
