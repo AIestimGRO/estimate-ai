@@ -29,7 +29,7 @@ from core.storage.catalog import (
     STATUS_SKIPPED,
     STATUS_SUCCESS,
     CatalogRowStorageItem,
-    filename_is_final_for_preview,
+    final_filename_keys_for_preview,
     imported_file_exists_for_region,
     normalize_import_filename,
     record_imported_file,
@@ -111,6 +111,7 @@ STATUS_UNSUPPORTED_FORMAT = "unsupported_format"
 STATUS_PARSE_ERROR = "parse_error"
 
 SUPPORTED_PREVIEW_SUFFIXES = frozenset({".xlsx", ".xlsm"})
+DEFAULT_ROW_PREVIEW_LIMIT = 30
 EXCEL_DATE_BASE = date(1899, 12, 30)
 VALUE_WITH_VAT_DIVISOR = 1.2
 
@@ -149,6 +150,7 @@ class RnmcWorkbookPreview:
     rows_ok: int
     rows_rejected: int
     sample_rows: list[RnmcRowSample]
+    is_limited: bool = False
 
 
 @dataclass(frozen=True)
@@ -195,6 +197,10 @@ class RnmcZipRowPreviewResult:
     @property
     def rows_rejected_total(self) -> int:
         return sum(entry.rows_rejected for entry in self.entries)
+
+    @property
+    def limited_count(self) -> int:
+        return sum(1 for entry in self.entries if entry.is_limited)
 
 
 @dataclass(frozen=True)
@@ -270,9 +276,12 @@ def analyze_rnmc_zip_row_preview(
     zip_path: str,
     *,
     region_override: str = "",
+    max_preview_rows: int = DEFAULT_ROW_PREVIEW_LIMIT,
 ) -> RnmcZipRowPreviewResult:
     """Preview RNMC workbook rows inside a zip archive without database writes."""
     manual_region = _text(region_override)
+    row_limit = max(1, int(max_preview_rows))
+    final_filename_keys = final_filename_keys_for_preview(connection)
     entries: list[RnmcWorkbookPreview] = []
     ignored_files = 0
     seen_keys: set[str] = set()
@@ -300,14 +309,14 @@ def analyze_rnmc_zip_row_preview(
                             "Duplicate filename inside uploaded zip",
                         )
                     )
-                elif filename_is_final_for_preview(connection, filename):
+                elif key in final_filename_keys:
                     entries.append(
                         _empty_preview(
                             path,
                             filename,
                             region,
                             STATUS_SKIPPED_PROCESSED,
-                            "Filename already has a final imported_files status",
+                            "Filename already has a final imported_files status; workbook was not opened",
                         )
                     )
                 elif PurePosixPath(path).suffix.casefold() not in SUPPORTED_PREVIEW_SUFFIXES:
@@ -329,6 +338,7 @@ def analyze_rnmc_zip_row_preview(
                             filename,
                             region,
                             allow_metadata_region=manual_region == "",
+                            row_limit=row_limit,
                         ))
                     except Exception as exc:  # pragma: no cover - defensive UI boundary
                         entries.append(
@@ -355,6 +365,7 @@ def import_rnmc_zip_catalog_rows(
 ) -> RnmcZipCatalogImportResult:
     """Import valid RNMC rows from a zip archive into catalog_items."""
     manual_region = _text(region_override)
+    final_filename_keys = final_filename_keys_for_preview(connection)
     entries: list[RnmcZipCatalogImportEntry] = []
     ignored_files = 0
     seen_keys: set[str] = set()
@@ -381,7 +392,7 @@ def import_rnmc_zip_catalog_rows(
                         DB_STATUS_DUPLICATE_NAME,
                         "Duplicate filename inside uploaded zip",
                     )
-                elif filename_is_final_for_preview(connection, filename):
+                elif key in final_filename_keys:
                     if imported_file_exists_for_region(
                         connection,
                         region_folder=region,
@@ -743,6 +754,7 @@ def _preview_workbook_bytes(
     region_folder: str,
     *,
     allow_metadata_region: bool = True,
+    row_limit: int = DEFAULT_ROW_PREVIEW_LIMIT,
 ) -> RnmcWorkbookPreview:
     workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
@@ -753,9 +765,15 @@ def _preview_workbook_bytes(
             header = _find_header_row(sheet)
             if header is None:
                 continue
-            rows_ok, rows_rejected, samples = _preview_table_rows(sheet, header)
+            rows_ok, rows_rejected, samples, is_limited = _preview_table_rows(
+                sheet,
+                header,
+                row_limit=row_limit,
+            )
             status = STATUS_PREVIEW_OK if rows_ok > 0 else STATUS_NO_ROWS
             reason = "Rows found" if rows_ok > 0 else "Header found, but no accepted rows"
+            if is_limited:
+                reason = f"{reason}; preview stopped at {row_limit} table rows"
             return RnmcWorkbookPreview(
                 archive_path=archive_path,
                 filename=filename,
@@ -772,6 +790,7 @@ def _preview_workbook_bytes(
                 rows_ok=rows_ok,
                 rows_rejected=rows_rejected,
                 sample_rows=samples,
+                is_limited=is_limited,
             )
 
         return _empty_preview(
@@ -858,20 +877,35 @@ def _preview_table_rows(
     header: _HeaderMatch,
     *,
     sample_limit: int = 5,
-) -> tuple[int, int, list[RnmcRowSample]]:
+    row_limit: int = DEFAULT_ROW_PREVIEW_LIMIT,
+) -> tuple[int, int, list[RnmcRowSample], bool]:
     num_col = _find_numbering_col(header.header_map) or 1
     max_row = int(sheet.max_row or 0)
+    max_col = max(num_col, header.name_col, header.unit_col, header.qty_col)
     rows_ok = 0
     rows_rejected = 0
     samples: list[RnmcRowSample] = []
     started = False
     blank_streak = 0
+    scanned_rows = 0
+    is_limited = False
 
-    for row_number in range(header.row_number + 1, max_row + 1):
-        num_value = sheet.cell(row_number, num_col).value
-        name_value = sheet.cell(row_number, header.name_col).value
-        unit_value = sheet.cell(row_number, header.unit_col).value
-        qty_value = sheet.cell(row_number, header.qty_col).value
+    if max_row <= header.row_number:
+        return rows_ok, rows_rejected, samples, is_limited
+
+    rows = sheet.iter_rows(
+        min_row=header.row_number + 1,
+        max_row=max_row,
+        min_col=1,
+        max_col=max_col,
+        values_only=True,
+    )
+    for row_offset, row_values in enumerate(rows, start=1):
+        row_number = header.row_number + row_offset
+        num_value = _row_value(row_values, num_col)
+        name_value = _row_value(row_values, header.name_col)
+        unit_value = _row_value(row_values, header.unit_col)
+        qty_value = _row_value(row_values, header.qty_col)
 
         if not started:
             if _is_blank(num_value) and _is_blank(unit_value) and _is_blank(qty_value):
@@ -895,9 +929,14 @@ def _preview_table_rows(
 
         if _is_blank(unit_value) and _is_blank(qty_value):
             rows_rejected += 1
+            scanned_rows += 1
+            if scanned_rows >= row_limit:
+                is_limited = True
+                break
             continue
 
         rows_ok += 1
+        scanned_rows += 1
         if len(samples) < sample_limit:
             samples.append(
                 RnmcRowSample(
@@ -907,7 +946,17 @@ def _preview_table_rows(
                     quantity=_text(qty_value),
                 )
             )
-    return rows_ok, rows_rejected, samples
+        if scanned_rows >= row_limit:
+            is_limited = True
+            break
+    return rows_ok, rows_rejected, samples, is_limited
+
+
+def _row_value(row_values: tuple[object, ...], column: int) -> object:
+    index = column - 1
+    if index < 0 or index >= len(row_values):
+        return None
+    return row_values[index]
 
 
 def _extract_workbook_metadata(workbook) -> RnmcWorkbookMetadata:
@@ -977,9 +1026,9 @@ def _find_metadata_value(
     normalized_patterns = tuple(_normalize_header(pattern) for pattern in label_patterns)
     max_row = min(int(sheet.max_row or 0), 120)
     max_col = min(int(sheet.max_column or 0), 60)
-    for row_number in range(1, max_row + 1):
-        for col_number in range(1, max_col + 1):
-            value = sheet.cell(row_number, col_number).value
+    rows = _metadata_rows(sheet, max_row=max_row, max_col=max_col)
+    for row_number, row_values in enumerate(rows, start=1):
+        for col_number, value in enumerate(row_values, start=1):
             normalized = _normalize_header(value)
             if normalized == "" or not _metadata_label_matches(normalized, normalized_patterns):
                 continue
@@ -990,7 +1039,7 @@ def _find_metadata_value(
                 if formatted:
                     return formatted
 
-            for candidate in _metadata_neighbor_values(sheet, row_number, col_number, max_row, max_col):
+            for candidate in _metadata_neighbor_values(rows, row_number, col_number, max_row, max_col):
                 formatted = _format_metadata_value(candidate, value_kind=value_kind)
                 if formatted:
                     return formatted
@@ -1001,9 +1050,9 @@ def _find_region_metadata_value(sheet: Worksheet) -> str:
     normalized_patterns = tuple(_normalize_header(pattern) for pattern in REGION_LABEL_PATTERNS)
     max_row = min(int(sheet.max_row or 0), 180)
     max_col = min(int(sheet.max_column or 0), 80)
-    for row_number in range(1, max_row + 1):
-        for col_number in range(1, max_col + 1):
-            value = sheet.cell(row_number, col_number).value
+    rows = _metadata_rows(sheet, max_row=max_row, max_col=max_col)
+    for row_number, row_values in enumerate(rows, start=1):
+        for col_number, value in enumerate(row_values, start=1):
             normalized = _normalize_header(value)
             if normalized == "" or not _region_label_matches(normalized, normalized_patterns):
                 continue
@@ -1011,7 +1060,7 @@ def _find_region_metadata_value(sheet: Worksheet) -> str:
             formatted = _format_region_metadata(inline)
             if formatted:
                 return formatted
-            for candidate in _metadata_neighbor_values(sheet, row_number, col_number, max_row, max_col):
+            for candidate in _metadata_neighbor_values(rows, row_number, col_number, max_row, max_col):
                 formatted = _format_region_metadata(candidate)
                 if formatted:
                     return formatted
@@ -1024,9 +1073,9 @@ def _find_regional_coefficient_metadata_value(sheet: Worksheet) -> float | None:
     )
     max_row = min(int(sheet.max_row or 0), 180)
     max_col = min(int(sheet.max_column or 0), 80)
-    for row_number in range(1, max_row + 1):
-        for col_number in range(1, max_col + 1):
-            value = sheet.cell(row_number, col_number).value
+    rows = _metadata_rows(sheet, max_row=max_row, max_col=max_col)
+    for row_number, row_values in enumerate(rows, start=1):
+        for col_number, value in enumerate(row_values, start=1):
             normalized = _normalize_header(value)
             if normalized == "" or not _coefficient_label_matches(normalized, normalized_patterns):
                 continue
@@ -1034,11 +1083,12 @@ def _find_regional_coefficient_metadata_value(sheet: Worksheet) -> float | None:
             formatted = _format_coefficient_metadata(inline)
             if formatted is not None:
                 return formatted
-            for candidate in _metadata_neighbor_values(sheet, row_number, col_number, max_row, max_col):
+            for candidate in _metadata_neighbor_values(rows, row_number, col_number, max_row, max_col):
                 formatted = _format_coefficient_metadata(candidate)
                 if formatted is not None:
                     return formatted
     return None
+
 
 
 def _region_label_matches(normalized: str, normalized_patterns: tuple[str, ...]) -> bool:
@@ -1118,8 +1168,27 @@ def _metadata_inline_value(value: object) -> str:
     return ""
 
 
-def _metadata_neighbor_values(
+def _metadata_rows(
     sheet: Worksheet,
+    *,
+    max_row: int,
+    max_col: int,
+) -> list[tuple[object, ...]]:
+    if max_row <= 0 or max_col <= 0:
+        return []
+    return list(
+        sheet.iter_rows(
+            min_row=1,
+            max_row=max_row,
+            min_col=1,
+            max_col=max_col,
+            values_only=True,
+        )
+    )
+
+
+def _metadata_neighbor_values(
+    rows: list[tuple[object, ...]],
     row_number: int,
     col_number: int,
     max_row: int,
@@ -1129,14 +1198,25 @@ def _metadata_neighbor_values(
     for offset in range(1, 5):
         column = col_number + offset
         if column <= max_col:
-            values.append(sheet.cell(row_number, column).value)
+            values.append(_grid_value(rows, row_number, column))
     if row_number + 1 <= max_row:
-        values.append(sheet.cell(row_number + 1, col_number).value)
+        values.append(_grid_value(rows, row_number + 1, col_number))
         for offset in range(1, 3):
             column = col_number + offset
             if column <= max_col:
-                values.append(sheet.cell(row_number + 1, column).value)
+                values.append(_grid_value(rows, row_number + 1, column))
     return values
+
+
+def _grid_value(rows: list[tuple[object, ...]], row_number: int, column: int) -> object:
+    row_index = row_number - 1
+    column_index = column - 1
+    if row_index < 0 or row_index >= len(rows):
+        return None
+    row_values = rows[row_index]
+    if column_index < 0 or column_index >= len(row_values):
+        return None
+    return row_values[column_index]
 
 
 def _format_metadata_value(value: object, *, value_kind: str) -> str:
@@ -1201,9 +1281,9 @@ def _find_metadata_context(sheet: Worksheet) -> RnmcWorkbookMetadata:
     regional_coefficient: float | None = None
     max_row = min(int(sheet.max_row or 0), 180)
     max_col = min(int(sheet.max_column or 0), 80)
-    for row_number in range(1, max_row + 1):
-        values = [sheet.cell(row_number, col_number).value for col_number in range(1, max_col + 1)]
-        text = " ".join(_text(value) for value in values if _text(value))
+    rows = _metadata_rows(sheet, max_row=max_row, max_col=max_col)
+    for row_values in rows:
+        text = " ".join(_text(value) for value in row_values if _text(value))
         if text == "":
             continue
         if lsr_quarter == "":
@@ -1734,6 +1814,7 @@ def _empty_preview(
         rows_ok=0,
         rows_rejected=0,
         sample_rows=[],
+        is_limited=False,
     )
 
 

@@ -59,7 +59,9 @@ log are marked as `duplicate_name` after the first occurrence.
    imported.
 3. **Row preview** — opens `.xlsx` / `.xlsm` files and shows detected rows,
    task number, workbook metadata, sheet name, header row, and rejected counts.
-   No catalog rows are imported.
+   Final already-processed filenames are skipped before workbook bytes are read.
+   Preview scans at most 30 table rows per workbook; the real catalog import
+   still validates and imports all rows. No catalog rows are imported.
 4. **Import rows into catalog** — validates and writes accepted rows to
    `catalog_items`, updates `imported_files`, stores detected workbook metadata,
    and writes rejected-row details to `import_row_log`.

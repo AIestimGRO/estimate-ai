@@ -4,6 +4,7 @@ from core.storage.connection import connect, default_database_path, init_databas
 from core.storage.catalog import (
     filename_is_processed,
     filename_is_final_for_preview,
+    final_filename_keys_for_preview,
     imported_file_exists_for_region,
     CatalogRowStorageItem,
     CatalogFileRowsImportResult,
@@ -56,6 +57,7 @@ __all__ = [
     "init_database",
     "filename_is_processed",
     "filename_is_final_for_preview",
+    "final_filename_keys_for_preview",
     "imported_file_exists_for_region",
     "CatalogRowStorageItem",
     "CatalogFileRowsImportResult",

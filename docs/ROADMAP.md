@@ -70,7 +70,8 @@ flow.
   marked as `duplicate_name`.
 - ZIP dry-run without writes.
 - ZIP import-log recording without catalog rows.
-- ZIP row preview for `.xlsx` / `.xlsm`.
+- ZIP row preview for `.xlsx` / `.xlsm`, including pre-skip of final
+  processed filenames and a 30-row-per-file preview limit.
 - Real ZIP import into `catalog_items`.
 - Per-file detail page with metadata, imported rows, rejected-row log, and retry
   unlock for `failed` / `no_data`.

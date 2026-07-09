@@ -16,7 +16,11 @@ from urllib.parse import quote
 from app.services.write_result import RunAndWriteResult
 from app.services.catalog_source import catalog_status_label, database_has_catalog
 from app.services.rnmc_zip import RnmcZipDryRunResult
-from app.services.rnmc_excel import RnmcZipCatalogImportResult, RnmcZipRowPreviewResult
+from app.services.rnmc_excel import (
+    DEFAULT_ROW_PREVIEW_LIMIT,
+    RnmcZipCatalogImportResult,
+    RnmcZipRowPreviewResult,
+)
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord
@@ -551,6 +555,10 @@ def _render_rnmc_zip_dry_run_result(result: RnmcZipDryRunResult | None) -> str:
         f'<div><dt>Прочих файлов проигнорировано</dt><dd>{result.ignored_files}</dd></div>'
         '</dl>'
     )
+    summary += (
+        f'<p class="muted">Предпросмотр читает не больше {DEFAULT_ROW_PREVIEW_LIMIT} строк на один Excel-файл. '
+        'Реальный импорт по-прежнему читает все строки файла.</p>'
+    )
     if not result.entries:
         return summary + '<p class="muted">В ZIP не найдено Excel-файлов РНМЦ.</p></div>'
 
@@ -588,6 +596,7 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
         f'<div><dt>Файлов с найденными строками</dt><dd>{result.preview_ok_count}</dd></div>'
         f'<div><dt>OK-строк найдено</dt><dd>{result.rows_ok_total}</dd></div>'
         f'<div><dt>Rejected-строк</dt><dd>{result.rows_rejected_total}</dd></div>'
+        f'<div><dt>Ограничено лимитом</dt><dd>{result.limited_count}</dd></div>'
         f'<div><dt>Уже обработано</dt><dd>{result.skipped_processed_count}</dd></div>'
         f'<div><dt>Дубликаты имени</dt><dd>{result.duplicate_name_count}</dd></div>'
         f'<div><dt>Без таблицы</dt><dd>{result.no_table_count}</dd></div>'
@@ -596,6 +605,10 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
         f'<div><dt>Ошибки чтения</dt><dd>{result.parse_error_count}</dd></div>'
         f'<div><dt>Прочих файлов проигнорировано</dt><dd>{result.ignored_files}</dd></div>'
         '</dl>'
+    )
+    summary += (
+        f'<p class="muted">Предпросмотр читает не больше {DEFAULT_ROW_PREVIEW_LIMIT} строк на один Excel-файл. '
+        'Реальный импорт по-прежнему читает все строки файла.</p>'
     )
     if not result.entries:
         return summary + '<p class="muted">В ZIP не найдено Excel-файлов РНМЦ.</p></div>'
@@ -637,10 +650,16 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
             f'<td>{_display_optional_number(entry.regional_coefficient)}</td>'
             f'<td>{entry.rows_ok}</td>'
             f'<td>{entry.rows_rejected}</td>'
-            f'<td>{_render_rnmc_samples(entry.sample_rows)}</td>'
+            f'<td>{_render_rnmc_samples(entry.sample_rows)}{_render_limited_marker(entry.is_limited)}</td>'
             '</tr>'
         )
     return summary + header + ''.join(rows) + '</tbody></table></div>'
+
+
+def _render_limited_marker(is_limited: bool) -> str:
+    if not is_limited:
+        return ''
+    return '<br><span class="muted">Остановлено на лимите предпросмотра</span>'
 
 
 def _render_rnmc_samples(samples) -> str:
@@ -676,6 +695,10 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
         f'<div><dt>Ошибки</dt><dd>{result.failed_count}</dd></div>'
         f'<div><dt>Прочих файлов проигнорировано</dt><dd>{result.ignored_files}</dd></div>'
         '</dl>'
+    )
+    summary += (
+        f'<p class="muted">Предпросмотр читает не больше {DEFAULT_ROW_PREVIEW_LIMIT} строк на один Excel-файл. '
+        'Реальный импорт по-прежнему читает все строки файла.</p>'
     )
     if not result.entries:
         return summary + '<p class="muted">В ZIP не найдено Excel-файлов РНМЦ.</p></div>'

@@ -374,6 +374,21 @@ def filename_is_final_for_preview(connection: sqlite3.Connection, filename: str)
     return _filename_has_status(connection, filename, FINAL_PREVIEW_SKIP_STATUSES)
 
 
+def final_filename_keys_for_preview(connection: sqlite3.Connection) -> set[str]:
+    """Return normalized file names that should be skipped before workbook parsing."""
+    placeholders = ", ".join("?" for _ in FINAL_PREVIEW_SKIP_STATUSES)
+    rows = connection.execute(
+        f"""
+        SELECT DISTINCT filename_key
+        FROM imported_files
+        WHERE filename_key <> ''
+          AND status IN ({placeholders})
+        """,
+        tuple(sorted(FINAL_PREVIEW_SKIP_STATUSES)),
+    ).fetchall()
+    return {_text(row["filename_key"]) for row in rows if _text(row["filename_key"])}
+
+
 def _filename_has_status(
     connection: sqlite3.Connection,
     filename: str,

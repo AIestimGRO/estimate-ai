@@ -17,7 +17,7 @@ from core.storage.catalog import (
     STATUS_DUPLICATE_NAME as DB_STATUS_DUPLICATE_NAME,
     STATUS_PENDING,
     STATUS_SKIPPED,
-    filename_is_final_for_preview,
+    final_filename_keys_for_preview,
     imported_file_exists_for_region,
     normalize_import_filename,
     record_imported_file,
@@ -86,6 +86,7 @@ def analyze_rnmc_zip_dry_run(
     versions.
     """
     manual_region = _text(region_override)
+    final_filename_keys = final_filename_keys_for_preview(connection)
     entries: list[RnmcZipDryRunEntry] = []
     ignored_files = 0
     seen_keys: set[str] = set()
@@ -106,7 +107,7 @@ def analyze_rnmc_zip_dry_run(
                 if key in seen_keys:
                     status = STATUS_DUPLICATE_NAME
                     reason = "Duplicate filename inside uploaded zip"
-                elif filename_is_final_for_preview(connection, filename):
+                elif key in final_filename_keys:
                     status = STATUS_SKIPPED_PROCESSED
                     reason = "Filename already has a final imported_files status"
                 else:

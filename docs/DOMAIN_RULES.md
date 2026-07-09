@@ -469,6 +469,13 @@ In short:
   `duplicate_name` without database writes.
 - ZIP log recording writes new files as `pending` without catalog rows.
 - ZIP row preview opens `.xlsx` / `.xlsm` files and reports detected rows.
+- ZIP row preview must skip final already-processed filenames before reading
+  workbook bytes from the archive. Final statuses include legacy imported,
+  success, skipped, no_data, duplicate_name, and manual_checked; pending and
+  failed remain previewable for retry checks.
+- ZIP row preview is intentionally limited to 30 table rows per workbook for UI
+  performance. This limit affects preview counts only; real catalog import must
+  still read and validate all rows.
 - ZIP catalog import writes accepted rows to `catalog_items`, writes rejected
   rows to `import_row_log`, and updates `imported_files` with statuses such as
   `success`, `no_data`, `failed`, `skipped`, and `duplicate_name`.

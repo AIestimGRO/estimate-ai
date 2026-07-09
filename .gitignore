@@ -118,3 +118,7 @@ _rnmc_strict_value_mapping_review/
 # RNMC consolidation metadata delivery artifacts
 rnmc-consolidation-metadata-updated-files.zip
 _rnmc_consolidation_metadata_review/
+
+# RNMC fast preview delivery artifacts
+rnmc-fast-preview-updated-files.zip
+_rnmc_fast_preview_review/

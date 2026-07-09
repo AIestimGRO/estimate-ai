@@ -70,6 +70,69 @@ def test_rnmc_zip_row_preview_counts_rows_and_keeps_pending_previewable(tmp_path
     assert by_path["Tula/pending.xlsx"].status == STATUS_PREVIEW_OK
 
 
+
+def test_row_preview_skips_processed_workbook_without_opening_it(tmp_path: Path) -> None:
+    file_log = tmp_path / "File_Log.xlsx"
+    _write_file_log(file_log, [["Moscow", "old.xlsx", 3, "", "", ""]])
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Moscow/old.xlsx": b"not a real workbook"})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        import_legacy_file_log(connection, file_log)
+        connection.commit()
+        result = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+    finally:
+        connection.close()
+
+    assert result.skipped_processed_count == 1
+    assert result.parse_error_count == 0
+    assert result.entries[0].status == STATUS_SKIPPED_PROCESSED
+    assert "not opened" in result.entries[0].reason
+
+
+def test_row_preview_limits_table_scan_to_30_rows_by_default(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Kazan/large.xlsx": _large_workbook_bytes(rows=45)})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+    finally:
+        connection.close()
+
+    entry = result.entries[0]
+    assert result.preview_ok_count == 1
+    assert result.rows_ok_total == 30
+    assert result.limited_count == 1
+    assert entry.rows_ok == 30
+    assert entry.rows_rejected == 0
+    assert entry.is_limited is True
+    assert "preview stopped at 30 table rows" in entry.reason
+
+
+def test_row_preview_limit_does_not_change_catalog_import(tmp_path: Path) -> None:
+    from app.services.rnmc_excel import import_rnmc_zip_catalog_rows
+    from core.storage.catalog import RNMC_ZIP_SOURCE_NAME, count_catalog_rows
+
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Kazan/large.xlsx": _large_workbook_bytes(rows=45, with_import_columns=True)})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        preview = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+        imported = import_rnmc_zip_catalog_rows(connection, str(zip_path))
+        total_rows = count_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+
+    assert preview.rows_ok_total == 30
+    assert imported.rows_imported_total == 45
+    assert total_rows == 45
+
 def test_admin_can_preview_rnmc_zip_rows(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "estimate_ai.db"
     monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
@@ -130,6 +193,37 @@ def _workbook_bytes(*, task_number: str) -> bytes:
     sheet.append([1, "Work A", "м", 10])
     sheet.append([2, "Work B", "шт", 5])
     sheet.append([3, "Work without unit and qty", "", ""])
+    sheet.append([None, None, None, None])
+    sheet.append([None, None, None, None])
+    sheet.append([None, None, None, None])
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _large_workbook_bytes(*, rows: int, with_import_columns: bool = False) -> bytes:
+    from io import BytesIO
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-LARGE"
+    sheet.append([])
+    if with_import_columns:
+        sheet.append([
+            "№ п/п",
+            "Наименование работ",
+            "Ед.изм.",
+            "Кол-во",
+            "Перечень ГЭСН",
+            "Цена единицы работ, руб. без НДС",
+        ])
+        for index in range(1, rows + 1):
+            sheet.append([index, f"Work {index}", "м", index, "ГЭСН01-01-001-01", 100 + index])
+    else:
+        sheet.append(["№ п/п", "Наименование работ", "Ед.изм.", "Кол-во"])
+        for index in range(1, rows + 1):
+            sheet.append([index, f"Work {index}", "м", index])
     sheet.append([None, None, None, None])
     sheet.append([None, None, None, None])
     sheet.append([None, None, None, None])
