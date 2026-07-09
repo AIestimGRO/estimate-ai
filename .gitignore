@@ -129,3 +129,7 @@ _rnmc_readable_preview_review/
 
 # RNMC preview filters zoom delivery artifacts
 _rnmc_preview_filters_zoom_review/
+
+# RNMC strict code section rows delivery artifacts
+rnmc-strict-code-section-rows-updated-files.zip
+_rnmc_strict_code_section_rows_review/

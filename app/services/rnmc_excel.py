@@ -48,6 +48,9 @@ TASK_LABEL_FULL = "\u2116 \u0437\u0430\u0434\u0430\u0447\u0438 1\u0424"
 TASK_LABEL_SHORT = "\u2116 \u0437\u0430\u0434\u0430\u0447\u0438"
 
 CODE_HEADER_PATTERNS = (
+    "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0422\u0415\u0420/\u041a\u0420",
+    "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0413\u042d\u0421\u041d/\u041a\u0420",
+    "\u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0422\u0415\u0420/\u041a\u0420",
     "\u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c",
     "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d",
     "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c",
@@ -634,20 +637,59 @@ def _extract_catalog_row_candidates(
     regional_coefficient: float | None = None,
 ) -> tuple[list[RnmcCatalogRowCandidate], list[RnmcRejectedRow]]:
     num_col = _find_numbering_col(header.header_map) or 1
-    code_col = _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)
+    code_col = _find_code_col(header)
     value_columns = _detect_value_columns(header.header_map)
     date_col = _find_pattern_col(header.header_map, ADDED_DATE_HEADER_PATTERNS)
     max_row = int(sheet.max_row or 0)
+    max_col = max(
+        num_col,
+        header.name_col,
+        header.unit_col,
+        header.qty_col,
+        code_col,
+        date_col,
+        value_columns.unit_price.column,
+        value_columns.total_price.column,
+        value_columns.labor_unit_col,
+        value_columns.labor_total_col,
+        value_columns.machine_labor_unit_col,
+        value_columns.machine_labor_total_col,
+    )
     rows: list[RnmcCatalogRowCandidate] = []
     rejected: list[RnmcRejectedRow] = []
     started = False
     blank_streak = 0
 
-    for row_number in range(header.row_number + 1, max_row + 1):
-        num_value = sheet.cell(row_number, num_col).value
-        name_value = sheet.cell(row_number, header.name_col).value
-        unit_value = sheet.cell(row_number, header.unit_col).value
-        qty_value = sheet.cell(row_number, header.qty_col).value
+    if max_row <= header.row_number:
+        return rows, rejected
+
+    sheet_rows = sheet.iter_rows(
+        min_row=header.row_number + 1,
+        max_row=max_row,
+        min_col=1,
+        max_col=max_col,
+        values_only=True,
+    )
+    for row_offset, row_values in enumerate(sheet_rows, start=1):
+        row_number = header.row_number + row_offset
+        num_value = _row_value(row_values, num_col)
+        name_value = _row_value(row_values, header.name_col)
+        unit_value = _row_value(row_values, header.unit_col)
+        qty_value = _row_value(row_values, header.qty_col)
+        price_value = _row_value(row_values, value_columns.unit_price.column)
+        total_price_value = _row_value(row_values, value_columns.total_price.column)
+        code_value = _row_value(row_values, code_col)
+
+        if _is_column_numbering_row((
+            num_value,
+            name_value,
+            unit_value,
+            qty_value,
+            price_value,
+            total_price_value,
+            code_value,
+        )):
+            continue
 
         if not started:
             if _is_blank(num_value) and _is_blank(unit_value) and _is_blank(qty_value):
@@ -669,39 +711,48 @@ def _extract_catalog_row_candidates(
         if is_end_blank:
             continue
 
+        if _is_section_row(
+            name_value=name_value,
+            code_value=code_value,
+            unit_value=unit_value,
+            qty_value=qty_value,
+            price_value=price_value,
+            total_price_value=total_price_value,
+        ):
+            continue
+
         if _is_blank(unit_value) and _is_blank(qty_value):
             rejected.append(RnmcRejectedRow(row_number, "missing_unit_and_quantity"))
             continue
 
-        price_value = _cell_value(sheet, row_number, value_columns.unit_price.column)
         parsed_price = _parse_positive_number(price_value)
         if parsed_price is not None:
             parsed_price = parsed_price / value_columns.unit_price.divisor
 
         total_price = _parse_optional_value(
-            _cell_value(sheet, row_number, value_columns.total_price.column),
+            total_price_value,
             divisor=value_columns.total_price.divisor,
         )
         catalog_row = CatalogRow(
             task_id=task_number,
             price=parsed_price if parsed_price is not None else price_value,
-            code=_cell_value(sheet, row_number, code_col),
+            code=code_value,
             unit=unit_value,
             work_name=name_value,
             region=region_folder,
-            added_date=_cell_value(sheet, row_number, date_col),
+            added_date=_row_value(row_values, date_col),
             total_price=total_price,
             labor_unit=_parse_optional_value(
-                _cell_value(sheet, row_number, value_columns.labor_unit_col)
+                _row_value(row_values, value_columns.labor_unit_col)
             ),
             labor_total=_parse_optional_value(
-                _cell_value(sheet, row_number, value_columns.labor_total_col)
+                _row_value(row_values, value_columns.labor_total_col)
             ),
             machine_labor_unit=_parse_optional_value(
-                _cell_value(sheet, row_number, value_columns.machine_labor_unit_col)
+                _row_value(row_values, value_columns.machine_labor_unit_col)
             ),
             machine_labor_total=_parse_optional_value(
-                _cell_value(sheet, row_number, value_columns.machine_labor_total_col)
+                _row_value(row_values, value_columns.machine_labor_total_col)
             ),
             regional_coefficient=regional_coefficient,
         )
@@ -712,7 +763,6 @@ def _extract_catalog_row_candidates(
         rows.append(RnmcCatalogRowCandidate(row_number=row_number, catalog_row=catalog_row))
 
     return rows, rejected
-
 
 def _record_non_imported_file(
     connection: sqlite3.Connection,
@@ -909,7 +959,7 @@ def _preview_table_rows(
     row_limit: int = DEFAULT_ROW_PREVIEW_LIMIT,
 ) -> tuple[int, int, list[RnmcRowSample], bool]:
     num_col = _find_numbering_col(header.header_map) or 1
-    code_col = _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)
+    code_col = _find_code_col(header)
     value_columns = _detect_value_columns(header.header_map)
     max_row = int(sheet.max_row or 0)
     max_col = max(
@@ -950,6 +1000,13 @@ def _preview_table_rows(
         unit_value = _row_value(row_values, header.unit_col)
         qty_value = _row_value(row_values, header.qty_col)
 
+        price_value = _row_value(row_values, value_columns.unit_price.column)
+        total_price_value = _row_value(row_values, value_columns.total_price.column)
+        code_value = _row_value(row_values, code_col)
+
+        if _is_column_numbering_row(row_values):
+            continue
+
         if not started:
             if _is_blank(num_value) and _is_blank(unit_value) and _is_blank(qty_value):
                 continue
@@ -970,6 +1027,16 @@ def _preview_table_rows(
         if is_end_blank:
             continue
 
+        if _is_section_row(
+            name_value=name_value,
+            code_value=code_value,
+            unit_value=unit_value,
+            qty_value=qty_value,
+            price_value=price_value,
+            total_price_value=total_price_value,
+        ):
+            continue
+
         issue = ""
         if _is_blank(unit_value) and _is_blank(qty_value):
             rows_rejected += 1
@@ -981,19 +1048,19 @@ def _preview_table_rows(
         samples.append(
             RnmcRowSample(
                 row_number=row_number,
-                code=_text(_row_value(row_values, code_col)),
+                code=_text(code_value),
                 work_name=_text(name_value),
                 unit=_text(unit_value),
                 quantity=_text(qty_value),
                 unit_price=_format_preview_number(
                     _parse_optional_value(
-                        _row_value(row_values, value_columns.unit_price.column),
+                        price_value,
                         divisor=value_columns.unit_price.divisor,
                     )
                 ),
                 total_price=_format_preview_number(
                     _parse_optional_value(
-                        _row_value(row_values, value_columns.total_price.column),
+                        total_price_value,
                         divisor=value_columns.total_price.divisor,
                     )
                 ),
@@ -1021,7 +1088,7 @@ def _preview_table_rows(
 def _build_header_preview(header: _HeaderMatch) -> RnmcHeaderPreview:
     value_columns = _detect_value_columns(header.header_map)
     return RnmcHeaderPreview(
-        code=_header_label(header, _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)),
+        code=_header_label(header, _find_code_col(header)),
         work_name=_header_label(header, header.name_col),
         unit=_header_label(header, header.unit_col),
         quantity=_header_label(header, header.qty_col),
@@ -1630,6 +1697,55 @@ def _find_numbering_col(header_map: dict[str, int]) -> int:
     return 0
 
 
+def _find_code_col(header: _HeaderMatch) -> int:
+    normalized_patterns = tuple(_normalize_header(pattern) for pattern in CODE_HEADER_PATTERNS)
+    for pattern in normalized_patterns:
+        for key, column in header.header_map.items():
+            if _is_disallowed_code_header(key):
+                continue
+            if key == pattern or pattern in key:
+                return int(column)
+    return 0
+
+
+def _is_disallowed_code_header(normalized_header: str) -> bool:
+    return "\u043a\u043e\u0434\u0440\u0430\u0437\u0434\u0435\u043b" in normalized_header
+
+
+def _is_column_numbering_row(row_values: tuple[object, ...]) -> bool:
+    numbers: list[int] = []
+    for value in row_values:
+        text = _text(value)
+        if text == "":
+            continue
+        if not re.fullmatch(r"\d{1,3}", text):
+            return False
+        numbers.append(int(text))
+    if len(numbers) < 4:
+        return False
+    if min(numbers) < 1 or max(numbers) > 200:
+        return False
+    return numbers == sorted(numbers) and len(set(numbers)) == len(numbers)
+
+
+def _is_section_row(
+    *,
+    name_value: object,
+    code_value: object,
+    unit_value: object,
+    qty_value: object,
+    price_value: object,
+    total_price_value: object,
+) -> bool:
+    if _text(name_value) == "":
+        return False
+    return (
+        _is_blank(code_value)
+        and _is_blank(unit_value)
+        and _is_blank(qty_value)
+        and _parse_number(price_value) is None
+        and _parse_number(total_price_value) is None
+    )
 
 
 def _detect_value_columns(header_map: dict[str, int]) -> _HeaderValueColumns:

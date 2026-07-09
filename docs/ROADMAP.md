@@ -106,6 +106,9 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - [x] RNMC consolidation metadata detection for region and regional coefficient.
 - [x] Readable RNMC row preview UI with tabs, detected source headers,
   client-side filters, and local preview zoom.
+- [x] Strict RNMC code-column handling: `Код раздела` is excluded, technical
+  header-number rows are skipped, and section/title rows are not treated as
+  rejected catalog rows.
 
 ## Next milestone — RNMC import quality automation
 

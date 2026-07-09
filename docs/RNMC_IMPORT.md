@@ -60,10 +60,10 @@ log are marked as `duplicate_name` after the first occurrence.
 3. **Row preview** — opens `.xlsx` / `.xlsm` files and shows a readable
    tabbed result: summary, file statuses, workbook metadata, detected source
    headers, and preview rows. Final already-processed filenames are skipped
-   before workbook bytes are read. Preview shows at most 30 real body rows per
-   workbook after the detected header row; blank technical rows before the table
-   body do not consume the limit. The real catalog import still validates and
-   imports all rows. No catalog rows are imported.
+   before workbook bytes are read. Preview shows at most 30 real catalog body
+   rows per workbook after the detected header row; Excel column-number helper
+   rows and section/title rows do not consume the limit. The real catalog import
+   still validates and imports all rows. No catalog rows are imported.
 4. **Import rows into catalog** — validates and writes accepted rows to
    `catalog_items`, updates `imported_files`, stores detected workbook metadata,
    and writes rejected-row details to `import_row_log`.
@@ -80,12 +80,25 @@ reviewable:
   start, and planned finish.
 - **Headers** shows the original Excel header texts that were mapped to code,
   work name, unit, quantity, unit price, total price, and labor columns.
-- **Rows** shows up to 30 real body rows per workbook with normalized unit price
-  without VAT, total without VAT, labor fields, and preview-only row issues.
+- **Rows** shows up to 30 real catalog body rows per workbook with normalized
+  unit price without VAT, total without VAT, labor fields, and preview-only row
+  issues. Column-number helper rows and section/title rows are omitted.
 
 Preview tables include client-side filters for search, status, already-processed
 files, problem rows, and empty rows. They also include a local table zoom/density
 control so large RNMC batches can be reviewed without changing browser zoom.
+
+
+Rows that are clearly section/title rows are skipped instead of being treated as
+critical rejected rows. In practice this means rows with a work-name/title but no
+GESN/code, no unit, no quantity, and no price/total are not written to the catalog
+and are not logged as rejected. Technical header-index rows such as `1 | 2 | 3 |
+...` directly under the Excel header are also skipped.
+
+`Код раздела` is never accepted as the catalog code column. The parser prefers
+source headers such as `Перечень ГЭСН/ФЕР/ТЕР/КР`, `Перечень ГЭСН`,
+`ГЭСН/ФЕР/Перечень`, `Обоснование`, or `Шифр`. Generic `Код` remains a last
+resort, but headers containing `код раздел` are explicitly excluded.
 
 ## Region handling
 
@@ -199,6 +212,9 @@ an Excel row number and reason, for example:
 - `missing_or_invalid_unit`;
 - `missing_or_invalid_price`;
 - `missing_unit_and_quantity`.
+
+Section/title rows that lack code, unit, quantity, and price are skipped before
+validation and therefore do not create `missing_unit_and_quantity` records.
 
 ## Statuses
 
