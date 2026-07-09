@@ -83,6 +83,10 @@ reviewable:
 - **Rows** shows up to 30 real body rows per workbook with normalized unit price
   without VAT, total without VAT, labor fields, and preview-only row issues.
 
+Preview tables include client-side filters for search, status, already-processed
+files, problem rows, and empty rows. They also include a local table zoom/density
+control so large RNMC batches can be reviewed without changing browser zoom.
+
 ## Region handling
 
 Default region = immediate parent folder inside the ZIP, unless a workbook consolidation block provides an object region.

@@ -126,3 +126,6 @@ _rnmc_fast_preview_review/
 # RNMC readable preview delivery artifacts
 rnmc-readable-preview-updated-files.zip
 _rnmc_readable_preview_review/
+
+# RNMC preview filters zoom delivery artifacts
+_rnmc_preview_filters_zoom_review/

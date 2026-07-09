@@ -104,7 +104,8 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   finish from RNMC workbooks.
 - [x] Strict RNMC value-column mapping with VAT normalization and labor fields.
 - [x] RNMC consolidation metadata detection for region and regional coefficient.
-- [x] Readable RNMC row preview UI with tabs and detected source headers.
+- [x] Readable RNMC row preview UI with tabs, detected source headers,
+  client-side filters, and local preview zoom.
 
 ## Next milestone — RNMC import quality automation
 

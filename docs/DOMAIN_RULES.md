@@ -479,6 +479,12 @@ In short:
   counts only; real catalog import must still read and validate all rows.
 - ZIP row preview should render large batches in separate views for summary,
   file statuses, workbook metadata, detected source headers, and row samples.
+- ZIP row preview UI should provide column-style client-side filters to hide
+  already-processed files, show only problem rows, hide empty rows, and search
+  within the currently rendered table. These UI filters must not change import
+  behavior or matching/pricing logic.
+- ZIP row preview UI may provide local table zoom/density controls. These are
+  presentation-only controls and must not change parsed values.
 - ZIP catalog import writes accepted rows to `catalog_items`, writes rejected
   rows to `import_row_log`, and updates `imported_files` with statuses such as
   `success`, `no_data`, `failed`, `skipped`, and `duplicate_name`.

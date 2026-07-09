@@ -186,6 +186,11 @@ def test_admin_can_preview_rnmc_zip_rows(tmp_path: Path, monkeypatch) -> None:
     assert "Метаданные" in response.text
     assert "Заголовки" in response.text
     assert "Строки предпросмотра" in response.text
+    assert 'data-rnmc-search="rnmc-files"' in response.text
+    assert 'data-rnmc-hide-processed="rnmc-files"' in response.text
+    assert 'data-rnmc-only-problems="rnmc-rows"' in response.text
+    assert "data-rnmc-zoom" in response.text
+    assert "Масштаб таблиц" in response.text
 
 
 def _value_preview_workbook_bytes() -> bytes:

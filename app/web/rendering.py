@@ -159,6 +159,31 @@ table.preview td.path {
 }
 .preview-wide { max-height: 560px; overflow: auto; border: 1px solid #e2e8f0;
   border-radius: 10px; margin-bottom: 16px; background: #fff; }
+.rnmc-preview-shell { --rnmc-preview-scale: 1; --rnmc-preview-padding: 7px 10px; }
+.rnmc-preview-shell table.preview { font-size: calc(13px * var(--rnmc-preview-scale)); }
+.rnmc-preview-shell table.preview th, .rnmc-preview-shell table.preview td {
+  padding: var(--rnmc-preview-padding);
+}
+.rnmc-preview-shell.compact { --rnmc-preview-padding: 4px 7px; }
+.rnmc-preview-shell.large { --rnmc-preview-padding: 10px 13px; }
+.rnmc-preview-toolbar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 8px 0 12px;
+  padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;
+}
+.rnmc-preview-toolbar label { margin: 0; font-size: 12px; color: #475569; font-weight: 600; }
+.rnmc-preview-toolbar input[type=search], .rnmc-preview-toolbar select {
+  display: block; width: auto; min-width: 170px; margin-top: 4px; padding: 7px 9px;
+  border-radius: 8px; font-size: 13px;
+}
+.rnmc-preview-toolbar button {
+  width: auto; margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+  background: #e0e7ff; color: #3730a3;
+}
+.rnmc-preview-toolbar button:hover { background: #c7d2fe; }
+.rnmc-preview-toolbar .rnmc-toggle { display: flex; gap: 6px; align-items: center; padding: 7px 0; }
+.rnmc-preview-toolbar input[type=checkbox] { margin: 0; }
+.rnmc-filter-count { color: #64748b; font-size: 12px; padding: 8px 0 0; }
+.rnmc-hidden-row { display: none; }
 .card.wide { max-width: min(1600px, 98vw); }
 .rnmc-tabs { margin-top: 14px; }
 .rnmc-tab-input { position: absolute; opacity: 0; pointer-events: none; }
@@ -619,6 +644,157 @@ def _render_rnmc_zip_dry_run_result(result: RnmcZipDryRunResult | None) -> str:
         )
     return summary + header + ''.join(rows) + '</tbody></table></div>'
 
+
+def _attr(value: object) -> str:
+    return html.escape(str(value or ""), quote=True)
+
+
+def _flag(value: bool) -> str:
+    return "1" if value else "0"
+
+
+def _rnmc_filter_toolbar(table_id: str, *, status_filter: bool = True, empty_filter: bool = True) -> str:
+    status = (
+        f'<label>Статус<select data-rnmc-filter-status="{table_id}">'
+        '<option value="">Все статусы</option>'
+        '</select></label>'
+        if status_filter else ""
+    )
+    hide_empty = (
+        f'<label class="rnmc-toggle"><input type="checkbox" data-rnmc-hide-empty="{table_id}"> Скрыть пустые строки</label>'
+        if empty_filter else ""
+    )
+    return (
+        f'<div class="rnmc-preview-toolbar" data-rnmc-toolbar="{table_id}">'
+        f'<label>Поиск<input type="search" data-rnmc-search="{table_id}" placeholder="Файл, код, регион, причина..."></label>'
+        f'{status}'
+        f'<label class="rnmc-toggle"><input type="checkbox" data-rnmc-hide-processed="{table_id}"> Скрыть ранее загруженные</label>'
+        f'<label class="rnmc-toggle"><input type="checkbox" data-rnmc-only-problems="{table_id}"> Только проблемные</label>'
+        f'{hide_empty}'
+        f'<button type="button" data-rnmc-clear="{table_id}">Очистить фильтры</button>'
+        f'<span class="rnmc-filter-count" data-rnmc-count="{table_id}"></span>'
+        '</div>'
+    )
+
+
+def _rnmc_zoom_toolbar() -> str:
+    return (
+        '<div class="rnmc-preview-toolbar">'
+        '<label>Масштаб таблиц<select data-rnmc-zoom>'
+        '<option value="0.85">85%</option>'
+        '<option value="1" selected>100%</option>'
+        '<option value="1.15">115%</option>'
+        '<option value="1.3">130%</option>'
+        '</select></label>'
+        '<label>Плотность<select data-rnmc-density>'
+        '<option value="compact">Компактно</option>'
+        '<option value="normal" selected>Обычно</option>'
+        '<option value="large">Крупно</option>'
+        '</select></label>'
+        '<span class="muted">Масштаб меняет только таблицы предпросмотра.</span>'
+        '</div>'
+    )
+
+
+def _rnmc_preview_script() -> str:
+    return """
+<script>
+(function () {
+  function text(row) { return (row.textContent || '').toLowerCase(); }
+  function tableById(id) { return document.querySelector('[data-rnmc-table="' + id + '"]'); }
+  function rowsFor(id) {
+    var table = tableById(id);
+    if (!table) return [];
+    return Array.prototype.slice.call(table.querySelectorAll('tbody tr[data-rnmc-row="1"]'));
+  }
+  function fillStatuses(id) {
+    var select = document.querySelector('[data-rnmc-filter-status="' + id + '"]');
+    if (!select || select.dataset.ready === '1') return;
+    var values = [];
+    rowsFor(id).forEach(function (row) {
+      var status = row.dataset.status || '';
+      if (status && values.indexOf(status) === -1) values.push(status);
+    });
+    values.sort().forEach(function (status) {
+      var option = document.createElement('option');
+      option.value = status;
+      option.textContent = status;
+      select.appendChild(option);
+    });
+    select.dataset.ready = '1';
+  }
+  function applyFilter(id) {
+    fillStatuses(id);
+    var query = (document.querySelector('[data-rnmc-search="' + id + '"]') || {}).value || '';
+    query = query.toLowerCase().trim();
+    var status = (document.querySelector('[data-rnmc-filter-status="' + id + '"]') || {}).value || '';
+    var hideProcessed = !!(document.querySelector('[data-rnmc-hide-processed="' + id + '"]') || {}).checked;
+    var onlyProblems = !!(document.querySelector('[data-rnmc-only-problems="' + id + '"]') || {}).checked;
+    var hideEmpty = !!(document.querySelector('[data-rnmc-hide-empty="' + id + '"]') || {}).checked;
+    var shown = 0;
+    var total = 0;
+    rowsFor(id).forEach(function (row) {
+      total += 1;
+      var ok = true;
+      if (query && text(row).indexOf(query) === -1) ok = false;
+      if (status && row.dataset.status !== status) ok = false;
+      if (hideProcessed && row.dataset.processed === '1') ok = false;
+      if (onlyProblems && row.dataset.problem !== '1') ok = false;
+      if (hideEmpty && row.dataset.empty === '1') ok = false;
+      row.classList.toggle('rnmc-hidden-row', !ok);
+      if (ok) shown += 1;
+    });
+    var count = document.querySelector('[data-rnmc-count="' + id + '"]');
+    if (count) count.textContent = 'Показано: ' + shown + ' из ' + total;
+  }
+  function clearFilter(id) {
+    var search = document.querySelector('[data-rnmc-search="' + id + '"]');
+    var status = document.querySelector('[data-rnmc-filter-status="' + id + '"]');
+    var hideProcessed = document.querySelector('[data-rnmc-hide-processed="' + id + '"]');
+    var onlyProblems = document.querySelector('[data-rnmc-only-problems="' + id + '"]');
+    var hideEmpty = document.querySelector('[data-rnmc-hide-empty="' + id + '"]');
+    if (search) search.value = '';
+    if (status) status.value = '';
+    if (hideProcessed) hideProcessed.checked = false;
+    if (onlyProblems) onlyProblems.checked = false;
+    if (hideEmpty) hideEmpty.checked = false;
+    applyFilter(id);
+  }
+  function setZoom() {
+    var shell = document.querySelector('.rnmc-preview-shell');
+    if (!shell) return;
+    var zoom = (document.querySelector('[data-rnmc-zoom]') || {}).value || '1';
+    var density = (document.querySelector('[data-rnmc-density]') || {}).value || 'normal';
+    shell.style.setProperty('--rnmc-preview-scale', zoom);
+    shell.classList.toggle('compact', density === 'compact');
+    shell.classList.toggle('large', density === 'large');
+  }
+  document.addEventListener('input', function (event) {
+    var id = event.target.getAttribute('data-rnmc-search');
+    if (id) applyFilter(id);
+  });
+  document.addEventListener('change', function (event) {
+    var attrs = ['data-rnmc-filter-status', 'data-rnmc-hide-processed', 'data-rnmc-only-problems', 'data-rnmc-hide-empty'];
+    for (var i = 0; i < attrs.length; i++) {
+      var id = event.target.getAttribute(attrs[i]);
+      if (id) { applyFilter(id); return; }
+    }
+    if (event.target.hasAttribute('data-rnmc-zoom') || event.target.hasAttribute('data-rnmc-density')) setZoom();
+  });
+  document.addEventListener('click', function (event) {
+    var id = event.target.getAttribute('data-rnmc-clear');
+    if (id) clearFilter(id);
+  });
+  document.querySelectorAll('[data-rnmc-table]').forEach(function (table) {
+    var id = table.getAttribute('data-rnmc-table');
+    fillStatuses(id);
+    applyFilter(id);
+  });
+  setZoom();
+})();
+</script>
+"""
+
 def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) -> str:
     if result is None:
         return ""
@@ -653,6 +829,8 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
         )
 
     tabs = (
+        '<div class="rnmc-preview-shell">'
+        f'{_rnmc_zoom_toolbar()}'
         '<div class="rnmc-tabs">'
         '<input class="rnmc-tab-input" type="radio" name="rnmc-preview-tabs" id="rnmc-preview-tab-summary" checked>'
         '<input class="rnmc-tab-input" type="radio" name="rnmc-preview-tabs" id="rnmc-preview-tab-files">'
@@ -673,6 +851,8 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
         f'<section class="rnmc-tab-panel" id="rnmc-preview-panel-headers">{_render_rnmc_preview_header_table(result.entries)}</section>'
         f'<section class="rnmc-tab-panel" id="rnmc-preview-panel-rows">{_render_rnmc_preview_rows_table(result.entries)}</section>'
         '</div></div>'
+        '</div>'
+        f'{_rnmc_preview_script()}'
     )
     return (
         '<div class="admin-form">'
@@ -682,9 +862,12 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
     )
 
 
+
 def _render_rnmc_preview_file_table(entries) -> str:
+    table_id = "rnmc-files"
     header = (
-        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        f'{_rnmc_filter_toolbar(table_id)}'
+        f'<div class="preview-wide"><table class="preview" data-rnmc-table="{table_id}"><thead><tr>'
         '<th>Файл</th><th>Регион</th><th>Статус</th><th>Причина</th>'
         '<th>Лист</th><th>Header row</th><th>Задача</th><th>OK</th><th>Rejected</th><th>Лимит</th>'
         '</tr></thead><tbody>'
@@ -692,9 +875,14 @@ def _render_rnmc_preview_file_table(entries) -> str:
     rows = []
     for entry in entries:
         status_class = _preview_status_class(entry.status)
+        processed = entry.status == "skipped_processed"
+        problem = entry.status != "preview_ok" or bool(entry.reason)
+        empty = entry.rows_ok <= 0 and entry.rows_rejected <= 0
         rows.append(
-            '<tr>'
-            f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+            '<tr data-rnmc-row="1" '
+            f'data-status="{_attr(entry.status)}" data-processed="{_flag(processed)}" '
+            f'data-problem="{_flag(problem)}" data-empty="{_flag(empty)}">'
+            f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
             f'<td>{html.escape(entry.region_folder)}</td>'
             f'<td><span class="status-pill {status_class}">{html.escape(entry.status)}</span></td>'
             f'<td class="wrap">{html.escape(entry.reason)}</td>'
@@ -710,16 +898,22 @@ def _render_rnmc_preview_file_table(entries) -> str:
 
 
 def _render_rnmc_preview_metadata_table(entries) -> str:
+    table_id = "rnmc-metadata"
     header = (
-        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        f'{_rnmc_filter_toolbar(table_id)}'
+        f'<div class="preview-wide"><table class="preview" data-rnmc-table="{table_id}"><thead><tr>'
         '<th>Файл</th><th>Регион</th><th>Коэф.</th><th>ЛСР</th><th>Начало</th><th>Окончание</th>'
         '</tr></thead><tbody>'
     )
     rows = []
     for entry in entries:
+        empty = not any([entry.region_folder, entry.regional_coefficient, entry.lsr_quarter, entry.planned_start, entry.planned_finish])
+        problem = entry.status != "preview_ok" or not entry.region_folder or not entry.lsr_quarter or not entry.planned_start or not entry.planned_finish
         rows.append(
-            '<tr>'
-            f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+            '<tr data-rnmc-row="1" '
+            f'data-status="{_attr(entry.status)}" data-processed="{_flag(entry.status == "skipped_processed")}" '
+            f'data-problem="{_flag(problem)}" data-empty="{_flag(empty)}">'
+            f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
             f'<td>{html.escape(entry.region_folder)}</td>'
             f'<td>{_display_optional_number(entry.regional_coefficient)}</td>'
             f'<td>{html.escape(entry.lsr_quarter)}</td>'
@@ -731,8 +925,10 @@ def _render_rnmc_preview_metadata_table(entries) -> str:
 
 
 def _render_rnmc_preview_header_table(entries) -> str:
+    table_id = "rnmc-headers"
     header = (
-        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        f'{_rnmc_filter_toolbar(table_id)}'
+        f'<div class="preview-wide"><table class="preview" data-rnmc-table="{table_id}"><thead><tr>'
         '<th>Файл</th><th>Header row</th><th>Код</th><th class="wrap">Наименование</th>'
         '<th>Ед.</th><th>Кол-во</th><th class="wrap">Цена ед.</th><th class="wrap">Итого</th>'
         '<th>ТЗ ед.</th><th>ТЗ всего</th><th>ТЗм ед.</th><th>ТЗм всего</th>'
@@ -741,9 +937,17 @@ def _render_rnmc_preview_header_table(entries) -> str:
     rows = []
     for entry in entries:
         labels = entry.header_preview
+        empty = not any([
+            labels.code, labels.work_name, labels.unit, labels.quantity, labels.unit_price,
+            labels.total_price, labels.labor_unit, labels.labor_total, labels.machine_labor_unit,
+            labels.machine_labor_total,
+        ])
+        problem = entry.status != "preview_ok" or not labels.code or not labels.unit or not labels.quantity or not labels.unit_price
         rows.append(
-            '<tr>'
-            f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+            '<tr data-rnmc-row="1" '
+            f'data-status="{_attr(entry.status)}" data-processed="{_flag(entry.status == "skipped_processed")}" '
+            f'data-problem="{_flag(problem)}" data-empty="{_flag(empty)}">'
+            f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
             f'<td>{entry.header_row or ""}</td>'
             f'<td>{html.escape(labels.code)}</td>'
             f'<td class="wrap">{html.escape(labels.work_name)}</td>'
@@ -761,8 +965,10 @@ def _render_rnmc_preview_header_table(entries) -> str:
 
 
 def _render_rnmc_preview_rows_table(entries) -> str:
+    table_id = "rnmc-rows"
     header = (
-        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        f'{_rnmc_filter_toolbar(table_id)}'
+        f'<div class="preview-wide"><table class="preview" data-rnmc-table="{table_id}"><thead><tr>'
         '<th>Файл</th><th>Excel row</th><th>Код</th><th class="wrap">Работа</th><th>Ед.</th><th>Кол-во</th>'
         '<th>Цена ед. без НДС</th><th>Итого без НДС</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
         '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Проблема</th>'
@@ -771,17 +977,24 @@ def _render_rnmc_preview_rows_table(entries) -> str:
     rows = []
     for entry in entries:
         if not entry.sample_rows:
+            problem = entry.status != "preview_ok"
             rows.append(
-                '<tr>'
-                f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+                '<tr data-rnmc-row="1" '
+                f'data-status="{_attr(entry.status)}" data-processed="{_flag(entry.status == "skipped_processed")}" '
+                f'data-problem="{_flag(problem)}" data-empty="1">'
+                f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
                 '<td colspan="12" class="muted">Нет строк для показа</td>'
                 '</tr>'
             )
             continue
         for sample in entry.sample_rows:
+            problem = bool(sample.issue)
+            empty = not any([sample.code, sample.work_name, sample.unit, sample.quantity, sample.unit_price, sample.total_price])
             rows.append(
-                '<tr>'
-                f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+                '<tr data-rnmc-row="1" '
+                f'data-status="{_attr(entry.status)}" data-processed="{_flag(entry.status == "skipped_processed")}" '
+                f'data-problem="{_flag(problem)}" data-empty="{_flag(empty)}">'
+                f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
                 f'<td>{sample.row_number}</td>'
                 f'<td>{html.escape(sample.code)}</td>'
                 f'<td class="wrap">{html.escape(sample.work_name)}</td>'
@@ -798,13 +1011,14 @@ def _render_rnmc_preview_rows_table(entries) -> str:
             )
         if entry.is_limited:
             rows.append(
-                '<tr>'
-                f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+                '<tr data-rnmc-row="1" '
+                f'data-status="{_attr(entry.status)}" data-processed="{_flag(entry.status == "skipped_processed")}" '
+                'data-problem="0" data-empty="1">'
+                f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
                 f'<td colspan="12" class="muted">Показаны первые {DEFAULT_ROW_PREVIEW_LIMIT} строк тела таблицы</td>'
                 '</tr>'
             )
     return header + ''.join(rows) + '</tbody></table></div>'
-
 
 def _preview_status_class(status: str) -> str:
     if status == "preview_ok":
