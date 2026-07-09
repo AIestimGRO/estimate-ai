@@ -60,10 +60,10 @@ log are marked as `duplicate_name` after the first occurrence.
 3. **Row preview** — opens `.xlsx` / `.xlsm` files and shows a readable
    tabbed result: summary, file statuses, workbook metadata, detected source
    headers, and preview rows. Final already-processed filenames are skipped
-   before workbook bytes are read. Preview shows at most 30 real catalog body
-   rows per workbook after the detected header row; Excel column-number helper
-   rows and section/title rows do not consume the limit. The real catalog import
-   still validates and imports all rows. No catalog rows are imported.
+   before workbook bytes are read. Preview shows at most 30 real body rows per
+   workbook after the detected header row; blank technical rows before the table
+   body do not consume the limit. The real catalog import still validates and
+   imports all rows. No catalog rows are imported.
 4. **Import rows into catalog** — validates and writes accepted rows to
    `catalog_items`, updates `imported_files`, stores detected workbook metadata,
    and writes rejected-row details to `import_row_log`.
@@ -80,25 +80,12 @@ reviewable:
   start, and planned finish.
 - **Headers** shows the original Excel header texts that were mapped to code,
   work name, unit, quantity, unit price, total price, and labor columns.
-- **Rows** shows up to 30 real catalog body rows per workbook with normalized
-  unit price without VAT, total without VAT, labor fields, and preview-only row
-  issues. Column-number helper rows and section/title rows are omitted.
+- **Rows** shows up to 30 real body rows per workbook with normalized unit price
+  without VAT, total without VAT, labor fields, and preview-only row issues.
 
 Preview tables include client-side filters for search, status, already-processed
 files, problem rows, and empty rows. They also include a local table zoom/density
 control so large RNMC batches can be reviewed without changing browser zoom.
-
-
-Rows that are clearly section/title rows are skipped instead of being treated as
-critical rejected rows. In practice this means rows with a work-name/title but no
-GESN/code, no unit, no quantity, and no price/total are not written to the catalog
-and are not logged as rejected. Technical header-index rows such as `1 | 2 | 3 |
-...` directly under the Excel header are also skipped.
-
-`Код раздела` is never accepted as the catalog code column. The parser prefers
-source headers such as `Перечень ГЭСН/ФЕР/ТЕР/КР`, `Перечень ГЭСН`,
-`ГЭСН/ФЕР/Перечень`, `Обоснование`, or `Шифр`. Generic `Код` remains a last
-resort, but headers containing `код раздел` are explicitly excluded.
 
 ## Region handling
 
@@ -132,6 +119,8 @@ The parser mirrors the legacy VBA importer where possible:
 - scans the first rows/columns for metadata labels such as `Год Квартал ЛСР`,
   planned start, planned finish, object region, and regional coefficient;
 - reads the first worksheet that has a matching header and accepted rows;
+- skips technical numbering rows directly below the header, such as `1 | 2 | 3 | ...`;
+- skips section/subsection rows that have a name but no unit, quantity, code, price, or total;
 - stops after 3 consecutive blank rows across number/name/unit/quantity;
 - ignores temporary Excel lock files starting with `~$`;
 - `.xlsx` and `.xlsm` are supported for preview/import;
@@ -150,20 +139,20 @@ and real import:
 
 Detection is intentionally conservative and deterministic. It looks for known
 Russian labels in the workbook, then reads an inline value after a separator or
-nearby values to the right / below the label. Parseable dates are normalized to
+nearby values to the right / below the label. Bare local-estimate labels such as `ЛСР 02-01-01 ...` are not treated as the `Год/квартал ЛСР` metadata value. Parseable dates are normalized to
 ISO format (`YYYY-MM-DD`). Quarter values such as `1 квартал 2026`, `IV кв.2025 г.`, and `2 кв. 25г.` are
 normalized to `2026 Q1`, `2025 Q4`, and `2025 Q2`. Legacy note text such as
 `в ценах IV кв.2025 г.` and monthly work periods such as `с июня 2026 г. по
 сентябрь 2026 г.` are also parsed. Month-only periods are stored as the first
 day of the month in ISO format. Excel serial date values near start/finish
-labels are converted to ISO dates.
+labels are converted to ISO dates only within a plausible metadata date range, so numeric prices/codes are not mistaken for dates.
 
 Newer consolidation blocks are also parsed. Region labels such as `Регион
 расположения объекта`, `Регион объекта`, or `Регион` can override the ZIP folder
 when no manual region override is supplied. `Региональный коэффициент` /
 `Коэффициент` is parsed as a numeric value with comma or dot decimals, stored on
 `imported_files.regional_coefficient`, and copied to imported
-`catalog_items.regional_coefficient` rows.
+`catalog_items.regional_coefficient` rows. Implausible values such as years (`2026`, `2027`) are ignored.
 
 Manual editing remains available on the import detail page because real RNMC
 layouts may require further iterations and additional label patterns.
@@ -195,6 +184,19 @@ Labor columns are stored separately:
 - `ТЗр на ед., чел-час` -> `labor_unit`;
 - `ТЗр всего, чел-час` -> `labor_total`.
 
+
+## Code column selection
+
+`Код раздела` is never a catalog code. The parser first looks for RNMC code/list
+headers such as `Перечень ГЭСН/ФЕР/ТЕР/КР`, `Перечень ГЭСН`, `Обоснование`, or
+`Шифр`. A generic `Код` header is accepted only if it is not `Код раздела`.
+
+Some real RNMC workbooks have a blank header cell immediately before `Код
+раздела`, while the body cells in that blank column contain the actual GESN/FER
+code. In that specific layout, the importer uses that unlabeled column as the
+catalog code column and shows it in preview as `[без заголовка перед Код
+раздела]`.
+
 ## Catalog row validation
 
 A row is written to `catalog_items` only when it has:
@@ -204,7 +206,7 @@ A row is written to `catalog_items` only when it has:
 - valid unit;
 - positive numeric price.
 
-Rejected rows are not silently lost. They are written to `import_row_log` with
+Rows with missing section data are skipped when they are clearly section/subsection labels. Data rows are written to `catalog_items` only when they pass validation. Rejected data rows are not silently lost; they are written to `import_row_log` with
 an Excel row number and reason, for example:
 
 - `missing_task_number`;
@@ -212,9 +214,6 @@ an Excel row number and reason, for example:
 - `missing_or_invalid_unit`;
 - `missing_or_invalid_price`;
 - `missing_unit_and_quantity`.
-
-Section/title rows that lack code, unit, quantity, and price are skipped before
-validation and therefore do not create `missing_unit_and_quantity` records.
 
 ## Statuses
 

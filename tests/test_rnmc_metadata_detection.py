@@ -284,3 +284,81 @@ def _workbook_with_consolidation_metadata() -> bytes:
     sheet.append([None, None, None, None, None, None])
     sheet.append([None, None, None, None, None, None])
     return _to_bytes(workbook)
+
+
+def test_metadata_does_not_treat_lsr_section_rows_as_lsr_quarter(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Buryatia/local-lsr.xlsx": _workbook_with_local_lsr_section_only()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+    finally:
+        connection.close()
+
+    entry = result.entries[0]
+    assert entry.lsr_quarter == ""
+    assert entry.planned_start == ""
+    assert entry.planned_finish == ""
+
+
+def test_metadata_rejects_implausible_regional_coefficient_values(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"SPb/bad-coef.xlsx": _workbook_with_bad_coefficient_metadata()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+    finally:
+        connection.close()
+
+    assert result.entries[0].regional_coefficient is None
+
+
+def _workbook_with_local_lsr_section_only() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-LOCAL-LSR"
+    sheet.append([])
+    sheet.append([
+        "№ п/п",
+        "Наименование работ",
+        "Ед.изм.",
+        "Кол-во",
+        "Перечень ГЭСН/ФЕР/ТЕР/КР",
+        "Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС",
+        "Итого стоимость, руб. без НДС",
+    ])
+    sheet.append([1, 2, 3, 4, 5, 6, 7])
+    sheet.append([1, "ЛСР 02-01-01 Оперативно-технологическая радиосвязь", "", "", "", "", ""])
+    sheet.append([2, "Монтаж материалов", "шт", 1, "ГЭСНм08-03-572-06 /КР", 100, 100])
+    sheet.append([None] * 7)
+    sheet.append([None] * 7)
+    sheet.append([None] * 7)
+    return _to_bytes(workbook)
+
+
+def _workbook_with_bad_coefficient_metadata() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-BAD-COEF"
+    sheet["A2"] = "Региональный коэффициент:"
+    sheet["B2"] = 2026
+    sheet.append([])
+    sheet.append([
+        "№ п/п",
+        "Наименование работ",
+        "Ед.изм.",
+        "Кол-во",
+        "Перечень ГЭСН",
+        "Цена единицы работ, руб. без НДС",
+    ])
+    sheet.append([1, "Work A", "шт", 1, "ГЭСН01-01-001-01", 100])
+    sheet.append([None] * 6)
+    sheet.append([None] * 6)
+    sheet.append([None] * 6)
+    return _to_bytes(workbook)

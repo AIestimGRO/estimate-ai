@@ -106,17 +106,19 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - [x] RNMC consolidation metadata detection for region and regional coefficient.
 - [x] Readable RNMC row preview UI with tabs, detected source headers,
   client-side filters, and local preview zoom.
-- [x] Strict RNMC code-column handling: `Код раздела` is excluded, technical
-  header-number rows are skipped, and section/title rows are not treated as
-  rejected catalog rows.
+- [x] Real-RNMC import hardening: `Код раздела` is excluded as a catalog code,
+  unlabeled code columns before `Код раздела` are supported, section rows are
+  skipped, and metadata parsing is stricter.
 
 ## Next milestone — RNMC import quality automation
 
 1. Improve rejected-row diagnostics and export/download of rejected rows.
-2. Add `.xls` support if real incoming files still require it.
-3. Decide whether to store original uploaded workbooks for true one-click retry
+2. Review the remaining average-only/no-data RNMC files and decide whether to
+   repair those workbooks or leave them out of the catalog.
+3. Add `.xls` support if real incoming files still require it.
+4. Decide whether to store original uploaded workbooks for true one-click retry
    without re-uploading the ZIP.
-4. Add a duplicate-name review workflow for `duplicate_name` records.
+5. Add a duplicate-name review workflow for `duplicate_name` records.
 
 ## Later web service path
 

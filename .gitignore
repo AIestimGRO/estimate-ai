@@ -133,3 +133,7 @@ _rnmc_preview_filters_zoom_review/
 # RNMC strict code section rows delivery artifacts
 rnmc-strict-code-section-rows-updated-files.zip
 _rnmc_strict_code_section_rows_review/
+
+# RNMC real import hardening delivery artifacts
+rnmc-real-import-hardening-updated-files.zip
+_rnmc_real_import_hardening_review/

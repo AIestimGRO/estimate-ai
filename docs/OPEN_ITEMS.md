@@ -7,11 +7,11 @@
 
 ## RNMC import — next decisions and improvements
 
-1. **Expand metadata detection from real RNMC workbooks.** Initial automatic
-   detection of `lsr_quarter`, planned start, and planned finish is implemented
-   for `.xlsx` / `.xlsm`; real legacy note text and Excel serial date values are
-   now covered. Keep adding deterministic label patterns when real files expose
-   new layouts or wording.
+1. **Review the remaining no-data RNMC files.** The current real-file pass imports
+   the normal files and intentionally leaves average-only price templates as
+   `no_data`, because `Цена средняя` and `Итого стоимость средняя` are not
+   accepted source values. Decide whether those files should be repaired at the
+   workbook level or kept out of the catalog.
 
 2. **Support `.xls` detailed parsing if needed.** ZIP dry-run recognizes `.xls`
    as an Excel file, but row preview/import currently supports `.xlsx` and

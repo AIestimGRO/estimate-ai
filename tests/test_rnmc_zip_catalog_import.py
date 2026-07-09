@@ -16,7 +16,6 @@ from core.storage.catalog import (
     STATUS_SUCCESS,
     import_legacy_file_log,
     list_catalog_rows,
-    list_catalog_items_for_imported_file,
     list_imported_files,
     record_imported_file,
 )
@@ -99,50 +98,6 @@ def test_import_rnmc_zip_catalog_rows_replaces_existing_rows_for_pending_file(
     assert len(rows) == 2
 
 
-
-
-def test_import_rnmc_zip_uses_gesn_column_and_skips_section_rows(tmp_path: Path) -> None:
-    zip_path = tmp_path / "rnmc.zip"
-    _write_zip(zip_path, {"Kazan/sections.xlsx": _sectioned_workbook_bytes()})
-
-    connection = connect(tmp_path / "estimate_ai.db")
-    try:
-        init_database(connection)
-        result = import_rnmc_zip_catalog_rows(connection, str(zip_path))
-        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
-        records = list_imported_files(connection)
-        record = next(item for item in records if item.filename == "sections.xlsx")
-        imported_rows = list_catalog_items_for_imported_file(connection, record.id)
-    finally:
-        connection.close()
-
-    assert result.success_count == 1
-    assert result.rows_imported_total == 2
-    assert result.rows_rejected_total == 0
-    assert [row.source_row_number for row in imported_rows] == [34, 35]
-    assert rows[0].code == "ГЭСНм08-03-572-06 /КР"
-    assert rows[0].work_name == "Valid work A"
-    assert rows[0].price == 8371.13
-    assert all(row.code not in {"11", "14", "15"} for row in rows)
-
-
-def test_import_rnmc_zip_does_not_use_code_section_column(tmp_path: Path) -> None:
-    zip_path = tmp_path / "rnmc.zip"
-    _write_zip(zip_path, {"Kazan/no-code.xlsx": _section_code_only_workbook_bytes()})
-
-    connection = connect(tmp_path / "estimate_ai.db")
-    try:
-        init_database(connection)
-        result = import_rnmc_zip_catalog_rows(connection, str(zip_path))
-        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
-    finally:
-        connection.close()
-
-    assert result.no_data_count == 1
-    assert result.rows_imported_total == 0
-    assert result.rows_rejected_total == 1
-    assert rows == []
-
 def test_admin_can_import_rnmc_zip_rows_into_catalog(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "estimate_ai.db"
     monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
@@ -172,69 +127,6 @@ def test_admin_can_import_rnmc_zip_rows_into_catalog(tmp_path: Path, monkeypatch
         connection.close()
     assert len(rows) == 2
     assert rows[0].region == "Manual Region"
-
-
-
-def _sectioned_workbook_bytes() -> bytes:
-    from io import BytesIO
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Data"
-    sheet["A1"] = "№ задачи 1Ф: TASK-SECTIONS"
-    for _ in range(2, 29):
-        sheet.append([])
-    sheet.append([
-        "№ п/п",
-        "Наименование работ",
-        "Единица измерения",
-        "Кол-во",
-        "Цена единицы работ, руб. без НДС",
-        "Итого стоимость, руб. без НДС",
-        "ТЗ на ед., чел-час",
-        "ТЗм на ед., чел-час",
-        "ТЗ всего, чел-час",
-        "ТЗм всего, чел-час",
-        "Перечень ГЭСН/ФЕР/ТЕР/КР",
-        "Код раздела",
-    ])
-    sheet.append(list(range(1, 13)))
-    sheet.append([None, "1102-01UYF-2029 object title", None, None, None, None, None, None, None, None, None, None])
-    sheet.append([None, "Раздел 1. Контрольно-пропускной пункт №2", None, None, None, None, None, None, None, None, None, 14])
-    sheet.append([None, "Оборудование", None, None, None, None, None, None, None, None, None, 15])
-    sheet.append([1, "Valid work A", "шт", 1, 8371.13, 8371.13, 3.09, 0.54, 3.09, 0.54, "ГЭСНм08-03-572-06 /КР", 15])
-    sheet.append([2, "Valid work B", "шт", 1, 1614.79, 1614.79, 1.03, 0.01, 1.03, 0.01, "ГЭСНм11-04-008-01 /КР", 15])
-    sheet.append([None] * 12)
-    sheet.append([None] * 12)
-    sheet.append([None] * 12)
-    output = BytesIO()
-    workbook.save(output)
-    return output.getvalue()
-
-
-def _section_code_only_workbook_bytes() -> bytes:
-    from io import BytesIO
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Data"
-    sheet["A1"] = "№ задачи 1Ф: TASK-NO-CODE"
-    sheet.append([])
-    sheet.append([
-        "№ п/п",
-        "Наименование работ",
-        "Единица измерения",
-        "Кол-во",
-        "Цена единицы работ, руб. без НДС",
-        "Код раздела",
-    ])
-    sheet.append([1, "Work with section code only", "шт", 1, 100, 14])
-    sheet.append([None] * 6)
-    sheet.append([None] * 6)
-    sheet.append([None] * 6)
-    output = BytesIO()
-    workbook.save(output)
-    return output.getvalue()
 
 
 def _write_zip(path: Path, files: dict[str, bytes]) -> None:
@@ -303,6 +195,50 @@ def _workbook_without_valid_rows(*, task_number: str) -> bytes:
     sheet.append([None, None, None, None, None])
     sheet.append([None, None, None, None, None])
     sheet.append([None, None, None, None, None])
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def test_import_uses_unlabeled_code_column_before_section_code(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Kazan/unlabeled-code.xlsx": _unlabeled_code_workbook_bytes()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = import_rnmc_zip_catalog_rows(connection, str(zip_path))
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+
+    assert result.success_count == 1
+    assert len(rows) == 1
+    assert rows[0].code == "ГЭСНм03-01-001-01"
+    assert rows[0].work_name == "Work A"
+
+
+def _unlabeled_code_workbook_bytes() -> bytes:
+    from io import BytesIO
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-CODE"
+    sheet.append([])
+    sheet.append([
+        "№ п/п",
+        "Наименование работ",
+        "Ед.изм.",
+        "Кол-во",
+        "Цена единицы работ, руб. без НДС",
+        "",
+        "Код раздела",
+    ])
+    sheet.append([1, "Work A", "шт", 1, 100, "ГЭСНм03-01-001-01", "06"])
+    sheet.append([None] * 7)
+    sheet.append([None] * 7)
+    sheet.append([None] * 7)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()

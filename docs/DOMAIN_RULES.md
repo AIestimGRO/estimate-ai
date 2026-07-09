@@ -231,6 +231,16 @@ normalized to SQLite numeric values. File-level regional coefficient from RNMC
 consolidation metadata is stored as metadata and copied to imported catalog rows;
 it does not modify stored catalog prices.
 
+- `Код раздела` is not a GESN/FER/TER/KR code and must never populate
+  `catalog_items.code`. If the actual code column is unlabeled but sits
+  immediately before `Код раздела`, that unlabeled column may be used as the
+  code source.
+- Technical numbering rows below the header and section/subsection rows with no
+  unit, quantity, code, price, or total are skipped, not imported.
+- Workbook metadata parsing must be conservative: bare local `ЛСР ...` section
+  labels are not `Год/квартал ЛСР`, month parsing must not treat words like
+  `материалы` as May, and implausible coefficients such as years are ignored.
+
 ## 7. Name exclusion rules (Module7)
 
 A configurable rule table on sheet `Name_Exclusions`, columns:
@@ -473,11 +483,8 @@ In short:
   workbook bytes from the archive. Final statuses include legacy imported,
   success, skipped, no_data, duplicate_name, and manual_checked; pending and
   failed remain previewable for retry checks.
-- ZIP row preview is intentionally limited to 30 real catalog body rows per
-  workbook for UI performance. The limit starts after the detected header row;
-  Excel column-number helper rows and section/title rows do not consume it. This
-  limit affects preview counts only; real catalog import must still read and
-  validate all rows.
+- ZIP row preview is intentionally limited to 30 real body rows per workbook for
+  UI performance. The limit starts after the detected header row. Technical numbering rows and section/subsection rows before the body do not consume it. Real catalog import must still read and validate all rows.
 - ZIP row preview should render large batches in separate views for summary,
   file statuses, workbook metadata, detected source headers, and row samples.
 - ZIP row preview UI should provide column-style client-side filters to hide
@@ -486,16 +493,6 @@ In short:
   behavior or matching/pricing logic.
 - ZIP row preview UI may provide local table zoom/density controls. These are
   presentation-only controls and must not change parsed values.
-- RNMC `Код раздела` is a section classifier, not an analog code. It must never
-  populate `catalog_items.code`. The code column should be selected from headers
-  such as `Перечень ГЭСН/ФЕР/ТЕР/КР`, `Перечень ГЭСН`, `ГЭСН/ФЕР/Перечень`,
-  `Обоснование`, or `Шифр`; generic `Код` is only a last-resort candidate when
-  it is not a section-code header.
-- RNMC section/title rows are skipped, not imported. A row with a title/work-name
-  but no code, unit, quantity, price, or total is not a catalog row and should
-  not be counted as a rejected work row.
-- RNMC technical column-number rows immediately below headers, for example
-  `1 | 2 | 3 | ...`, are skipped before preview/import row validation.
 - ZIP catalog import writes accepted rows to `catalog_items`, writes rejected
   rows to `import_row_log`, and updates `imported_files` with statuses such as
   `success`, `no_data`, `failed`, `skipped`, and `duplicate_name`.

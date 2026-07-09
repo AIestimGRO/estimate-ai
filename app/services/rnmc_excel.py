@@ -50,10 +50,8 @@ TASK_LABEL_SHORT = "\u2116 \u0437\u0430\u0434\u0430\u0447\u0438"
 CODE_HEADER_PATTERNS = (
     "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0422\u0415\u0420/\u041a\u0420",
     "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0413\u042d\u0421\u041d/\u041a\u0420",
-    "\u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0422\u0415\u0420/\u041a\u0420",
     "\u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c",
     "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d",
-    "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c",
     "\u041e\u0431\u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0435",
     "\u0428\u0438\u0444\u0440",
     "\u041a\u043e\u0434",
@@ -79,7 +77,7 @@ LSR_QUARTER_LABEL_PATTERNS = (
     "\u0413\u043e\u0434/\u043a\u0432\u0430\u0440\u0442\u0430\u043b \u041b\u0421\u0420",
     "\u0413\u043e\u0434 \u0438 \u043a\u0432\u0430\u0440\u0442\u0430\u043b \u041b\u0421\u0420",
     "\u041a\u0432\u0430\u0440\u0442\u0430\u043b \u041b\u0421\u0420",
-    "\u041b\u0421\u0420",
+    "\u041f\u0440\u0435\u0434\u043e\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u043d\u044b\u0445 \u0441\u043c\u0435\u0442 \u0432 \u0446\u0435\u043d\u0430\u0445",
 )
 PLANNED_START_LABEL_PATTERNS = (
     "\u041f\u043b\u0430\u043d\u0438\u0440\u0443\u043c\u044b\u0439 \u0441\u0440\u043e\u043a \u043d\u0430\u0447\u0430\u043b\u0430 \u0440\u0430\u0431\u043e\u0442",
@@ -676,19 +674,11 @@ def _extract_catalog_row_candidates(
         name_value = _row_value(row_values, header.name_col)
         unit_value = _row_value(row_values, header.unit_col)
         qty_value = _row_value(row_values, header.qty_col)
-        price_value = _row_value(row_values, value_columns.unit_price.column)
-        total_price_value = _row_value(row_values, value_columns.total_price.column)
         code_value = _row_value(row_values, code_col)
+        price_source_value = _row_value(row_values, value_columns.unit_price.column)
+        total_source_value = _row_value(row_values, value_columns.total_price.column)
 
-        if _is_column_numbering_row((
-            num_value,
-            name_value,
-            unit_value,
-            qty_value,
-            price_value,
-            total_price_value,
-            code_value,
-        )):
+        if _is_technical_numbering_row(row_values):
             continue
 
         if not started:
@@ -711,13 +701,13 @@ def _extract_catalog_row_candidates(
         if is_end_blank:
             continue
 
-        if _is_section_row(
-            name_value=name_value,
-            code_value=code_value,
-            unit_value=unit_value,
-            qty_value=qty_value,
-            price_value=price_value,
-            total_price_value=total_price_value,
+        if _is_non_catalog_section_row(
+            name_value,
+            unit_value,
+            qty_value,
+            code_value,
+            price_source_value,
+            total_source_value,
         ):
             continue
 
@@ -725,12 +715,13 @@ def _extract_catalog_row_candidates(
             rejected.append(RnmcRejectedRow(row_number, "missing_unit_and_quantity"))
             continue
 
+        price_value = price_source_value
         parsed_price = _parse_positive_number(price_value)
         if parsed_price is not None:
             parsed_price = parsed_price / value_columns.unit_price.divisor
 
         total_price = _parse_optional_value(
-            total_price_value,
+            total_source_value,
             divisor=value_columns.total_price.divisor,
         )
         catalog_row = CatalogRow(
@@ -999,12 +990,11 @@ def _preview_table_rows(
         name_value = _row_value(row_values, header.name_col)
         unit_value = _row_value(row_values, header.unit_col)
         qty_value = _row_value(row_values, header.qty_col)
-
-        price_value = _row_value(row_values, value_columns.unit_price.column)
-        total_price_value = _row_value(row_values, value_columns.total_price.column)
         code_value = _row_value(row_values, code_col)
+        price_source_value = _row_value(row_values, value_columns.unit_price.column)
+        total_source_value = _row_value(row_values, value_columns.total_price.column)
 
-        if _is_column_numbering_row(row_values):
+        if _is_technical_numbering_row(row_values):
             continue
 
         if not started:
@@ -1027,20 +1017,33 @@ def _preview_table_rows(
         if is_end_blank:
             continue
 
-        if _is_section_row(
-            name_value=name_value,
-            code_value=code_value,
-            unit_value=unit_value,
-            qty_value=qty_value,
-            price_value=price_value,
-            total_price_value=total_price_value,
+        if _is_non_catalog_section_row(
+            name_value,
+            unit_value,
+            qty_value,
+            code_value,
+            price_source_value,
+            total_source_value,
         ):
             continue
 
-        issue = ""
+        parsed_price = _parse_positive_number(price_source_value)
+        if parsed_price is not None:
+            parsed_price = parsed_price / value_columns.unit_price.divisor
+        preview_row = CatalogRow(
+            task_id="preview-task",
+            price=parsed_price if parsed_price is not None else price_source_value,
+            code=code_value,
+            unit=unit_value,
+            work_name=name_value,
+            region="preview-region",
+        )
         if _is_blank(unit_value) and _is_blank(qty_value):
-            rows_rejected += 1
             issue = "missing_unit_and_quantity"
+        else:
+            issue = _catalog_row_issue(preview_row)
+        if issue:
+            rows_rejected += 1
         else:
             rows_ok += 1
 
@@ -1054,13 +1057,13 @@ def _preview_table_rows(
                 quantity=_text(qty_value),
                 unit_price=_format_preview_number(
                     _parse_optional_value(
-                        price_value,
+                        price_source_value,
                         divisor=value_columns.unit_price.divisor,
                     )
                 ),
                 total_price=_format_preview_number(
                     _parse_optional_value(
-                        total_price_value,
+                        total_source_value,
                         divisor=value_columns.total_price.divisor,
                     )
                 ),
@@ -1084,7 +1087,6 @@ def _preview_table_rows(
             break
     return rows_ok, rows_rejected, samples, is_limited
 
-
 def _build_header_preview(header: _HeaderMatch) -> RnmcHeaderPreview:
     value_columns = _detect_value_columns(header.header_map)
     return RnmcHeaderPreview(
@@ -1104,7 +1106,12 @@ def _build_header_preview(header: _HeaderMatch) -> RnmcHeaderPreview:
 def _header_label(header: _HeaderMatch, column: int) -> str:
     if column <= 0:
         return ""
-    return header.header_labels.get(column, "")
+    label = header.header_labels.get(column, "")
+    if label:
+        return label
+    if _is_unlabeled_code_col_before_section_code(header, column):
+        return "[без заголовка перед Код раздела]"
+    return ""
 
 
 def _format_preview_number(value: float | None) -> str:
@@ -1280,6 +1287,8 @@ def _format_region_metadata(value: object) -> str:
         return ""
     normalized = " ".join(text.replace("\u00a0", " ").split())
     folded = normalized.casefold()
+    if len(folded) < 3:
+        return ""
     if (
         "\u043a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442" in folded
         or folded in {"\u0440\u0435\u0433\u0438\u043e\u043d", "\u0440\u0435\u0433\u0438\u043e\u043d \u043e\u0431\u044a\u0435\u043a\u0442\u0430", "\u0440\u0435\u0433\u0438\u043e\u043d \u0440\u0430\u0441\u043f\u043e\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u043e\u0431\u044a\u0435\u043a\u0442\u0430"}
@@ -1292,6 +1301,8 @@ def _format_region_metadata(value: object) -> str:
 def _format_coefficient_metadata(value: object) -> float | None:
     number = _parse_number(value)
     if number is None or number <= 0:
+        return None
+    if number < 0.1 or number > 10:
         return None
     return number
 
@@ -1427,11 +1438,7 @@ def _format_quarter_metadata(value: object) -> str:
     text = _text(value)
     if text == "":
         return ""
-    parsed = _parse_quarter_context(text)
-    if parsed:
-        return parsed
-    normalized = text.replace("\u00a0", " ").strip()
-    return normalized
+    return _parse_quarter_context(text)
 
 
 def _find_metadata_context(sheet: Worksheet) -> RnmcWorkbookMetadata:
@@ -1506,26 +1513,27 @@ def _parse_quarter_context(value: object) -> str:
     text = _text(value)
     if text == "":
         return ""
-    folded = text.replace("\u00a0", " ").casefold()
-    year_pattern = "(?P<year>(?:20|19)?\\d{2})"
+    folded = text.replace(" ", " ").casefold()
+    year_pattern = r"(?P<year>(?:20|19)\d{2}|\d{2}\s*г\.?)"
     roman_pattern = "(?P<roman>iv|iii|ii|i)"
     number_pattern = "(?P<number>[1-4])"
-    quarter_word = "(?:\\u043a\\u0432\\.?|\\u043a\\u0432\\u0430\\u0440\\u0442\\u0430\\u043b\\w*)"
+    quarter_word = r"(?:\u043a\u0432\.?|\u043a\u0432\u0430\u0440\u0442\u0430\u043b\w*)"
     patterns = (
-        roman_pattern + "\\s*" + quarter_word + "[^0-9]{0,20}" + year_pattern,
-        number_pattern + "\\s*" + quarter_word + "[^0-9]{0,20}" + year_pattern,
-        quarter_word + "\\s*" + number_pattern + "[^0-9]{0,20}" + year_pattern,
+        roman_pattern + r"\s*" + quarter_word + "[^0-9]{0,20}" + year_pattern,
+        number_pattern + r"\s*" + quarter_word + "[^0-9]{0,20}" + year_pattern,
+        quarter_word + r"\s*" + number_pattern + "[^0-9]{0,20}" + year_pattern,
     )
     for pattern in patterns:
         match = re.search(pattern, folded)
         if match is None:
             continue
         year = _normalize_year(match.group("year"))
+        if not _is_plausible_metadata_year(year):
+            continue
         quarter = match.groupdict().get("number") or _roman_quarter(match.groupdict().get("roman", ""))
         if quarter:
             return f"{year} Q{quarter}"
     return ""
-
 
 def _roman_quarter(value: str) -> str:
     return {"i": "1", "ii": "2", "iii": "3", "iv": "4"}.get(value.casefold(), "")
@@ -1535,26 +1543,30 @@ def _normalize_year(value: str) -> str:
     text = _text(value)
     if text == "":
         return ""
-    if len(text) == 2:
-        return f"20{text}"
-    return text
+    digits = "".join(char for char in text if char.isdigit())
+    if len(digits) == 2:
+        return f"20{digits}"
+    if len(digits) == 4:
+        return digits
+    return ""
 
 
 def _parse_month_period_context(value: object) -> tuple[str, str]:
     text = _text(value)
     if text == "":
         return "", ""
-    folded = text.replace("\u00a0", " ").casefold()
+    folded = text.replace(" ", " ").casefold()
     tokens = _month_tokens(folded)
     if not tokens:
         return "", ""
-    years = [_normalize_year(item) for item in re.findall(r"(?:20|19)?\d{2}", folded)]
-    if not _looks_like_period_text(folded) and not years:
+    years = [_normalize_year(item) for item in re.findall(r"(?<!\d)((?:20|19)\d{2})(?!\d)", folded)]
+    years = [year for year in years if _is_plausible_metadata_year(year)]
+    if not _looks_like_period_text(folded) and not _looks_like_month_date_only_text(folded):
         return "", ""
     if len(tokens) == 1:
         month, year = tokens[0]
         year = year or (years[0] if years else "")
-        if year:
+        if year and _is_plausible_metadata_year(year):
             value = _month_date(year, month)
             return value, value
         return "", ""
@@ -1567,47 +1579,59 @@ def _parse_month_period_context(value: object) -> tuple[str, str]:
     if start_year == "" and finish_year == "" and years:
         start_year = years[0]
         finish_year = years[-1]
-    if start_year and finish_year:
+    if (
+        start_year
+        and finish_year
+        and _is_plausible_metadata_year(start_year)
+        and _is_plausible_metadata_year(finish_year)
+    ):
         return _month_date(start_year, start_month), _month_date(finish_year, finish_month)
     return "", ""
 
-
 def _looks_like_period_text(value: str) -> bool:
-    return any(
+    if any(
         token in value
         for token in (
-            "\u043f\u0435\u0440\u0438\u043e\u0434",
-            "\u043d\u0430\u0447\u0430\u043b",
-            "\u043e\u043a\u043e\u043d\u0447",
-            "\u0440\u0430\u0431\u043e\u0442",
+            "период",
+            "срок",
+            "начал",
+            "оконч",
         )
-    ) or " \u043f\u043e " in value or "-" in value or "\u2013" in value or "\u2014" in value
-
+    ):
+        return True
+    return bool(
+        re.search(
+            r"(?:^|\s)\u0441\s+.+?(?:\s\u043f\u043e\s|[-\u2013\u2014]).+",
+            value,
+        )
+    )
 
 def _month_tokens(value: str) -> list[tuple[int, str]]:
     month_pattern = (
-        "(?P<month>"
-        "\\u044f\\u043d\\u0432\\u0430\\u0440\\w*|"
-        "\\u0444\\u0435\\u0432\\u0440\\u0430\\u043b\\w*|"
-        "\\u043c\\u0430\\u0440\\u0442\\w*|"
-        "\\u0430\\u043f\\u0440\\u0435\\u043b\\w*|"
-        "\\u043c\\u0430(?:\\u0439|\\u044f|\\u0435|\\u044e|\\u0435\\u043c)?|"
-        "\\u0438\\u044e\\u043d\\w*|"
-        "\\u0438\\u044e\\u043b\\w*|"
-        "\\u0430\\u0432\\u0433\\u0443\\u0441\\u0442\\w*|"
-        "\\u0441\\u0435\\u043d\\u0442\\u044f\\u0431\\u0440\\w*|"
-        "\\u043e\\u043a\\u0442\\u044f\\u0431\\u0440\\w*|"
-        "\\u043d\\u043e\\u044f\\u0431\\u0440\\w*|"
-        "\\u0434\\u0435\\u043a\\u0430\\u0431\\u0440\\w*)"
-        "\\s*(?P<year>(?:20|19)?\\d{2})?"
+        r"(?<![а-яёa-z])"
+        r"(?P<month>"
+        r"январ[а-яё]*|"
+        r"феврал[а-яё]*|"
+        r"март[а-яё]*|"
+        r"апрел[а-яё]*|"
+        r"ма(?:й|я|е|ю|ем)|"
+        r"июн[а-яё]*|"
+        r"июл[а-яё]*|"
+        r"август[а-яё]*|"
+        r"сентябр[а-яё]*|"
+        r"октябр[а-яё]*|"
+        r"ноябр[а-яё]*|"
+        r"декабр[а-яё]*)"
+        r"(?![а-яёa-z])"
+        r"\s*(?P<year>(?:20|19)\d{2}|\d{2}\s*г\.?)?"
     )
     tokens: list[tuple[int, str]] = []
     for match in re.finditer(month_pattern, value):
         month = _month_number(match.group("month"))
+        year = _normalize_year(match.group("year") or "")
         if month:
-            tokens.append((month, _normalize_year(match.group("year") or "")))
+            tokens.append((month, year if _is_plausible_metadata_year(year) else ""))
     return tokens
-
 
 def _month_number(value: str) -> int:
     folded = value.casefold()
@@ -1641,8 +1665,10 @@ def _excel_serial_date(value: object) -> str:
     serial = float(value)
     if serial < 20000 or serial > 80000:
         return ""
-    return (EXCEL_DATE_BASE + timedelta(days=int(serial))).isoformat()
-
+    parsed = EXCEL_DATE_BASE + timedelta(days=int(serial))
+    if parsed.year < 2020 or parsed.year > 2035:
+        return ""
+    return parsed.isoformat()
 
 def _extract_task_number(workbook) -> str:
     full_label = TASK_LABEL_FULL.casefold()
@@ -1650,9 +1676,16 @@ def _extract_task_number(workbook) -> str:
     for sheet in workbook.worksheets:
         max_row = min(int(sheet.max_row or 0), 50)
         max_col = min(int(sheet.max_column or 0), 20)
-        for row_number in range(1, max_row + 1):
-            for col_number in range(1, max_col + 1):
-                text = _text(sheet.cell(row_number, col_number).value)
+        rows = sheet.iter_rows(
+            min_row=1,
+            max_row=max_row,
+            min_col=1,
+            max_col=max_col,
+            values_only=True,
+        )
+        for row_values in rows:
+            for index, value in enumerate(row_values, start=1):
+                text = _text(value)
                 if text == "":
                     continue
                 folded = text.casefold()
@@ -1663,15 +1696,14 @@ def _extract_task_number(workbook) -> str:
                     tail = _cleanup_task_tail(text[position + len(label) :])
                     if tail:
                         return tail
-                    neighbor = _neighbor_task_value(sheet, row_number, col_number)
+                    neighbor = _neighbor_task_value_from_row(row_values, index)
                     if neighbor:
                         return neighbor
     return ""
 
-
-def _neighbor_task_value(sheet: Worksheet, row_number: int, col_number: int) -> str:
+def _neighbor_task_value_from_row(row_values: tuple[object, ...], col_number: int) -> str:
     for offset in range(1, 4):
-        value = _text(sheet.cell(row_number, col_number + offset).value)
+        value = _text(_row_value(row_values, col_number + offset))
         if value:
             return value
     return ""
@@ -1680,6 +1712,100 @@ def _neighbor_task_value(sheet: Worksheet, row_number: int, col_number: int) -> 
 def _cleanup_task_tail(value: str) -> str:
     text = value.replace(":", "").replace("#", "")
     return " ".join(text.split())
+
+
+def _find_code_col(header: _HeaderMatch) -> int:
+    normalized_patterns = tuple(_normalize_header(pattern) for pattern in CODE_HEADER_PATTERNS)
+    generic_code = _normalize_header("Код")
+    for pattern in normalized_patterns:
+        if pattern == generic_code:
+            continue
+        for key, column in header.header_map.items():
+            if _is_section_code_header(key):
+                continue
+            if key == pattern or pattern in key:
+                return int(column)
+
+    fallback = _find_unlabeled_code_col_before_section_code(header)
+    if fallback:
+        return fallback
+
+    for key, column in header.header_map.items():
+        if _is_section_code_header(key):
+            continue
+        if key == generic_code:
+            return int(column)
+    return 0
+
+
+def _is_section_code_header(normalized_header: str) -> bool:
+    return "код" in normalized_header and "раздел" in normalized_header
+
+
+def _find_unlabeled_code_col_before_section_code(header: _HeaderMatch) -> int:
+    for key, column in header.header_map.items():
+        if not _is_section_code_header(key):
+            continue
+        candidate = int(column) - 1
+        if candidate > 0 and candidate not in header.header_labels:
+            return candidate
+    return 0
+
+
+def _is_unlabeled_code_col_before_section_code(header: _HeaderMatch, column: int) -> bool:
+    return column > 0 and column == _find_unlabeled_code_col_before_section_code(header)
+
+
+def _is_technical_numbering_row(row_values: tuple[object, ...]) -> bool:
+    non_empty = [_text(value) for value in row_values if _text(value) != ""]
+    if len(non_empty) < 4:
+        return False
+    numeric: list[int] = []
+    for value in non_empty:
+        if not re.fullmatch(r"\d+", value):
+            return False
+        numeric.append(int(value))
+    if any(value <= 0 or value > 40 for value in numeric):
+        return False
+    return True
+
+
+def _is_non_catalog_section_row(
+    work_name: object,
+    unit_value: object,
+    qty_value: object,
+    code_value: object,
+    price_value: object,
+    total_value: object,
+) -> bool:
+    if not _is_blank(unit_value) or not _is_blank(qty_value):
+        return False
+    if _parse_number(price_value) is not None or _parse_number(total_value) is not None:
+        return False
+    if NormCode(code_value) != "":
+        return False
+    return _text(work_name) != ""
+
+
+def _is_plausible_metadata_year(value: str) -> bool:
+    text = _text(value)
+    if text == "":
+        return False
+    try:
+        year = int(text)
+    except ValueError:
+        return False
+    return 2010 <= year <= 2035
+
+
+def _looks_like_month_date_only_text(value: str) -> bool:
+    compact = re.sub(r"[\s.,()]+", " ", value).strip()
+    return bool(
+        re.fullmatch(
+            r"(?:с |по |в )?[а-яё]+\s+(?:(?:20|19)\d{2}|\d{2}\s*г\.?)\s*(?:г|г\.|года)?",
+            compact,
+        )
+    )
 
 
 def _find_numbering_col(header_map: dict[str, int]) -> int:
@@ -1697,55 +1823,6 @@ def _find_numbering_col(header_map: dict[str, int]) -> int:
     return 0
 
 
-def _find_code_col(header: _HeaderMatch) -> int:
-    normalized_patterns = tuple(_normalize_header(pattern) for pattern in CODE_HEADER_PATTERNS)
-    for pattern in normalized_patterns:
-        for key, column in header.header_map.items():
-            if _is_disallowed_code_header(key):
-                continue
-            if key == pattern or pattern in key:
-                return int(column)
-    return 0
-
-
-def _is_disallowed_code_header(normalized_header: str) -> bool:
-    return "\u043a\u043e\u0434\u0440\u0430\u0437\u0434\u0435\u043b" in normalized_header
-
-
-def _is_column_numbering_row(row_values: tuple[object, ...]) -> bool:
-    numbers: list[int] = []
-    for value in row_values:
-        text = _text(value)
-        if text == "":
-            continue
-        if not re.fullmatch(r"\d{1,3}", text):
-            return False
-        numbers.append(int(text))
-    if len(numbers) < 4:
-        return False
-    if min(numbers) < 1 or max(numbers) > 200:
-        return False
-    return numbers == sorted(numbers) and len(set(numbers)) == len(numbers)
-
-
-def _is_section_row(
-    *,
-    name_value: object,
-    code_value: object,
-    unit_value: object,
-    qty_value: object,
-    price_value: object,
-    total_price_value: object,
-) -> bool:
-    if _text(name_value) == "":
-        return False
-    return (
-        _is_blank(code_value)
-        and _is_blank(unit_value)
-        and _is_blank(qty_value)
-        and _parse_number(price_value) is None
-        and _parse_number(total_price_value) is None
-    )
 
 
 def _detect_value_columns(header_map: dict[str, int]) -> _HeaderValueColumns:
