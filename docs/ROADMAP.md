@@ -71,7 +71,8 @@ flow.
 - ZIP dry-run without writes.
 - ZIP import-log recording without catalog rows.
 - ZIP row preview for `.xlsx` / `.xlsm`, including pre-skip of final
-  processed filenames and a 30-row-per-file preview limit.
+  processed filenames, a 30-real-body-row preview limit, and a readable tabbed
+  UI for summary, statuses, metadata, headers, and preview rows.
 - Real ZIP import into `catalog_items`.
 - Per-file detail page with metadata, imported rows, rejected-row log, and retry
   unlock for `failed` / `no_data`.
@@ -103,6 +104,7 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   finish from RNMC workbooks.
 - [x] Strict RNMC value-column mapping with VAT normalization and labor fields.
 - [x] RNMC consolidation metadata detection for region and regional coefficient.
+- [x] Readable RNMC row preview UI with tabs and detected source headers.
 
 ## Next milestone — RNMC import quality automation
 

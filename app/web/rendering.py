@@ -147,10 +147,45 @@ button:hover { background: #4338ca; }
 table.preview { border-collapse: collapse; width: 100%; font-size: 13px; }
 table.preview th, table.preview td {
   padding: 7px 10px; border-bottom: 1px solid #f1f5f9; text-align: left;
-  white-space: nowrap; }
+  white-space: nowrap; vertical-align: top; }
 table.preview th { position: sticky; top: 0; background: #f8fafc; color: #475569;
-  font-weight: 600; }
+  font-weight: 600; z-index: 1; }
 table.preview td.risk { color: #b91c1c; text-align: center; font-weight: 700; }
+table.preview td.wrap, table.preview th.wrap {
+  white-space: normal; min-width: 260px; max-width: 520px; line-height: 1.35;
+}
+table.preview td.path {
+  max-width: 340px; overflow: hidden; text-overflow: ellipsis;
+}
+.preview-wide { max-height: 560px; overflow: auto; border: 1px solid #e2e8f0;
+  border-radius: 10px; margin-bottom: 16px; background: #fff; }
+.card.wide { max-width: min(1600px, 98vw); }
+.rnmc-tabs { margin-top: 14px; }
+.rnmc-tab-input { position: absolute; opacity: 0; pointer-events: none; }
+.rnmc-tab-labels { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.rnmc-tab-labels label {
+  width: auto; margin: 0; padding: 8px 12px; border-radius: 999px;
+  background: #eef2ff; color: #3730a3; font-size: 13px; cursor: pointer;
+}
+.rnmc-tab-panel { display: none; }
+#rnmc-preview-tab-summary:checked ~ .rnmc-tab-labels label[for=rnmc-preview-tab-summary],
+#rnmc-preview-tab-files:checked ~ .rnmc-tab-labels label[for=rnmc-preview-tab-files],
+#rnmc-preview-tab-metadata:checked ~ .rnmc-tab-labels label[for=rnmc-preview-tab-metadata],
+#rnmc-preview-tab-headers:checked ~ .rnmc-tab-labels label[for=rnmc-preview-tab-headers],
+#rnmc-preview-tab-rows:checked ~ .rnmc-tab-labels label[for=rnmc-preview-tab-rows] {
+  background: #4f46e5; color: #fff;
+}
+#rnmc-preview-tab-summary:checked ~ .rnmc-tab-panels #rnmc-preview-panel-summary,
+#rnmc-preview-tab-files:checked ~ .rnmc-tab-panels #rnmc-preview-panel-files,
+#rnmc-preview-tab-metadata:checked ~ .rnmc-tab-panels #rnmc-preview-panel-metadata,
+#rnmc-preview-tab-headers:checked ~ .rnmc-tab-panels #rnmc-preview-panel-headers,
+#rnmc-preview-tab-rows:checked ~ .rnmc-tab-panels #rnmc-preview-panel-rows {
+  display: block;
+}
+.status-pill { display: inline-block; padding: 3px 7px; border-radius: 999px;
+  background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 600; }
+.status-pill.ok { background: #ecfdf5; color: #047857; }
+.status-pill.warn { background: #fff7ed; color: #c2410c; }
 .muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
 .build { margin-top: 20px; font-size: 12px; color: #94a3b8; text-align: center; }
 .admin-nav {
@@ -588,14 +623,12 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
     if result is None:
         return ""
 
-    summary = (
-        '<div class="admin-form">'
-        '<h2 class="section">Предпросмотр строк РНМЦ</h2>'
+    summary_stats = (
         '<dl class="stats">'
         f'<div><dt>Excel-файлов найдено</dt><dd>{result.total_excel_files}</dd></div>'
         f'<div><dt>Файлов с найденными строками</dt><dd>{result.preview_ok_count}</dd></div>'
-        f'<div><dt>OK-строк найдено</dt><dd>{result.rows_ok_total}</dd></div>'
-        f'<div><dt>Rejected-строк</dt><dd>{result.rows_rejected_total}</dd></div>'
+        f'<div><dt>OK-строк в preview</dt><dd>{result.rows_ok_total}</dd></div>'
+        f'<div><dt>Rejected-строк в preview</dt><dd>{result.rows_rejected_total}</dd></div>'
         f'<div><dt>Ограничено лимитом</dt><dd>{result.limited_count}</dd></div>'
         f'<div><dt>Уже обработано</dt><dd>{result.skipped_processed_count}</dd></div>'
         f'<div><dt>Дубликаты имени</dt><dd>{result.duplicate_name_count}</dd></div>'
@@ -606,54 +639,179 @@ def _render_rnmc_zip_row_preview_result(result: RnmcZipRowPreviewResult | None) 
         f'<div><dt>Прочих файлов проигнорировано</dt><dd>{result.ignored_files}</dd></div>'
         '</dl>'
     )
-    summary += (
-        f'<p class="muted">Предпросмотр читает не больше {DEFAULT_ROW_PREVIEW_LIMIT} строк на один Excel-файл. '
-        'Реальный импорт по-прежнему читает все строки файла.</p>'
+    note = (
+        f'<p class="muted">Предпросмотр показывает заголовки и первые {DEFAULT_ROW_PREVIEW_LIMIT} '
+        'реальных строк тела таблицы на один Excel-файл. Пустые технические строки до начала таблицы '
+        'не расходуют лимит. Реальный импорт по-прежнему читает все строки файла.</p>'
     )
     if not result.entries:
-        return summary + '<p class="muted">В ZIP не найдено Excel-файлов РНМЦ.</p></div>'
+        return (
+            '<div class="admin-form">'
+            '<h2 class="section">Предпросмотр строк РНМЦ</h2>'
+            f'{summary_stats}{note}'
+            '<p class="muted">В ZIP не найдено Excel-файлов РНМЦ.</p></div>'
+        )
 
+    tabs = (
+        '<div class="rnmc-tabs">'
+        '<input class="rnmc-tab-input" type="radio" name="rnmc-preview-tabs" id="rnmc-preview-tab-summary" checked>'
+        '<input class="rnmc-tab-input" type="radio" name="rnmc-preview-tabs" id="rnmc-preview-tab-files">'
+        '<input class="rnmc-tab-input" type="radio" name="rnmc-preview-tabs" id="rnmc-preview-tab-metadata">'
+        '<input class="rnmc-tab-input" type="radio" name="rnmc-preview-tabs" id="rnmc-preview-tab-headers">'
+        '<input class="rnmc-tab-input" type="radio" name="rnmc-preview-tabs" id="rnmc-preview-tab-rows">'
+        '<div class="rnmc-tab-labels">'
+        '<label for="rnmc-preview-tab-summary">Сводка</label>'
+        '<label for="rnmc-preview-tab-files">Файлы и статусы</label>'
+        '<label for="rnmc-preview-tab-metadata">Метаданные</label>'
+        '<label for="rnmc-preview-tab-headers">Заголовки</label>'
+        '<label for="rnmc-preview-tab-rows">Строки предпросмотра</label>'
+        '</div>'
+        '<div class="rnmc-tab-panels">'
+        f'<section class="rnmc-tab-panel" id="rnmc-preview-panel-summary">{summary_stats}{note}</section>'
+        f'<section class="rnmc-tab-panel" id="rnmc-preview-panel-files">{_render_rnmc_preview_file_table(result.entries)}</section>'
+        f'<section class="rnmc-tab-panel" id="rnmc-preview-panel-metadata">{_render_rnmc_preview_metadata_table(result.entries)}</section>'
+        f'<section class="rnmc-tab-panel" id="rnmc-preview-panel-headers">{_render_rnmc_preview_header_table(result.entries)}</section>'
+        f'<section class="rnmc-tab-panel" id="rnmc-preview-panel-rows">{_render_rnmc_preview_rows_table(result.entries)}</section>'
+        '</div></div>'
+    )
+    return (
+        '<div class="admin-form">'
+        '<h2 class="section">Предпросмотр строк РНМЦ</h2>'
+        f'{tabs}'
+        '</div>'
+    )
+
+
+def _render_rnmc_preview_file_table(entries) -> str:
     header = (
-        '<table class="preview"><thead><tr>'
-        '<th>Путь в ZIP</th>'
-        '<th>Файл</th>'
-        '<th>Регион</th>'
-        '<th>Статус</th>'
-        '<th>Причина</th>'
-        '<th>Лист</th>'
-        '<th>Header row</th>'
-        '<th>Задача</th>'
-        '<th>ЛСР</th>'
-        '<th>Начало</th>'
-        '<th>Окончание</th>'
-        '<th>Коэф.</th>'
-        '<th>OK</th>'
-        '<th>Rejected</th>'
-        '<th>Примеры строк</th>'
+        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        '<th>Файл</th><th>Регион</th><th>Статус</th><th>Причина</th>'
+        '<th>Лист</th><th>Header row</th><th>Задача</th><th>OK</th><th>Rejected</th><th>Лимит</th>'
         '</tr></thead><tbody>'
     )
     rows = []
-    for entry in result.entries:
+    for entry in entries:
+        status_class = _preview_status_class(entry.status)
         rows.append(
             '<tr>'
-            f'<td>{html.escape(entry.archive_path)}</td>'
-            f'<td>{html.escape(entry.filename)}</td>'
+            f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
             f'<td>{html.escape(entry.region_folder)}</td>'
-            f'<td>{html.escape(entry.status)}</td>'
-            f'<td>{html.escape(entry.reason)}</td>'
+            f'<td><span class="status-pill {status_class}">{html.escape(entry.status)}</span></td>'
+            f'<td class="wrap">{html.escape(entry.reason)}</td>'
             f'<td>{html.escape(entry.sheet_name)}</td>'
-            f'<td>{entry.header_row}</td>'
+            f'<td>{entry.header_row or ""}</td>'
             f'<td>{html.escape(entry.task_number)}</td>'
+            f'<td>{entry.rows_ok}</td>'
+            f'<td>{entry.rows_rejected}</td>'
+            f'<td>{"да" if entry.is_limited else ""}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table></div>'
+
+
+def _render_rnmc_preview_metadata_table(entries) -> str:
+    header = (
+        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        '<th>Файл</th><th>Регион</th><th>Коэф.</th><th>ЛСР</th><th>Начало</th><th>Окончание</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for entry in entries:
+        rows.append(
+            '<tr>'
+            f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+            f'<td>{html.escape(entry.region_folder)}</td>'
+            f'<td>{_display_optional_number(entry.regional_coefficient)}</td>'
             f'<td>{html.escape(entry.lsr_quarter)}</td>'
             f'<td>{html.escape(entry.planned_start)}</td>'
             f'<td>{html.escape(entry.planned_finish)}</td>'
-            f'<td>{_display_optional_number(entry.regional_coefficient)}</td>'
-            f'<td>{entry.rows_ok}</td>'
-            f'<td>{entry.rows_rejected}</td>'
-            f'<td>{_render_rnmc_samples(entry.sample_rows)}{_render_limited_marker(entry.is_limited)}</td>'
             '</tr>'
         )
-    return summary + header + ''.join(rows) + '</tbody></table></div>'
+    return header + ''.join(rows) + '</tbody></table></div>'
+
+
+def _render_rnmc_preview_header_table(entries) -> str:
+    header = (
+        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        '<th>Файл</th><th>Header row</th><th>Код</th><th class="wrap">Наименование</th>'
+        '<th>Ед.</th><th>Кол-во</th><th class="wrap">Цена ед.</th><th class="wrap">Итого</th>'
+        '<th>ТЗ ед.</th><th>ТЗ всего</th><th>ТЗм ед.</th><th>ТЗм всего</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for entry in entries:
+        labels = entry.header_preview
+        rows.append(
+            '<tr>'
+            f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+            f'<td>{entry.header_row or ""}</td>'
+            f'<td>{html.escape(labels.code)}</td>'
+            f'<td class="wrap">{html.escape(labels.work_name)}</td>'
+            f'<td>{html.escape(labels.unit)}</td>'
+            f'<td>{html.escape(labels.quantity)}</td>'
+            f'<td class="wrap">{html.escape(labels.unit_price)}</td>'
+            f'<td class="wrap">{html.escape(labels.total_price)}</td>'
+            f'<td>{html.escape(labels.labor_unit)}</td>'
+            f'<td>{html.escape(labels.labor_total)}</td>'
+            f'<td>{html.escape(labels.machine_labor_unit)}</td>'
+            f'<td>{html.escape(labels.machine_labor_total)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table></div>'
+
+
+def _render_rnmc_preview_rows_table(entries) -> str:
+    header = (
+        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        '<th>Файл</th><th>Excel row</th><th>Код</th><th class="wrap">Работа</th><th>Ед.</th><th>Кол-во</th>'
+        '<th>Цена ед. без НДС</th><th>Итого без НДС</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
+        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Проблема</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for entry in entries:
+        if not entry.sample_rows:
+            rows.append(
+                '<tr>'
+                f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+                '<td colspan="12" class="muted">Нет строк для показа</td>'
+                '</tr>'
+            )
+            continue
+        for sample in entry.sample_rows:
+            rows.append(
+                '<tr>'
+                f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+                f'<td>{sample.row_number}</td>'
+                f'<td>{html.escape(sample.code)}</td>'
+                f'<td class="wrap">{html.escape(sample.work_name)}</td>'
+                f'<td>{html.escape(sample.unit)}</td>'
+                f'<td>{html.escape(sample.quantity)}</td>'
+                f'<td>{html.escape(sample.unit_price)}</td>'
+                f'<td>{html.escape(sample.total_price)}</td>'
+                f'<td>{html.escape(sample.labor_unit)}</td>'
+                f'<td>{html.escape(sample.labor_total)}</td>'
+                f'<td>{html.escape(sample.machine_labor_unit)}</td>'
+                f'<td>{html.escape(sample.machine_labor_total)}</td>'
+                f'<td>{html.escape(sample.issue)}</td>'
+                '</tr>'
+            )
+        if entry.is_limited:
+            rows.append(
+                '<tr>'
+                f'<td class="path" title="{html.escape(entry.archive_path)}">{html.escape(entry.filename)}</td>'
+                f'<td colspan="12" class="muted">Показаны первые {DEFAULT_ROW_PREVIEW_LIMIT} строк тела таблицы</td>'
+                '</tr>'
+            )
+    return header + ''.join(rows) + '</tbody></table></div>'
+
+
+def _preview_status_class(status: str) -> str:
+    if status == "preview_ok":
+        return "ok"
+    if status in {"skipped_processed", "duplicate_name", "no_table", "no_rows", "unsupported_format", "parse_error"}:
+        return "warn"
+    return ""
 
 
 def _render_limited_marker(is_limited: bool) -> str:
@@ -662,18 +820,6 @@ def _render_limited_marker(is_limited: bool) -> str:
     return '<br><span class="muted">Остановлено на лимите предпросмотра</span>'
 
 
-def _render_rnmc_samples(samples) -> str:
-    if not samples:
-        return ''
-    parts = []
-    for sample in samples:
-        parts.append(
-            f'{sample.row_number}: '
-            f'{html.escape(sample.work_name)} | '
-            f'{html.escape(sample.unit)} | '
-            f'{html.escape(sample.quantity)}'
-        )
-    return '<br>'.join(parts)
 
 
 

@@ -473,9 +473,12 @@ In short:
   workbook bytes from the archive. Final statuses include legacy imported,
   success, skipped, no_data, duplicate_name, and manual_checked; pending and
   failed remain previewable for retry checks.
-- ZIP row preview is intentionally limited to 30 table rows per workbook for UI
-  performance. This limit affects preview counts only; real catalog import must
-  still read and validate all rows.
+- ZIP row preview is intentionally limited to 30 real body rows per workbook for
+  UI performance. The limit starts after the detected header row, and blank
+  technical rows before the body do not consume it. This limit affects preview
+  counts only; real catalog import must still read and validate all rows.
+- ZIP row preview should render large batches in separate views for summary,
+  file statuses, workbook metadata, detected source headers, and row samples.
 - ZIP catalog import writes accepted rows to `catalog_items`, writes rejected
   rows to `import_row_log`, and updates `imported_files` with statuses such as
   `success`, `no_data`, `failed`, `skipped`, and `duplicate_name`.

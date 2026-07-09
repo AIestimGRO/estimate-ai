@@ -126,11 +126,33 @@ class RnmcWorkbookMetadata:
 
 
 @dataclass(frozen=True)
+class RnmcHeaderPreview:
+    code: str = ""
+    work_name: str = ""
+    unit: str = ""
+    quantity: str = ""
+    unit_price: str = ""
+    total_price: str = ""
+    labor_unit: str = ""
+    labor_total: str = ""
+    machine_labor_unit: str = ""
+    machine_labor_total: str = ""
+
+
+@dataclass(frozen=True)
 class RnmcRowSample:
     row_number: int
+    code: str
     work_name: str
     unit: str
     quantity: str
+    unit_price: str
+    total_price: str
+    labor_unit: str
+    labor_total: str
+    machine_labor_unit: str
+    machine_labor_total: str
+    issue: str = ""
 
 
 @dataclass(frozen=True)
@@ -149,6 +171,7 @@ class RnmcWorkbookPreview:
     regional_coefficient: float | None
     rows_ok: int
     rows_rejected: int
+    header_preview: RnmcHeaderPreview
     sample_rows: list[RnmcRowSample]
     is_limited: bool = False
 
@@ -789,6 +812,7 @@ def _preview_workbook_bytes(
                 regional_coefficient=metadata.regional_coefficient,
                 rows_ok=rows_ok,
                 rows_rejected=rows_rejected,
+                header_preview=_build_header_preview(header),
                 sample_rows=samples,
                 is_limited=is_limited,
             )
@@ -816,6 +840,7 @@ class _HeaderMatch:
     unit_col: int
     qty_col: int
     header_map: dict[str, int]
+    header_labels: dict[int, str]
 
 
 @dataclass(frozen=True)
@@ -852,7 +877,11 @@ def _find_header_row(sheet: Worksheet) -> _HeaderMatch | None:
         unit_col = 0
         qty_col = 0
         header_map: dict[str, int] = {}
+        header_labels: dict[int, str] = {}
         for index, value in enumerate(row, start=1):
+            header_text = _text(value)
+            if header_text != "":
+                header_labels.setdefault(index, header_text)
             for normalized in _header_keys(value):
                 header_map.setdefault(normalized, index)
                 if _is_name_header(normalized):
@@ -868,6 +897,7 @@ def _find_header_row(sheet: Worksheet) -> _HeaderMatch | None:
                 unit_col=unit_col,
                 qty_col=qty_col,
                 header_map=header_map,
+                header_labels=header_labels,
             )
     return None
 
@@ -876,12 +906,25 @@ def _preview_table_rows(
     sheet: Worksheet,
     header: _HeaderMatch,
     *,
-    sample_limit: int = 5,
     row_limit: int = DEFAULT_ROW_PREVIEW_LIMIT,
 ) -> tuple[int, int, list[RnmcRowSample], bool]:
     num_col = _find_numbering_col(header.header_map) or 1
+    code_col = _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)
+    value_columns = _detect_value_columns(header.header_map)
     max_row = int(sheet.max_row or 0)
-    max_col = max(num_col, header.name_col, header.unit_col, header.qty_col)
+    max_col = max(
+        num_col,
+        header.name_col,
+        header.unit_col,
+        header.qty_col,
+        code_col,
+        value_columns.unit_price.column,
+        value_columns.total_price.column,
+        value_columns.labor_unit_col,
+        value_columns.labor_total_col,
+        value_columns.machine_labor_unit_col,
+        value_columns.machine_labor_total_col,
+    )
     rows_ok = 0
     rows_rejected = 0
     samples: list[RnmcRowSample] = []
@@ -927,29 +970,80 @@ def _preview_table_rows(
         if is_end_blank:
             continue
 
+        issue = ""
         if _is_blank(unit_value) and _is_blank(qty_value):
             rows_rejected += 1
-            scanned_rows += 1
-            if scanned_rows >= row_limit:
-                is_limited = True
-                break
-            continue
+            issue = "missing_unit_and_quantity"
+        else:
+            rows_ok += 1
 
-        rows_ok += 1
         scanned_rows += 1
-        if len(samples) < sample_limit:
-            samples.append(
-                RnmcRowSample(
-                    row_number=row_number,
-                    work_name=_text(name_value),
-                    unit=_text(unit_value),
-                    quantity=_text(qty_value),
-                )
+        samples.append(
+            RnmcRowSample(
+                row_number=row_number,
+                code=_text(_row_value(row_values, code_col)),
+                work_name=_text(name_value),
+                unit=_text(unit_value),
+                quantity=_text(qty_value),
+                unit_price=_format_preview_number(
+                    _parse_optional_value(
+                        _row_value(row_values, value_columns.unit_price.column),
+                        divisor=value_columns.unit_price.divisor,
+                    )
+                ),
+                total_price=_format_preview_number(
+                    _parse_optional_value(
+                        _row_value(row_values, value_columns.total_price.column),
+                        divisor=value_columns.total_price.divisor,
+                    )
+                ),
+                labor_unit=_format_preview_number(
+                    _parse_optional_value(_row_value(row_values, value_columns.labor_unit_col))
+                ),
+                labor_total=_format_preview_number(
+                    _parse_optional_value(_row_value(row_values, value_columns.labor_total_col))
+                ),
+                machine_labor_unit=_format_preview_number(
+                    _parse_optional_value(_row_value(row_values, value_columns.machine_labor_unit_col))
+                ),
+                machine_labor_total=_format_preview_number(
+                    _parse_optional_value(_row_value(row_values, value_columns.machine_labor_total_col))
+                ),
+                issue=issue,
             )
+        )
         if scanned_rows >= row_limit:
             is_limited = True
             break
     return rows_ok, rows_rejected, samples, is_limited
+
+
+def _build_header_preview(header: _HeaderMatch) -> RnmcHeaderPreview:
+    value_columns = _detect_value_columns(header.header_map)
+    return RnmcHeaderPreview(
+        code=_header_label(header, _find_pattern_col(header.header_map, CODE_HEADER_PATTERNS)),
+        work_name=_header_label(header, header.name_col),
+        unit=_header_label(header, header.unit_col),
+        quantity=_header_label(header, header.qty_col),
+        unit_price=_header_label(header, value_columns.unit_price.column),
+        total_price=_header_label(header, value_columns.total_price.column),
+        labor_unit=_header_label(header, value_columns.labor_unit_col),
+        labor_total=_header_label(header, value_columns.labor_total_col),
+        machine_labor_unit=_header_label(header, value_columns.machine_labor_unit_col),
+        machine_labor_total=_header_label(header, value_columns.machine_labor_total_col),
+    )
+
+
+def _header_label(header: _HeaderMatch, column: int) -> str:
+    if column <= 0:
+        return ""
+    return header.header_labels.get(column, "")
+
+
+def _format_preview_number(value: float | None) -> str:
+    if value is None:
+        return ""
+    return f"{value:g}"
 
 
 def _row_value(row_values: tuple[object, ...], column: int) -> object:
@@ -1813,6 +1907,7 @@ def _empty_preview(
         regional_coefficient=regional_coefficient,
         rows_ok=0,
         rows_rejected=0,
+        header_preview=RnmcHeaderPreview(),
         sample_rows=[],
         is_limited=False,
     )

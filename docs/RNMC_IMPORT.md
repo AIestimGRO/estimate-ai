@@ -57,14 +57,31 @@ log are marked as `duplicate_name` after the first occurrence.
 2. **Record ZIP in import log** — records new files as `pending`, skipped files
    as `skipped`, and duplicate names as `duplicate_name`. No catalog rows are
    imported.
-3. **Row preview** — opens `.xlsx` / `.xlsm` files and shows detected rows,
-   task number, workbook metadata, sheet name, header row, and rejected counts.
-   Final already-processed filenames are skipped before workbook bytes are read.
-   Preview scans at most 30 table rows per workbook; the real catalog import
-   still validates and imports all rows. No catalog rows are imported.
+3. **Row preview** — opens `.xlsx` / `.xlsm` files and shows a readable
+   tabbed result: summary, file statuses, workbook metadata, detected source
+   headers, and preview rows. Final already-processed filenames are skipped
+   before workbook bytes are read. Preview shows at most 30 real body rows per
+   workbook after the detected header row; blank technical rows before the table
+   body do not consume the limit. The real catalog import still validates and
+   imports all rows. No catalog rows are imported.
 4. **Import rows into catalog** — validates and writes accepted rows to
    `catalog_items`, updates `imported_files`, stores detected workbook metadata,
    and writes rejected-row details to `import_row_log`.
+
+## Row preview UI
+
+The preview result is intentionally split into tabs so large RNMC batches remain
+reviewable:
+
+- **Summary** aggregates counts by status and row outcome.
+- **Files and statuses** shows one row per workbook with status, reason, sheet,
+  header row, task number, OK/rejected counts, and preview-limit marker.
+- **Metadata** shows resolved region, regional coefficient, LSR quarter, planned
+  start, and planned finish.
+- **Headers** shows the original Excel header texts that were mapped to code,
+  work name, unit, quantity, unit price, total price, and labor columns.
+- **Rows** shows up to 30 real body rows per workbook with normalized unit price
+  without VAT, total without VAT, labor fields, and preview-only row issues.
 
 ## Region handling
 

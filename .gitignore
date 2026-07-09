@@ -122,3 +122,7 @@ _rnmc_consolidation_metadata_review/
 # RNMC fast preview delivery artifacts
 rnmc-fast-preview-updated-files.zip
 _rnmc_fast_preview_review/
+
+# RNMC readable preview delivery artifacts
+rnmc-readable-preview-updated-files.zip
+_rnmc_readable_preview_review/

@@ -110,7 +110,35 @@ def test_row_preview_limits_table_scan_to_30_rows_by_default(tmp_path: Path) -> 
     assert entry.rows_ok == 30
     assert entry.rows_rejected == 0
     assert entry.is_limited is True
+    assert len(entry.sample_rows) == 30
+    assert entry.sample_rows[0].row_number == 4
+    assert entry.sample_rows[-1].row_number == 33
+    assert entry.sample_rows[-1].work_name == "Work 30"
     assert "preview stopped at 30 table rows" in entry.reason
+
+
+def test_row_preview_includes_detected_headers_and_value_samples(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Kazan/values.xlsx": _value_preview_workbook_bytes()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = analyze_rnmc_zip_row_preview(connection, str(zip_path))
+    finally:
+        connection.close()
+
+    entry = result.entries[0]
+    assert entry.header_preview.code == "Перечень ГЭСН"
+    assert entry.header_preview.unit == "Единица измерения"
+    assert entry.header_preview.unit_price == "Цена единицы работ, руб. с НДС"
+    assert entry.header_preview.total_price == "Итого стоимость, руб. с НДС"
+    assert len(entry.sample_rows) == 2
+    assert entry.sample_rows[0].code == "ГЭСН01-01-001-01"
+    assert entry.sample_rows[0].unit_price == "100"
+    assert entry.sample_rows[0].total_price == "200"
+    assert entry.sample_rows[0].labor_unit == "1.5"
+    assert entry.sample_rows[1].issue == "missing_unit_and_quantity"
 
 
 def test_row_preview_limit_does_not_change_catalog_import(tmp_path: Path) -> None:
@@ -153,7 +181,42 @@ def test_admin_can_preview_rnmc_zip_rows(tmp_path: Path, monkeypatch) -> None:
     assert "Manual Region" in response.text
     assert "ADMIN-7" in response.text
     assert "preview_ok" in response.text
-    assert "OK-строк найдено" in response.text
+    assert "OK-строк в preview" in response.text
+    assert "Файлы и статусы" in response.text
+    assert "Метаданные" in response.text
+    assert "Заголовки" in response.text
+    assert "Строки предпросмотра" in response.text
+
+
+def _value_preview_workbook_bytes() -> bytes:
+    from io import BytesIO
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-PREVIEW"
+    sheet.append([])
+    sheet.append([
+        "№ п/п",
+        "Наименование работ",
+        "Единица измерения",
+        "Кол-во",
+        "Перечень ГЭСН",
+        "Цена единицы работ, руб. с НДС",
+        "Итого стоимость, руб. с НДС",
+        "ТЗ на ед., чел-час",
+        "ТЗ всего, чел-час",
+        "ТЗм на ед., чел-час",
+        "ТЗм всего, чел-час",
+    ])
+    sheet.append([1, "Work A", "м", 2, "ГЭСН01-01-001-01", 120, 240, 1.5, 3, 0.5, 1])
+    sheet.append([2, "Rejected sample", "", "", "ГЭСН01-01-001-02", 300, 600, 2, 4, 1, 2])
+    sheet.append([None] * 11)
+    sheet.append([None] * 11)
+    sheet.append([None] * 11)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 def _write_zip(path: Path, files: dict[str, bytes]) -> None:
