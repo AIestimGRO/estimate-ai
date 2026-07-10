@@ -266,7 +266,7 @@ table.preview td.path {
 .admin-nav-link.active { background: #4f46e5; color: #fff; }
 .admin-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 .admin-card {
@@ -295,6 +295,42 @@ table.preview td.path {
 .admin-form {
   margin: 16px 0 20px; padding: 14px; border: 1px solid #e2e8f0;
   border-radius: 12px; background: #fff;
+}
+.admin-section-head { margin-bottom: 14px; }
+.admin-section-head p { margin: 4px 0 0; }
+.admin-action-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  align-items: start;
+}
+.admin-action-card { margin: 0; height: 100%; }
+.admin-step-list { margin: 0; padding-left: 20px; color: #475569; font-size: 14px; line-height: 1.55; }
+.admin-primary-action { margin-top: 12px; }
+.admin-confirm-box {
+  margin: 12px 0 20px; padding: 14px; border: 1px solid #bbf7d0;
+  border-radius: 12px; background: #f0fdf4;
+}
+.admin-confirm-box form { margin: 0; }
+.admin-confirm-box button { width: auto; min-width: 220px; }
+@media (max-width: 760px) {
+  .admin-grid, .admin-action-grid { grid-template-columns: 1fr; }
+}
+.admin-section-head { margin-bottom: 14px; }
+.admin-section-head p { margin: 4px 0 0; }
+.admin-action-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  align-items: start;
+}
+.admin-action-card { margin: 0; height: 100%; }
+.admin-step-list { margin: 0; padding-left: 20px; color: #475569; font-size: 14px; line-height: 1.55; }
+.admin-primary-action { margin-top: 12px; }
+.admin-confirm-box {
+  margin: 12px 0 20px; padding: 14px; border: 1px solid #bbf7d0;
+  border-radius: 12px; background: #f0fdf4;
+}
+.admin-confirm-box form { margin: 0; }
+.admin-confirm-box button { width: auto; min-width: 220px; }
+@media (max-width: 760px) {
+  .admin-grid, .admin-action-grid { grid-template-columns: 1fr; }
 }
 .table-action { margin: 0; }
 .table-action button { width: auto; margin: 0; padding: 7px 10px; font-size: 12px; }
@@ -779,23 +815,34 @@ def render_admin_imports(
     row_preview_result: RnmcZipRowPreviewResult | None = None,
     catalog_import_result: RnmcZipCatalogImportResult | None = None,
     status_filter: str = "",
+    stage_token: str = "",
+    stage_filename: str = "",
 ) -> str:
     notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
     error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
     content = (
         '<section class="admin-panel">'
-        '<h2 class="section">Импорты файлов</h2>'
-        '<p>Журнал показывает, какие файлы были загружены, из какого источника и сколько строк принято.</p>'
-        f'{notice_html}'
-        f'{error_html}'
-        f'{_render_file_log_import_form()}'
-        f'{_render_rnmc_zip_dry_run_form()}'
-        f'{_render_rnmc_zip_import_log_form()}'
+        '<div class="admin-section-head">'
+        '<h2 class="section">Загрузка новых РНМЦ</h2>'
+        '<p class="muted">Один сценарий: выберите ZIP, проверьте найденные данные и подтвердите сохранение.</p>'
+        '</div>'
+        f'{notice_html}{error_html}'
+        '<div class="admin-action-grid">'
         f'{_render_rnmc_zip_row_preview_form()}'
-        f'{_render_rnmc_zip_catalog_import_form()}'
+        '<div class="admin-form admin-action-card">'
+        '<h2 class="section">Как проходит импорт</h2>'
+        '<ol class="admin-step-list">'
+        '<li>Система проверяет файлы, дубликаты и метаданные.</li>'
+        '<li>Показывает сводку, статусы, заголовки и реальные строки.</li>'
+        '<li>После подтверждения сохраняет каталог и автоматически обновляет журнал.</li>'
+        '</ol>'
+        '</div></div>'
         f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
         f'{_render_rnmc_zip_row_preview_result(row_preview_result)}'
+        f'{_render_rnmc_stage_commit(stage_token, stage_filename)}'
         f'{_render_rnmc_zip_catalog_import_result(catalog_import_result)}'
+        '<div class="admin-section-head"><h2 class="section">История импортов</h2>'
+        '<p class="muted">Журнал обновляется автоматически после сохранения ZIP.</p></div>'
         f'{_render_import_status_filters(status_filter)}'
         f'{_render_imported_file_table(imports)}'
         '</section>'
@@ -803,9 +850,23 @@ def render_admin_imports(
     return render(
         "admin.html",
         title="Импорты файлов",
-        subtitle="Раздел администрирования автоподборщика.",
+        subtitle="Проверка, предпросмотр и сохранение новых РНМЦ.",
         admin_nav=_render_admin_nav(active_slug="imports"),
         content=content,
+    )
+
+
+def _render_rnmc_stage_commit(stage_token: str, stage_filename: str) -> str:
+    if not stage_token:
+        return ""
+    return (
+        '<div class="admin-confirm-box">'
+        '<h2 class="section">Предпросмотр готов</h2>'
+        f'<p>Архив <strong>{html.escape(stage_filename)}</strong> проверен. Просмотрите вкладки ниже и сохраните данные, если всё верно.</p>'
+        '<form action="/admin/imports/rnmc-stage-commit" method="post">'
+        f'<input type="hidden" name="stage_token" value="{html.escape(stage_token, quote=True)}">'
+        '<button type="submit">Сохранить в каталог</button>'
+        '</form></div>'
     )
 
 
@@ -847,12 +908,12 @@ def _render_rnmc_zip_import_log_form() -> str:
 
 def _render_rnmc_zip_row_preview_form() -> str:
     return (
-        '<form class="admin-form" action="/admin/imports/rnmc-row-preview" method="post" enctype="multipart/form-data">'
-        '<h2 class="section">Предпросмотр строк РНМЦ из ZIP</h2>'
-        '<p class="muted">Этот режим открывает Excel-файлы, ищет таблицу работ и считает строки по правилам VBA. В каталог ничего не записывается.</p>'
+        '<form class="admin-form admin-action-card" action="/admin/imports/rnmc-row-preview" method="post" enctype="multipart/form-data">'
+        '<h2 class="section">Выбрать ZIP</h2>'
+        '<p class="muted">На этом шаге данные только проверяются. Запись в каталог начнется после отдельного подтверждения.</p>'
         '<label>ZIP-архив РНМЦ<input type="file" name="rnmc_zip" accept=".zip" required></label>'
         '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Оставьте пустым, чтобы взять регион из папки"></label>'
-        '<button type="submit">Разобрать строки без записи в каталог</button>'
+        '<button class="admin-primary-action" type="submit">Загрузить и проверить</button>'
         '</form>'
     )
 

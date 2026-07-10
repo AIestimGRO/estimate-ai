@@ -1,6 +1,7 @@
 """Tests for RNMC zip workbook row previews."""
 
 from pathlib import Path
+import re
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
@@ -192,6 +193,41 @@ def test_admin_can_preview_rnmc_zip_rows(tmp_path: Path, monkeypatch) -> None:
     assert "data-rnmc-zoom" in response.text
     assert "Масштаб таблиц" in response.text
 
+
+
+def test_admin_can_confirm_staged_rnmc_import(tmp_path: Path, monkeypatch) -> None:
+    from core.storage.catalog import RNMC_ZIP_SOURCE_NAME, list_catalog_rows
+
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Folder/staged.xlsx": _workbook_bytes(task_number="STAGED-1")})
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        with zip_path.open("rb") as handle:
+            preview = client.post(
+                "/admin/imports/rnmc-row-preview",
+                data={"region_override": "Stage Region"},
+                files={"rnmc_zip": ("rnmc.zip", handle, "application/zip")},
+            )
+        match = re.search(r'name="stage_token" value="([a-f0-9]+)"', preview.text)
+        assert match is not None
+        assert "Сохранить в каталог" in preview.text
+        committed = client.post(
+            "/admin/imports/rnmc-stage-commit",
+            data={"stage_token": match.group(1)},
+        )
+
+    assert committed.status_code == 200
+    assert "rnmc.zip импортирован" in committed.text
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+    assert len(rows) == 2
+    assert rows[0].region == "Stage Region"
 
 def _value_preview_workbook_bytes() -> bytes:
     from io import BytesIO

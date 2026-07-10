@@ -157,3 +157,7 @@ _rnmc_zlvl_price_model_skip_log_review/
 # Admin UI catalog clear delivery artifacts
 estimate-ai-admin-ui-catalog-clear.zip
 _admin_ui_catalog_clear_review/
+
+# Admin UI import workflow delivery artifacts
+estimate-ai-admin-ui-import-workflow.zip
+_admin_ui_import_workflow_review/

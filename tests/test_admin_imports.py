@@ -65,3 +65,20 @@ def test_admin_imports_lists_imported_files(tmp_path, monkeypatch) -> None:
     assert "<td>25</td>" in response.text
     assert "<td>2</td>" in response.text
     assert 'class="admin-nav-link active" href="/admin/imports"' in response.text
+
+
+def test_admin_imports_uses_single_regular_import_flow(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.get("/admin/imports")
+
+    assert response.status_code == 200
+    assert "Загрузка новых РНМЦ" in response.text
+    assert "Загрузить и проверить" in response.text
+    assert "Как проходит импорт" in response.text
+    assert "История импортов" in response.text
+    assert "Импорт старого File_Log.xlsx" not in response.text
+    assert "Зафиксировать ZIP в журнале" not in response.text
+    assert "Импортировать строки РНМЦ из ZIP в каталог" not in response.text

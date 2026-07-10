@@ -295,3 +295,13 @@ filename-based skip rule: if the same source RNMC later appears in a ZIP upload,
 dry-run/preview/import can skip it by normalized base filename without opening the
 workbook again. The consolidated catalog file itself is also recorded as a
 `success` import for auditability.
+## Admin import workflow
+
+The regular admin workflow is intentionally limited to one staged action:
+
+1. Upload one RNMC ZIP and run preview.
+2. Review summary, file statuses, metadata, detected headers, and sample rows.
+3. Confirm the staged ZIP to write catalog rows and update `imported_files` automatically.
+
+Legacy `File_Log.xlsx` migration and low-level log-only endpoints remain available for compatibility and tests, but they are not shown in the regular admin interface. One-time catalog migrations should be run as maintenance scripts instead of permanent UI actions.
+

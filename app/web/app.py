@@ -108,11 +108,21 @@ class UploadRecord:
 
 
 @dataclass
+class RnmcImportStage:
+    """Saved RNMC archive awaiting final import confirmation."""
+
+    archive_path: Path
+    original_name: str
+    region_override: str
+
+
+@dataclass
 class AppState:
-    """Shared server state (upload store + working directory)."""
+    """Shared server state (upload stores + working directory)."""
 
     base_dir: Path
     store: dict[str, UploadRecord] = field(default_factory=dict)
+    rnmc_stages: dict[str, RnmcImportStage] = field(default_factory=dict)
 
 
 def create_app(base_dir: str | Path | None = None) -> FastAPI:
@@ -557,10 +567,16 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
 
         upload_dir = app.state.app_state.base_dir / "admin_imports"
         upload_dir.mkdir(parents=True, exist_ok=True)
+        stage_token = uuid.uuid4().hex
         saved_path = _save(
             upload_dir,
-            f"rnmc_row_preview_{uuid.uuid4().hex}.zip",
+            f"rnmc_stage_{stage_token}.zip",
             await rnmc_zip.read(),
+        )
+        app.state.app_state.rnmc_stages[stage_token] = RnmcImportStage(
+            archive_path=saved_path,
+            original_name=_safe_name(raw_name),
+            region_override=region_override,
         )
         connection = connect(default_database_path())
         try:
@@ -583,12 +599,60 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             return HTMLResponse(
                 render_admin_imports(
                     imports,
-                    notice="ZIP разобран без записи строк в каталог.",
+                    notice="ZIP проверен. Просмотрите данные и подтвердите сохранение.",
                     row_preview_result=row_preview_result,
+                    stage_token=stage_token,
+                    stage_filename=_safe_name(raw_name),
                 )
             )
         finally:
             connection.close()
+
+
+    @app.post("/admin/imports/rnmc-stage-commit", response_class=HTMLResponse)
+    def admin_imports_rnmc_stage_commit(stage_token: str = Form(...)):
+        stage = app.state.app_state.rnmc_stages.get(stage_token)
+        if stage is None or not stage.archive_path.exists():
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(imports, error="Предпросмотр устарел. Выберите ZIP повторно."),
+                    status_code=400,
+                )
+            finally:
+                connection.close()
+
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                result = import_rnmc_zip_catalog_rows(
+                    connection, str(stage.archive_path), region_override=stage.region_override
+                )
+            except ValueError as exc:
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(imports, error=f"Не удалось импортировать ZIP: {exc}"),
+                    status_code=400,
+                )
+            imports = list_imported_files(connection)
+            message = (
+                f"{stage.original_name} импортирован: добавлено {result.rows_imported_total}, "
+                f"отклонено {result.rows_rejected_total}, пропущено {result.skipped_count}, "
+                f"дубликатов {result.duplicate_name_count}, ошибок {result.failed_count}."
+            )
+            return HTMLResponse(render_admin_imports(
+                imports, notice=message, catalog_import_result=result
+            ))
+        finally:
+            connection.close()
+            app.state.app_state.rnmc_stages.pop(stage_token, None)
+            try:
+                stage.archive_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
     @app.post("/admin/imports/rnmc-import", response_class=HTMLResponse)
