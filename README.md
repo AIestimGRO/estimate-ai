@@ -62,3 +62,11 @@ Main web routes:
 - `docs/ROADMAP.md` — completed milestones and next work.
 - `docs/RNMC_IMPORT.md` — RNMC ZIP/File_Log import workflow.
 - `docs/OPEN_ITEMS.md` — deliberately deferred decisions and follow-ups.
+
+### Single Excel RNMC upload
+
+The admin imports page has a second compact upload card for a single `.xlsx` or `.xlsm` file.
+
+- `РНМЦ_КА_ЖО_ZLVL_V3.xlsx` is detected by its exact base filename and imported with the full legacy ZLVL catalog mapping.
+- Any other supported Excel filename is treated as one new RNMC workbook and uses the standard preview and confirmed import flow.
+- `imported_files` is updated automatically after confirmation.

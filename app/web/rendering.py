@@ -817,6 +817,7 @@ def render_admin_imports(
     status_filter: str = "",
     stage_token: str = "",
     stage_filename: str = "",
+    stage_mode: str = "",
 ) -> str:
     notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
     error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
@@ -829,6 +830,7 @@ def render_admin_imports(
         f'{notice_html}{error_html}'
         '<div class="admin-action-grid">'
         f'{_render_rnmc_zip_row_preview_form()}'
+        f'{_render_rnmc_single_file_preview_form()}'
         '<div class="admin-form admin-action-card">'
         '<h2 class="section">Как проходит импорт</h2>'
         '<ol class="admin-step-list">'
@@ -839,7 +841,7 @@ def render_admin_imports(
         '</div></div>'
         f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
         f'{_render_rnmc_zip_row_preview_result(row_preview_result)}'
-        f'{_render_rnmc_stage_commit(stage_token, stage_filename)}'
+        f'{_render_rnmc_stage_commit(stage_token, stage_filename, stage_mode)}'
         f'{_render_rnmc_zip_catalog_import_result(catalog_import_result)}'
         '<div class="admin-section-head"><h2 class="section">История импортов</h2>'
         '<p class="muted">Журнал обновляется автоматически после сохранения ZIP.</p></div>'
@@ -856,13 +858,19 @@ def render_admin_imports(
     )
 
 
-def _render_rnmc_stage_commit(stage_token: str, stage_filename: str) -> str:
+def _render_rnmc_stage_commit(stage_token: str, stage_filename: str, stage_mode: str = "") -> str:
     if not stage_token:
         return ""
+    object_label = 'Файл' if stage_mode else 'Архив'
+    mode_note = (
+        ' Будет выполнена полная загрузка старого ZLVL-каталога.'
+        if stage_mode == 'legacy_catalog'
+        else ''
+    )
     return (
         '<div class="admin-confirm-box">'
         '<h2 class="section">Предпросмотр готов</h2>'
-        f'<p>Архив <strong>{html.escape(stage_filename)}</strong> проверен. Просмотрите вкладки ниже и сохраните данные, если всё верно.</p>'
+        f'<p>{object_label} <strong>{html.escape(stage_filename)}</strong> проверен.{mode_note} Сохраните данные, если всё верно.</p>'
         '<form action="/admin/imports/rnmc-stage-commit" method="post">'
         f'<input type="hidden" name="stage_token" value="{html.escape(stage_token, quote=True)}">'
         '<button type="submit">Сохранить в каталог</button>'
@@ -927,6 +935,18 @@ def _render_rnmc_zip_catalog_import_form() -> str:
         '<label>ZIP-архив РНМЦ<input type="file" name="rnmc_zip" accept=".zip" required></label>'
         '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Оставьте пустым, чтобы взять регион из папки"></label>'
         '<button type="submit">Импортировать строки в каталог</button>'
+        '</form>'
+    )
+
+
+def _render_rnmc_single_file_preview_form() -> str:
+    return (
+        '<form class="admin-form admin-action-card" action="/admin/imports/rnmc-file-preview" method="post" enctype="multipart/form-data">'
+        '<h2 class="section">Выбрать Excel-файл</h2>'
+        '<p class="muted">Одиночная новая РНМЦ обрабатывается по обычным правилам. Файл РНМЦ_КА_ЖО_ZLVL_V3.xlsx распознается как полный старый каталог.</p>'
+        '<label>Excel-файл РНМЦ<input type="file" name="rnmc_file" accept=".xlsx,.xlsm" required></label>'
+        '<label>Регион вручную, если нужно<input type="text" name="region_override" placeholder="Для новой РНМЦ; каталог берет регион из строк"></label>'
+        '<button class="admin-primary-action" type="submit">Загрузить и проверить</button>'
         '</form>'
     )
 

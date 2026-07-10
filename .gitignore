@@ -161,3 +161,7 @@ _admin_ui_catalog_clear_review/
 # Admin UI import workflow delivery artifacts
 estimate-ai-admin-ui-import-workflow.zip
 _admin_ui_import_workflow_review/
+
+# Admin UI single file import delivery artifacts
+estimate-ai-admin-ui-single-file-import.zip
+_admin_ui_single_file_import_review/

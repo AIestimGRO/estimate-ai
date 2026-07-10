@@ -77,6 +77,8 @@ def test_admin_imports_uses_single_regular_import_flow(tmp_path, monkeypatch) ->
     assert response.status_code == 200
     assert "Загрузка новых РНМЦ" in response.text
     assert "Загрузить и проверить" in response.text
+    assert "Выбрать Excel-файл" in response.text
+    assert "/admin/imports/rnmc-file-preview" in response.text
     assert "Как проходит импорт" in response.text
     assert "История импортов" in response.text
     assert "Импорт старого File_Log.xlsx" not in response.text

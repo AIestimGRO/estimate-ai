@@ -21,6 +21,7 @@ from urllib.parse import parse_qsl, quote, urlencode
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -42,6 +43,7 @@ from core.storage.catalog import (
     count_catalog_rows,
     delete_catalog_item,
     get_imported_file,
+    import_catalog_from_excel,
     import_legacy_file_log,
     list_catalog_editor_page,
     list_catalog_items_for_imported_file,
@@ -89,6 +91,7 @@ from app.web.rendering import (
 )
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+LEGACY_ZLVL_CATALOG_FILENAME = "РНМЦ_КА_ЖО_ZLVL_V3.xlsx"
 VBA_DATE_BASE = date(1899, 12, 30)
 _INVALID = object()
 
@@ -109,11 +112,12 @@ class UploadRecord:
 
 @dataclass
 class RnmcImportStage:
-    """Saved RNMC archive awaiting final import confirmation."""
+    """Saved RNMC upload awaiting final import confirmation."""
 
     archive_path: Path
     original_name: str
     region_override: str
+    import_kind: str = "zip"
 
 
 @dataclass
@@ -609,6 +613,92 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             connection.close()
 
 
+    @app.post("/admin/imports/rnmc-file-preview", response_class=HTMLResponse)
+    async def admin_imports_rnmc_file_preview(
+        rnmc_file: UploadFile = File(...),
+        region_override: str = Form(""),
+    ):
+        raw_name = _safe_name(rnmc_file.filename or "")
+        suffix = Path(raw_name).suffix.lower()
+        if raw_name == "" or suffix not in {".xlsx", ".xlsm"}:
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(
+                        imports,
+                        error="Выберите Excel-файл РНМЦ в формате .xlsx или .xlsm.",
+                    ),
+                    status_code=400,
+                )
+            finally:
+                connection.close()
+
+        upload_dir = app.state.app_state.base_dir / "admin_imports"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        stage_token = uuid.uuid4().hex
+        data = await rnmc_file.read()
+        is_legacy_catalog = raw_name.casefold() == LEGACY_ZLVL_CATALOG_FILENAME.casefold()
+
+        if is_legacy_catalog:
+            saved_path = _save(upload_dir, f"rnmc_stage_{stage_token}{suffix}", data)
+            import_kind = "legacy_catalog"
+            row_preview_result = None
+            notice = (
+                "Распознан старый ZLVL-каталог. После подтверждения он будет загружен "
+                "по правилам полного каталога."
+            )
+        else:
+            saved_path = upload_dir / f"rnmc_stage_{stage_token}.zip"
+            with ZipFile(saved_path, "w", ZIP_DEFLATED) as archive:
+                archive.writestr(raw_name, data)
+            import_kind = "single_rnmc"
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                imports = list_imported_files(connection)
+                try:
+                    row_preview_result = analyze_rnmc_zip_row_preview(
+                        connection, str(saved_path), region_override=region_override
+                    )
+                except ValueError as exc:
+                    saved_path.unlink(missing_ok=True)
+                    return HTMLResponse(
+                        render_admin_imports(
+                            imports,
+                            error=f"Не удалось разобрать Excel-файл: {exc}",
+                        ),
+                        status_code=400,
+                    )
+            finally:
+                connection.close()
+            notice = "Excel-файл проверен как новая РНМЦ. Просмотрите данные и подтвердите сохранение."
+
+        app.state.app_state.rnmc_stages[stage_token] = RnmcImportStage(
+            archive_path=saved_path,
+            original_name=raw_name,
+            region_override=region_override,
+            import_kind=import_kind,
+        )
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            imports = list_imported_files(connection)
+            return HTMLResponse(
+                render_admin_imports(
+                    imports,
+                    notice=notice,
+                    row_preview_result=row_preview_result,
+                    stage_token=stage_token,
+                    stage_filename=raw_name,
+                    stage_mode=import_kind,
+                )
+            )
+        finally:
+            connection.close()
+
+
     @app.post("/admin/imports/rnmc-stage-commit", response_class=HTMLResponse)
     def admin_imports_rnmc_stage_commit(stage_token: str = Form(...)):
         stage = app.state.app_state.rnmc_stages.get(stage_token)
@@ -628,21 +718,32 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         try:
             init_database(connection)
             try:
-                result = import_rnmc_zip_catalog_rows(
-                    connection, str(stage.archive_path), region_override=stage.region_override
-                )
-            except ValueError as exc:
+                if stage.import_kind == "legacy_catalog":
+                    legacy_result = import_catalog_from_excel(
+                        connection, stage.archive_path, source_name="main", replace=True
+                    )
+                    result = None
+                    message = (
+                        f"{stage.original_name} загружен как полный ZLVL-каталог: "
+                        f"добавлено {legacy_result.rows_imported}, "
+                        f"пропущено {legacy_result.rows_skipped}."
+                    )
+                else:
+                    result = import_rnmc_zip_catalog_rows(
+                        connection, str(stage.archive_path), region_override=stage.region_override
+                    )
+                    message = (
+                        f"{stage.original_name} импортирован: добавлено {result.rows_imported_total}, "
+                        f"отклонено {result.rows_rejected_total}, пропущено {result.skipped_count}, "
+                        f"дубликатов {result.duplicate_name_count}, ошибок {result.failed_count}."
+                    )
+            except (ValueError, OSError) as exc:
                 imports = list_imported_files(connection)
                 return HTMLResponse(
-                    render_admin_imports(imports, error=f"Не удалось импортировать ZIP: {exc}"),
+                    render_admin_imports(imports, error=f"Не удалось импортировать файл: {exc}"),
                     status_code=400,
                 )
             imports = list_imported_files(connection)
-            message = (
-                f"{stage.original_name} импортирован: добавлено {result.rows_imported_total}, "
-                f"отклонено {result.rows_rejected_total}, пропущено {result.skipped_count}, "
-                f"дубликатов {result.duplicate_name_count}, ошибок {result.failed_count}."
-            )
             return HTMLResponse(render_admin_imports(
                 imports, notice=message, catalog_import_result=result
             ))

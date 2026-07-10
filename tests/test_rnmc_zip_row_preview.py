@@ -431,3 +431,101 @@ def _unlabeled_code_workbook_bytes() -> bytes:
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def test_admin_can_preview_and_import_single_rnmc_file(tmp_path: Path, monkeypatch) -> None:
+    from core.storage.catalog import RNMC_ZIP_SOURCE_NAME, list_catalog_rows
+
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    workbook_path = tmp_path / "single.xlsx"
+    workbook_path.write_bytes(_workbook_bytes(task_number="SINGLE-1"))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        with workbook_path.open("rb") as handle:
+            preview = client.post(
+                "/admin/imports/rnmc-file-preview",
+                data={"region_override": "Single Region"},
+                files={"rnmc_file": ("single.xlsx", handle, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+        match = re.search(r'name="stage_token" value="([a-f0-9]+)"', preview.text)
+        assert preview.status_code == 200
+        assert match is not None
+        assert "Excel-файл проверен как новая РНМЦ" in preview.text
+        committed = client.post(
+            "/admin/imports/rnmc-stage-commit",
+            data={"stage_token": match.group(1)},
+        )
+
+    assert committed.status_code == 200
+    assert "single.xlsx импортирован" in committed.text
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+    assert len(rows) == 2
+    assert rows[0].region == "Single Region"
+
+
+def test_admin_recognizes_named_legacy_zlvl_catalog(tmp_path: Path, monkeypatch) -> None:
+    from core.storage.catalog import list_catalog_rows
+
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    workbook_path = tmp_path / "РНМЦ_КА_ЖО_ZLVL_V3.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Каталог"
+    sheet.append([])
+    sheet.append([None, None, None, None, None, None, "ZLVL"])
+    sheet.append([
+        "№_пп", "Номер задачи", "Наименование работ", "Ед.изм.", "Кол-во",
+        "Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС",
+        "Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС ZLVL",
+        "Итого стоимость, руб. с НДС", "Итого стоимость, руб. без НДС",
+        "ТЗ на ед., чел-час", "ТЗ всего, чел-час", "ТЗм на ед., чел-час", "ТЗм всего, чел-час",
+        "Перечень ГЭСН/ФЕР/ТЕР/КР", "source_file", "Регион", "Год Квартал ЛСР",
+        "Планирумый срок начала работ", "Планируемый срок окончания работ",
+        "Региональный коэффициент", "Дата добавления в каталог",
+    ])
+    sheet.append([
+        1, "LEGACY-1", "Legacy work", "шт", 1, 120, 100, 120, 100,
+        1, 1, 0.5, 0.5, "ГЭСН01-01-001-01", "old-source.xlsx", "Москва",
+        "2026 Q1", "2026-01-01", "2026-02-01", 1.2, "2026-07-10",
+    ])
+    workbook.save(workbook_path)
+    workbook.close()
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        with workbook_path.open("rb") as handle:
+            preview = client.post(
+                "/admin/imports/rnmc-file-preview",
+                files={"rnmc_file": (workbook_path.name, handle, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+        match = re.search(r'name="stage_token" value="([a-f0-9]+)"', preview.text)
+        assert preview.status_code == 200
+        assert match is not None
+        assert "Распознан старый ZLVL-каталог" in preview.text
+        committed = client.post(
+            "/admin/imports/rnmc-stage-commit",
+            data={"stage_token": match.group(1)},
+        )
+
+    assert committed.status_code == 200
+    assert "загружен как полный ZLVL-каталог" in committed.text
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        rows = list_catalog_rows(connection, source_name="main")
+        source_import = connection.execute(
+            "SELECT status FROM imported_files WHERE filename = ?",
+            ("old-source.xlsx",),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert len(rows) == 1
+    assert rows[0].price_original == 120
+    assert rows[0].price_zlvl == 100
+    assert source_import["status"] == "legacy_imported"
