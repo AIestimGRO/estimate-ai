@@ -169,3 +169,7 @@ _admin_ui_single_file_import_review/
 # Admin UI legacy catalog preview fix delivery artifacts
 estimate-ai-admin-ui-legacy-catalog-preview-fix.zip
 _admin_ui_legacy_catalog_preview_fix_review/
+
+# Admin UI maintenance clear delivery artifacts
+estimate-ai-admin-ui-maintenance-clear.zip
+_admin_ui_maintenance_clear_review/

@@ -420,7 +420,8 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 return HTMLResponse(render_admin_name_exclusions(rules))
             if section_slug == "settings":
                 settings_rows = _admin_settings_rows(connection)
-                return HTMLResponse(render_admin_settings(settings_rows))
+                catalog_rows = connection.execute("SELECT COUNT(*) AS count FROM catalog_items").fetchone()["count"]
+                return HTMLResponse(render_admin_settings(settings_rows, catalog_rows=catalog_rows))
         finally:
             connection.close()
 

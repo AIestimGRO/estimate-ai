@@ -276,5 +276,5 @@ def test_admin_catalog_bulk_submission_disables_row_editor_fields(tmp_path, monk
     assert response.status_code == 200
     assert "prepareCatalogBulkAction" in response.text
     assert "tbody input:not(.catalog-row-check), tbody textarea" in response.text
-    assert 'action="/admin/catalog/clear"' in response.text
-    assert "Очистить каталог для пересборки" in response.text
+    assert 'action="/admin/catalog/clear"' not in response.text
+    assert "Очистить каталог для пересборки" not in response.text

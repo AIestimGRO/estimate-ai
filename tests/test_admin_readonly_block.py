@@ -171,6 +171,9 @@ def test_admin_settings_shows_diagnostics(tmp_path, monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "Настройки и диагностика" in response.text
+    assert "Служебные действия" in response.text
+    assert "Очистить каталог" in response.text
+    assert "Для подтверждения введите ОЧИСТИТЬ" in response.text
     assert "Database path" in response.text
     assert str(db_path) in response.text
     assert "Catalog rows" in response.text

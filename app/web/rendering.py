@@ -245,6 +245,11 @@ table.preview td.path {
 .catalog-pager a { padding: 7px 10px; border-radius: 8px; background: #eef2ff; color: #3730a3; text-decoration: none; font-weight: 600; }
 .catalog-warning { padding: 10px; margin: 10px 0; background: #fffbeb; color: #92400e; border-radius: 10px; }
 .muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
+.maintenance-tools { margin-top: 18px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+.maintenance-tools summary { cursor: pointer; color: #64748b; font-size: 13px; font-weight: 600; }
+.maintenance-tools-body { margin-top: 10px; padding: 10px; border: 1px solid #fee2e2; border-radius: 10px; background: #fffafa; }
+button.danger-small { width: auto; margin: 0; padding: 6px 9px; border-radius: 7px; font-size: 12px; background: #b91c1c; }
+button.danger-small:hover { background: #991b1b; }
 .build { margin-top: 20px; font-size: 12px; color: #94a3b8; text-align: center; }
 .admin-nav {
   display: flex;
@@ -586,7 +591,6 @@ def render_admin_catalog(
         f'{notice_html}'
         f'{error_html}'
         f'{_render_catalog_editor_filters(catalog_page)}'
-        f'{_render_catalog_clear_form(catalog_page.total_rows)}'
         f'{_render_catalog_editor_pager(catalog_page)}'
         f'{_render_catalog_editor_table(catalog_page, return_url)}'
         f'{_render_catalog_editor_pager(catalog_page)}'
@@ -603,14 +607,18 @@ def render_admin_catalog(
 
 def _render_catalog_clear_form(total_rows: int) -> str:
     return (
-        '<form class="admin-form" action="/admin/catalog/clear" method="post" '
-        'onsubmit="return confirm(\'Полностью очистить каталог и журнал импортов?\\n\\n'
-        'Это действие нужно только перед полной пересборкой и его нельзя отменить.\')">'
-        '<h2 class="section">Полная пересборка</h2>'
-        f'<p class="muted">Сейчас в каталоге строк: {total_rows}. Очистка удалит строки каталога и журнал imported_files, но не затронет настройки и правила.</p>'
+        '<details class="maintenance-tools">'
+        '<summary>Служебные действия</summary>'
+        '<div class="maintenance-tools-body">'
+        '<p class="muted">Полная очистка нужна только перед пересборкой каталога. '
+        f'Сейчас строк: {total_rows}.</p>'
+        '<form action="/admin/catalog/clear" method="post" '
+        'onsubmit="return prompt(\'Для подтверждения введите ОЧИСТИТЬ\') === \'ОЧИСТИТЬ\';">'
         '<input type="hidden" name="confirmation" value="clear_catalog">'
-        '<button class="danger" type="submit">Очистить каталог для пересборки</button>'
+        '<button class="danger-small" type="submit">Очистить каталог</button>'
         '</form>'
+        '</div>'
+        '</details>'
     )
 
 
@@ -2017,12 +2025,13 @@ def _render_name_exclusion_toggle(rule: NameExclusionRule) -> str:
     )
 
 
-def render_admin_settings(settings_rows: list[tuple[str, str]]) -> str:
+def render_admin_settings(settings_rows: list[tuple[str, str]], *, catalog_rows: int = 0) -> str:
     content = (
         '<section class="admin-panel">'
         '<h2 class="section">Настройки и диагностика</h2>'
-        '<p>Read-only сводка по базе, конфигам и накопленным админ-таблицам. Эта страница ничего не меняет.</p>'
+        '<p>Сводка по базе, конфигам и накопленным админ-таблицам.</p>'
         f'{_render_settings_table(settings_rows)}'
+        f'{_render_catalog_clear_form(catalog_rows)}'
         '</section>'
     )
     return render(
