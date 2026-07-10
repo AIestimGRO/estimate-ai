@@ -226,14 +226,18 @@ not create persisted custom columns yet.
 
 ## 6.1 RNMC catalog import value normalization
 
-For RNMC ZIP imports, `catalog_items.quantity` stores the source `Кол-во` value, and `catalog_items.price` stores unit price without VAT. Unit
+For RNMC ZIP imports, `catalog_items.quantity` stores the source `Кол-во` value.
+Unit price is stored in two levels: `price_original` is the source regional unit
+price without VAT, `price_zlvl` is `price_original / regional_coefficient`, and
+`price` remains the matching/pricing working value equal to `price_zlvl`. Unit
 price headers with auxiliary materials are valid source columns when the header
-still describes a unit price. Unit-price source values marked `с НДС` are
-divided by 1.2 before storage; values marked `без НДС` are stored as-is.
+still describes a unit price. Unit-price source values marked `с НДС` are divided
+by 1.2 before `price_original` is stored; values marked `без НДС` are stored as-is.
 
-`Итого стоимость` is stored separately as `total_price` and follows the same VAT
-normalization rule. Average values are not source values: headers containing
-`средняя` or `ср знач` are ignored for both unit price and total price.
+`Итого стоимость` is stored separately as one `total_price` without VAT and is
+not split into original/ZLVL levels. Average values are not source values:
+headers containing `средняя` or `ср знач` are ignored for both unit price and
+total price.
 
 Labor import mappings are deterministic: `ТЗ`, `ТЗр`, and `ЗТР` unit/total values map to
 `labor_unit` / `labor_total`; `ТЗм` unit/total values map to
@@ -241,7 +245,8 @@ Labor import mappings are deterministic: `ТЗ`, `ТЗр`, and `ЗТР` unit/tot
 calculated values, and numeric strings with comma or dot decimal separators are
 normalized to SQLite numeric values. File-level regional coefficient from RNMC
 consolidation metadata is stored as metadata and copied to imported catalog rows;
-it does not modify stored catalog prices.
+it is used to compute `price_zlvl` from `price_original`. `lsr_quarter`,
+`planned_start`, and `planned_finish` are copied to every imported catalog row.
 
 - `Код раздела` is not a GESN/FER/TER/KR code and must never populate
   `catalog_items.code`. If the actual code column is unlabeled but sits
@@ -598,3 +603,15 @@ richer header detection incl. merged-cell/sub-header handling (R2-R4),
 total/summary-row skipping (rest of R5), section/quantity detection
 (R10-R11), analog-column placement in the first free column (R13), and
 tolerant number/code parsing at detection time (R17-R18).
+
+## Legacy ZLVL catalog reload
+
+The prepared legacy catalog `РНМЦ_КА_ЖО_ZLVL_V3.xlsx` has a direct header mapping.
+It loads `price_original` from the non-ZLVL unit-price column, `price_zlvl` and
+`price` from the ZLVL unit-price column, `total_price` from `Итого стоимость, руб.
+без НДС`, labor from the explicit `ТЗ` / `ТЗм` columns, and row metadata
+(`source_file`, region, LSR quarter, planned dates, coefficient, and added date)
+into the corresponding `catalog_items` columns. `Итого стоимость, руб. с НДС` is
+ignored for this reload. Each distinct `source_file` value must also be recorded
+in `imported_files` as `legacy_imported`, so the normalized filename skip rule
+continues to work for future ZIP uploads.

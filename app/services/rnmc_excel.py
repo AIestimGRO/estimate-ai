@@ -501,6 +501,9 @@ def _import_workbook_bytes(
                 resolved_region,
                 filename,
                 metadata.regional_coefficient,
+                lsr_quarter=metadata.lsr_quarter,
+                planned_start=metadata.planned_start,
+                planned_finish=metadata.planned_finish,
             )
             rejected = len(rejected_rows)
             if not rows:
@@ -633,6 +636,9 @@ def _extract_catalog_row_candidates(
     region_folder: str,
     filename: str,
     regional_coefficient: float | None = None,
+    lsr_quarter: str = "",
+    planned_start: str = "",
+    planned_finish: str = "",
 ) -> tuple[list[RnmcCatalogRowCandidate], list[RnmcRejectedRow]]:
     num_col = _find_numbering_col(header.header_map) or 1
     code_col = _find_code_col(header)
@@ -716,9 +722,11 @@ def _extract_catalog_row_candidates(
             continue
 
         price_value = price_source_value
-        parsed_price = _parse_positive_number(price_value)
-        if parsed_price is not None:
-            parsed_price = parsed_price / value_columns.unit_price.divisor
+        price_original = _parse_positive_number(price_value)
+        if price_original is not None:
+            price_original = price_original / value_columns.unit_price.divisor
+        price_zlvl = _price_zlvl(price_original, regional_coefficient)
+        working_price = price_zlvl if price_zlvl is not None else price_original
 
         total_price = _parse_optional_value(
             total_source_value,
@@ -726,7 +734,9 @@ def _extract_catalog_row_candidates(
         )
         catalog_row = CatalogRow(
             task_id=task_number,
-            price=parsed_price if parsed_price is not None else price_value,
+            price=working_price if working_price is not None else price_value,
+            price_original=price_original,
+            price_zlvl=price_zlvl,
             code=code_value,
             unit=unit_value,
             quantity=_parse_optional_value(qty_value),
@@ -747,6 +757,9 @@ def _extract_catalog_row_candidates(
                 _row_value(row_values, value_columns.machine_labor_total_col)
             ),
             regional_coefficient=regional_coefficient,
+            lsr_quarter=lsr_quarter,
+            planned_start=planned_start,
+            planned_finish=planned_finish,
         )
         issue = _catalog_row_issue(catalog_row)
         if issue != "":
@@ -1958,6 +1971,14 @@ def _cell_value(sheet: Worksheet, row_number: int, col_number: int) -> object:
     if col_number <= 0:
         return None
     return sheet.cell(row_number, col_number).value
+
+
+def _price_zlvl(price_original: float | None, regional_coefficient: float | None) -> float | None:
+    if price_original is None:
+        return None
+    if regional_coefficient is None or regional_coefficient <= 0:
+        return None
+    return price_original / regional_coefficient
 
 
 def _catalog_row_issue(row: CatalogRow) -> str:

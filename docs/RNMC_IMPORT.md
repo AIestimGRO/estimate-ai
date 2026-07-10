@@ -154,8 +154,12 @@ when no manual region override is supplied. `Региональный коэфф
 `imported_files.regional_coefficient`, and copied to imported
 `catalog_items.regional_coefficient` rows. Implausible values such as years (`2026`, `2027`) are ignored.
 
+Detected `lsr_quarter`, `planned_start`, and `planned_finish` are stored both on
+`imported_files` and on every imported `catalog_items` row from that workbook.
 Manual editing remains available on the import detail page because real RNMC
-layouts may require further iterations and additional label patterns.
+layouts may require further iterations and additional label patterns. When a
+regional coefficient is entered manually for an import file, it is propagated to
+that file's catalog rows and their ZLVL unit price is recalculated.
 
 ## RNMC value column mapping
 
@@ -166,16 +170,19 @@ dot decimals, then stores SQLite `REAL` values.
 
 `Кол-во` is stored in `catalog_items.quantity` as the source row quantity.
 
-The main matching price is `catalog_items.price`, which means unit price without
-VAT. The importer accepts unit-price headers with auxiliary materials when the
-header is still a unit price. If the source header says `с НДС`, the value is
-divided by `1.2` before storage. If the source header says `без НДС`, the value
-is stored as-is.
+The catalog stores unit price in two levels. `catalog_items.price_original` is
+the source regional unit price without VAT. `catalog_items.price_zlvl` is the
+ZLVL / Moscow-level unit price. `catalog_items.price` remains the working price
+used by matching/pricing and equals `price_zlvl`. For new RNMC ZIP files,
+`price_original` comes from the workbook and `price_zlvl = price_original /
+regional_coefficient` when a valid coefficient is available. If the source
+header says `с НДС`, the value is divided by `1.2` before `price_original` is
+stored. If the source header says `без НДС`, the value is stored as-is.
 
-`Итого стоимость` is stored separately in `catalog_items.total_price`, also
-normalized to without VAT by dividing `с НДС` source values by `1.2`. Average
-headers such as `Цена средняя`, `Итого стоимость средняя`, or `ср знач` are not
-used as source values for either `price` or `total_price`.
+`Итого стоимость` is stored separately in `catalog_items.total_price` as one
+without-VAT total value. Total cost is not stored in two ZLVL/original levels.
+Average headers such as `Цена средняя`, `Итого стоимость средняя`, or `ср знач`
+are not used as source values for either unit price or `total_price`.
 
 Labor columns are stored separately:
 
@@ -256,3 +263,35 @@ original uploaded Excel files in a durable file store.
 - durable storage of source files for one-click retry;
 - richer duplicate-name review UI;
 - richer rejected-row diagnostics and exports.
+
+## Legacy ZLVL catalog reload
+
+`РНМЦ_КА_ЖО_ZLVL_V3.xlsx` is imported as a prepared catalog, not as a raw RNMC
+ZIP file. Its direct column mapping is:
+
+- `Номер задачи` -> `task_id`;
+- `Наименование работ` -> `work_name`;
+- `Ед.изм.` -> `unit`;
+- `Кол-во` -> `quantity`;
+- `Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС` -> `price_original`;
+- `Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС ZLVL` -> `price_zlvl` and `price`;
+- `Итого стоимость, руб. без НДС` -> `total_price`;
+- `ТЗ на ед., чел-час` / `ТЗ всего, чел-час` -> `labor_unit` / `labor_total`;
+- `ТЗм на ед., чел-час` / `ТЗм всего, чел-час` -> `machine_labor_unit` / `machine_labor_total`;
+- `Перечень ГЭСН/ФЕР/ТЕР/КР` -> `code`;
+- `source_file` -> `source_filename`;
+- `Регион` -> `region`;
+- `Год Квартал ЛСР` -> `lsr_quarter`;
+- `Планирумый срок начала работ` -> `planned_start`;
+- `Планируемый срок окончания работ` -> `planned_finish`;
+- `Региональный коэффициент` -> `regional_coefficient`;
+- `Дата добавления в каталог` -> `added_date`.
+
+For this legacy reload, `Итого стоимость, руб. с НДС` is ignored.
+
+Each distinct `source_file` value from the prepared catalog is also recorded in
+`imported_files` with status `legacy_imported`. This preserves the global
+filename-based skip rule: if the same source RNMC later appears in a ZIP upload,
+dry-run/preview/import can skip it by normalized base filename without opening the
+workbook again. The consolidated catalog file itself is also recorded as a
+`success` import for auditability.

@@ -634,8 +634,8 @@ def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: st
         '<div class="preview-wide">'
         '<table class="preview catalog-table"><thead><tr>'
         '<th></th><th>ID</th><th>Источник</th><th>Регион</th><th>Задача</th><th>Код</th><th>Ед.</th>'
-        '<th>Кол-во</th><th>Цена</th><th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
-        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th class="wrap">Работа</th>'
+        '<th>Кол-во</th><th>Цена раб.</th><th>Цена ориг.</th><th>Цена ZLVL</th><th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
+        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th>ЛСР</th><th>Начало</th><th>Окончание</th><th class="wrap">Работа</th>'
         '<th>Папка</th><th>Файл</th><th>Excel row</th><th>Действия</th>'
         '</tr></thead><tbody>'
     )
@@ -683,13 +683,18 @@ def _catalog_bulk_field_options() -> str:
         ("unit", "Ед."),
         ("work_name", "Работа"),
         ("quantity", "Кол-во"),
-        ("price", "Цена"),
+        ("price", "Цена рабочая"),
+        ("price_original", "Цена оригинал"),
+        ("price_zlvl", "Цена ZLVL"),
         ("total_price", "Итого"),
         ("labor_unit", "ТЗ ед."),
         ("labor_total", "ТЗ всего"),
         ("machine_labor_unit", "ТЗм ед."),
         ("machine_labor_total", "ТЗм всего"),
         ("regional_coefficient", "Коэф."),
+        ("lsr_quarter", "ЛСР"),
+        ("planned_start", "Начало"),
+        ("planned_finish", "Окончание"),
     ]
     return "".join(f'<option value="{html.escape(value)}">{html.escape(label)}</option>' for value, label in options)
 
@@ -707,12 +712,17 @@ def _render_catalog_editor_row(row: CatalogEditorRow) -> str:
         f'<td class="short-cell">{_catalog_text_input("unit", item_id, row.unit)}</td>'
         f'<td class="number-cell">{_catalog_text_input("quantity", item_id, _format_optional_number(row.quantity))}</td>'
         f'<td class="number-cell">{_catalog_text_input("price", item_id, _format_optional_number(row.price))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("price_original", item_id, _format_optional_number(row.price_original))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("price_zlvl", item_id, _format_optional_number(row.price_zlvl))}</td>'
         f'<td class="number-cell">{_catalog_text_input("total_price", item_id, _format_optional_number(row.total_price))}</td>'
         f'<td class="number-cell">{_catalog_text_input("labor_unit", item_id, _format_optional_number(row.labor_unit))}</td>'
         f'<td class="number-cell">{_catalog_text_input("labor_total", item_id, _format_optional_number(row.labor_total))}</td>'
         f'<td class="number-cell">{_catalog_text_input("machine_labor_unit", item_id, _format_optional_number(row.machine_labor_unit))}</td>'
         f'<td class="number-cell">{_catalog_text_input("machine_labor_total", item_id, _format_optional_number(row.machine_labor_total))}</td>'
         f'<td class="number-cell">{_catalog_text_input("regional_coefficient", item_id, _format_optional_number(row.regional_coefficient))}</td>'
+        f'<td class="short-cell">{_catalog_text_input("lsr_quarter", item_id, row.lsr_quarter)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("planned_start", item_id, row.planned_start)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("planned_finish", item_id, row.planned_finish)}</td>'
         f'<td class="work-cell"><textarea name="work_name_{item_id}">{html.escape(row.work_name)}</textarea></td>'
         f'<td class="file-cell">{_catalog_text_input("source_region_folder", item_id, row.source_region_folder)}</td>'
         f'<td class="file-cell">{_catalog_text_input("source_filename", item_id, row.source_filename)}</td>'
@@ -1499,9 +1509,9 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
     header = (
         '<div class="admin-form"><h2 class="section">Импортированные строки</h2>'
         '<table class="preview"><thead><tr>'
-        '<th>Excel row</th><th>Код</th><th>Ед.</th><th>Кол-во</th><th>Цена ед.</th>'
+        '<th>Excel row</th><th>Код</th><th>Ед.</th><th>Кол-во</th><th>Цена раб.</th><th>Цена ориг.</th><th>Цена ZLVL</th>'
         '<th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
-        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th>Работа</th>'
+        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th>ЛСР</th><th>Начало</th><th>Окончание</th><th>Работа</th>'
         '</tr></thead><tbody>'
     )
     body = []
@@ -1513,12 +1523,17 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
             f'<td>{html.escape(row.unit)}</td>'
             f'<td>{_display_optional_number(row.quantity)}</td>'
             f'<td>{row.price:g}</td>'
+            f'<td>{_display_optional_number(row.price_original)}</td>'
+            f'<td>{_display_optional_number(row.price_zlvl)}</td>'
             f'<td>{_display_optional_number(row.total_price)}</td>'
             f'<td>{_display_optional_number(row.labor_unit)}</td>'
             f'<td>{_display_optional_number(row.labor_total)}</td>'
             f'<td>{_display_optional_number(row.machine_labor_unit)}</td>'
             f'<td>{_display_optional_number(row.machine_labor_total)}</td>'
             f'<td>{_display_optional_number(row.regional_coefficient)}</td>'
+            f'<td>{html.escape(row.lsr_quarter)}</td>'
+            f'<td>{html.escape(row.planned_start)}</td>'
+            f'<td>{html.escape(row.planned_finish)}</td>'
             f'<td>{html.escape(row.work_name)}</td>'
             '</tr>'
         )

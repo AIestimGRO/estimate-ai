@@ -62,12 +62,17 @@ CATALOG_EDITOR_TEXT_FIELDS = frozenset(
         "work_name",
         "source_region_folder",
         "source_filename",
+        "lsr_quarter",
+        "planned_start",
+        "planned_finish",
     }
 )
 CATALOG_EDITOR_NUMERIC_FIELDS = frozenset(
     {
         "quantity",
         "price",
+        "price_original",
+        "price_zlvl",
         "total_price",
         "labor_unit",
         "labor_total",
@@ -121,12 +126,17 @@ class CatalogItemRecord:
     quantity: float | None
     work_name: str
     price: float
+    price_original: float | None
+    price_zlvl: float | None
     total_price: float | None
     labor_unit: float | None
     labor_total: float | None
     machine_labor_unit: float | None
     machine_labor_total: float | None
     regional_coefficient: float | None
+    lsr_quarter: str
+    planned_start: str
+    planned_finish: str
     source_row_number: int
 
 
@@ -142,12 +152,17 @@ class CatalogEditorRow:
     quantity: float | None
     work_name: str
     price: float
+    price_original: float | None
+    price_zlvl: float | None
     total_price: float | None
     labor_unit: float | None
     labor_total: float | None
     machine_labor_unit: float | None
     machine_labor_total: float | None
     regional_coefficient: float | None
+    lsr_quarter: str
+    planned_start: str
+    planned_finish: str
     source_region_folder: str
     source_filename: str
     source_row_number: int
@@ -318,9 +333,11 @@ def list_catalog_rows(
     rows = connection.execute(
         """
         SELECT
-            task_id, region, code, unit, quantity, work_name, price, added_date,
+            task_id, region, code, unit, quantity, work_name, price,
+            price_original, price_zlvl, added_date,
             total_price, labor_unit, labor_total,
-            machine_labor_unit, machine_labor_total, regional_coefficient
+            machine_labor_unit, machine_labor_total, regional_coefficient,
+            lsr_quarter, planned_start, planned_finish, source_filename
         FROM catalog_items
         WHERE source_id = ?
         ORDER BY id
@@ -386,12 +403,17 @@ def list_catalog_editor_page(
             catalog_items.quantity,
             catalog_items.work_name,
             catalog_items.price,
+            catalog_items.price_original,
+            catalog_items.price_zlvl,
             catalog_items.total_price,
             catalog_items.labor_unit,
             catalog_items.labor_total,
             catalog_items.machine_labor_unit,
             catalog_items.machine_labor_total,
             catalog_items.regional_coefficient,
+            catalog_items.lsr_quarter,
+            catalog_items.planned_start,
+            catalog_items.planned_finish,
             catalog_items.source_region_folder,
             catalog_items.source_filename,
             catalog_items.source_row_number,
@@ -560,9 +582,9 @@ def _catalog_editor_where(filters: dict[str, str]) -> tuple[str, tuple[object, .
         clauses.append(
             "(catalog_items.work_name LIKE ? OR catalog_items.code LIKE ? "
             "OR catalog_items.task_id LIKE ? OR catalog_items.region LIKE ? "
-            "OR catalog_items.source_filename LIKE ?)"
+            "OR catalog_items.source_filename LIKE ? OR catalog_items.lsr_quarter LIKE ?)"
         )
-        params.extend([search, search, search, search, search])
+        params.extend([search, search, search, search, search, search])
     where = "" if not clauses else "WHERE " + " AND ".join(clauses)
     return where, tuple(params)
 
@@ -579,12 +601,17 @@ def _catalog_editor_row(row: sqlite3.Row) -> CatalogEditorRow:
         quantity=_optional_float(row["quantity"]),
         work_name=str(row["work_name"]),
         price=float(row["price"]),
+        price_original=_optional_float(row["price_original"]),
+        price_zlvl=_optional_float(row["price_zlvl"]),
         total_price=_optional_float(row["total_price"]),
         labor_unit=_optional_float(row["labor_unit"]),
         labor_total=_optional_float(row["labor_total"]),
         machine_labor_unit=_optional_float(row["machine_labor_unit"]),
         machine_labor_total=_optional_float(row["machine_labor_total"]),
         regional_coefficient=_optional_float(row["regional_coefficient"]),
+        lsr_quarter=str(row["lsr_quarter"]),
+        planned_start=str(row["planned_start"]),
+        planned_finish=str(row["planned_finish"]),
         source_region_folder=str(row["source_region_folder"]),
         source_filename=str(row["source_filename"]),
         source_row_number=int(row["source_row_number"]),
@@ -832,6 +859,8 @@ def update_imported_file_metadata(
     planned_finish: str,
     regional_coefficient: object = None,
 ) -> bool:
+    existing = get_imported_file(connection, import_id)
+    coefficient = _parse_optional_number(regional_coefficient)
     cursor = connection.execute(
         """
         UPDATE imported_files
@@ -849,13 +878,113 @@ def update_imported_file_metadata(
             _text(lsr_quarter),
             _text(planned_start),
             _text(planned_finish),
-            _parse_optional_number(regional_coefficient),
+            coefficient,
             int(import_id),
         ),
     )
+    if cursor.rowcount > 0 and existing is not None:
+        _apply_import_metadata_to_catalog_items(
+            connection,
+            existing,
+            region_folder=_text(region_folder),
+            task_number=_text(task_number),
+            lsr_quarter=_text(lsr_quarter),
+            planned_start=_text(planned_start),
+            planned_finish=_text(planned_finish),
+            regional_coefficient=coefficient,
+        )
     connection.commit()
     return cursor.rowcount > 0
 
+
+def _apply_import_metadata_to_catalog_items(
+    connection: sqlite3.Connection,
+    record: ImportedFileRecord,
+    *,
+    region_folder: str,
+    task_number: str,
+    lsr_quarter: str,
+    planned_start: str,
+    planned_finish: str,
+    regional_coefficient: float | None,
+) -> None:
+    source_name = record.source_name or RNMC_ZIP_SOURCE_NAME
+    source_row = connection.execute(
+        "SELECT id FROM catalog_sources WHERE name = ? LIMIT 1",
+        (source_name,),
+    ).fetchone()
+    if source_row is None:
+        return
+    source_id = int(source_row["id"])
+    if regional_coefficient is not None and regional_coefficient > 0:
+        connection.execute(
+            """
+            UPDATE catalog_items
+            SET region = ?,
+                task_id = CASE WHEN ? <> '' THEN ? ELSE task_id END,
+                regional_coefficient = ?,
+                lsr_quarter = ?,
+                planned_start = ?,
+                planned_finish = ?,
+                source_region_folder = ?,
+                price_zlvl = CASE
+                    WHEN price_original IS NOT NULL AND price_original > 0
+                    THEN price_original / ?
+                    ELSE price_zlvl
+                END,
+                price = CASE
+                    WHEN price_original IS NOT NULL AND price_original > 0
+                    THEN price_original / ?
+                    ELSE price
+                END
+            WHERE source_id = ?
+              AND source_region_folder = ?
+              AND source_filename = ?
+            """,
+            (
+                region_folder,
+                task_number,
+                task_number,
+                regional_coefficient,
+                lsr_quarter,
+                planned_start,
+                planned_finish,
+                region_folder,
+                regional_coefficient,
+                regional_coefficient,
+                source_id,
+                record.region_folder,
+                record.filename,
+            ),
+        )
+    else:
+        connection.execute(
+            """
+            UPDATE catalog_items
+            SET region = ?,
+                task_id = CASE WHEN ? <> '' THEN ? ELSE task_id END,
+                regional_coefficient = NULL,
+                lsr_quarter = ?,
+                planned_start = ?,
+                planned_finish = ?,
+                source_region_folder = ?
+            WHERE source_id = ?
+              AND source_region_folder = ?
+              AND source_filename = ?
+            """,
+            (
+                region_folder,
+                task_number,
+                task_number,
+                lsr_quarter,
+                planned_start,
+                planned_finish,
+                region_folder,
+                source_id,
+                record.region_folder,
+                record.filename,
+            ),
+        )
 
 def allow_import_retry(connection: sqlite3.Connection, import_id: int) -> bool:
     cursor = connection.execute(
@@ -890,12 +1019,17 @@ def list_catalog_items_for_imported_file(
             catalog_items.quantity,
             catalog_items.work_name,
             catalog_items.price,
+            catalog_items.price_original,
+            catalog_items.price_zlvl,
             catalog_items.total_price,
             catalog_items.labor_unit,
             catalog_items.labor_total,
             catalog_items.machine_labor_unit,
             catalog_items.machine_labor_total,
             catalog_items.regional_coefficient,
+            catalog_items.lsr_quarter,
+            catalog_items.planned_start,
+            catalog_items.planned_finish,
             catalog_items.source_row_number
         FROM catalog_items
         WHERE catalog_items.source_region_folder = ?
@@ -917,12 +1051,17 @@ def list_catalog_items_for_imported_file(
             quantity=_optional_float(row["quantity"]),
             work_name=str(row["work_name"]),
             price=float(row["price"]),
+            price_original=_optional_float(row["price_original"]),
+            price_zlvl=_optional_float(row["price_zlvl"]),
             total_price=_optional_float(row["total_price"]),
             labor_unit=_optional_float(row["labor_unit"]),
             labor_total=_optional_float(row["labor_total"]),
             machine_labor_unit=_optional_float(row["machine_labor_unit"]),
             machine_labor_total=_optional_float(row["machine_labor_total"]),
             regional_coefficient=_optional_float(row["regional_coefficient"]),
+            lsr_quarter=str(row["lsr_quarter"]),
+            planned_start=str(row["planned_start"]),
+            planned_finish=str(row["planned_finish"]),
             source_row_number=int(row["source_row_number"]),
         )
         for row in rows
@@ -1011,6 +1150,8 @@ def replace_catalog_rows_for_file(
         if price is None:
             skipped += 1
             continue
+        price_original = _parse_optional_number(row.price_original)
+        price_zlvl = _parse_optional_number(row.price_zlvl)
         payload.append(
             (
                 source_id,
@@ -1021,12 +1162,17 @@ def replace_catalog_rows_for_file(
                 _parse_optional_number(row.quantity),
                 _text(row.work_name),
                 price,
+                price_original if price_original is not None else price,
+                price_zlvl if price_zlvl is not None else price,
                 _parse_optional_number(row.total_price),
                 _parse_optional_number(row.labor_unit),
                 _parse_optional_number(row.labor_total),
                 _parse_optional_number(row.machine_labor_unit),
                 _parse_optional_number(row.machine_labor_total),
                 _parse_optional_number(row.regional_coefficient),
+                _metadata_text(row.lsr_quarter),
+                _metadata_text(row.planned_start),
+                _metadata_text(row.planned_finish),
                 _serialize_date(row.added_date),
                 _text(item.source_region_folder),
                 _text(item.source_filename),
@@ -1039,10 +1185,10 @@ def replace_catalog_rows_for_file(
             """
             INSERT INTO catalog_items (
                 source_id, task_id, region, code, unit, quantity, work_name, price,
-                total_price, labor_unit, labor_total, machine_labor_unit,
-                machine_labor_total, regional_coefficient, added_date, source_region_folder,
-                source_filename, source_row_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                price_original, price_zlvl, total_price, labor_unit, labor_total, machine_labor_unit,
+                machine_labor_total, regional_coefficient, lsr_quarter, planned_start,
+                planned_finish, added_date, source_region_folder, source_filename, source_row_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             payload[offset : offset + BATCH_SIZE],
         )
@@ -1074,6 +1220,7 @@ def import_catalog_from_excel(
 
     if replace:
         connection.execute("DELETE FROM catalog_items WHERE source_id = ?", (source_id,))
+        connection.execute("DELETE FROM imported_files WHERE source_id = ?", (source_id,))
 
     positioned_rows = read_catalog_rows_with_positions(path, settings)
     payload: list[tuple] = []
@@ -1083,6 +1230,12 @@ def import_catalog_from_excel(
         if not _is_storable_row(catalog_row):
             skipped += 1
             continue
+        price = _parse_positive_price(catalog_row.price)
+        if price is None:
+            skipped += 1
+            continue
+        price_original = _parse_optional_number(catalog_row.price_original)
+        price_zlvl = _parse_optional_number(catalog_row.price_zlvl)
         payload.append(
             (
                 source_id,
@@ -1090,11 +1243,23 @@ def import_catalog_from_excel(
                 _text(catalog_row.region),
                 _text(catalog_row.code),
                 _text(catalog_row.unit),
+                _parse_optional_number(catalog_row.quantity),
                 _text(catalog_row.work_name),
-                float(catalog_row.price),
+                price,
+                price_original if price_original is not None else price,
+                price_zlvl if price_zlvl is not None else price,
+                _parse_optional_number(catalog_row.total_price),
+                _parse_optional_number(catalog_row.labor_unit),
+                _parse_optional_number(catalog_row.labor_total),
+                _parse_optional_number(catalog_row.machine_labor_unit),
+                _parse_optional_number(catalog_row.machine_labor_total),
+                _parse_optional_number(catalog_row.regional_coefficient),
+                _metadata_text(catalog_row.lsr_quarter),
+                _metadata_text(catalog_row.planned_start),
+                _metadata_text(catalog_row.planned_finish),
                 _serialize_date(catalog_row.added_date),
                 "",
-                path.name,
+                        _text(catalog_row.source_filename) or path.name,
                 row_number,
             )
         )
@@ -1103,12 +1268,21 @@ def import_catalog_from_excel(
         connection.executemany(
             """
             INSERT INTO catalog_items (
-                source_id, task_id, region, code, unit, work_name, price,
-                added_date, source_region_folder, source_filename, source_row_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_id, task_id, region, code, unit, quantity, work_name, price,
+                price_original, price_zlvl, total_price, labor_unit, labor_total,
+                machine_labor_unit, machine_labor_total, regional_coefficient,
+                lsr_quarter, planned_start, planned_finish, added_date,
+                source_region_folder, source_filename, source_row_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             payload[offset : offset + BATCH_SIZE],
         )
+
+    _record_catalog_source_files(
+        connection,
+        source_id=source_id,
+        positioned_rows=positioned_rows,
+    )
 
     _record_imported_file(
         connection,
@@ -1128,6 +1302,66 @@ def import_catalog_from_excel(
         rows_skipped=skipped,
         source_filename=path.name,
     )
+
+
+
+def _record_catalog_source_files(
+    connection: sqlite3.Connection,
+    *,
+    source_id: int,
+    positioned_rows: list[tuple[int, CatalogRow]],
+) -> None:
+    grouped: dict[tuple[str, str], dict[str, object]] = {}
+    for _row_number, catalog_row in positioned_rows:
+        filename = _text(catalog_row.source_filename)
+        if filename == "":
+            continue
+        region = _text(catalog_row.region)
+        key = (region, filename)
+        item = grouped.setdefault(
+            key,
+            {
+                "rows_ok": 0,
+                "rows_rejected": 0,
+                "task_number": "",
+                "lsr_quarter": "",
+                "planned_start": "",
+                "planned_finish": "",
+                "regional_coefficient": None,
+            },
+        )
+        if _is_storable_row(catalog_row):
+            item["rows_ok"] = int(item["rows_ok"]) + 1
+        else:
+            item["rows_rejected"] = int(item["rows_rejected"]) + 1
+        if item["task_number"] == "":
+            item["task_number"] = _text(catalog_row.task_id)
+        if item["lsr_quarter"] == "":
+            item["lsr_quarter"] = _metadata_text(catalog_row.lsr_quarter)
+        if item["planned_start"] == "":
+            item["planned_start"] = _metadata_text(catalog_row.planned_start)
+        if item["planned_finish"] == "":
+            item["planned_finish"] = _metadata_text(catalog_row.planned_finish)
+        if item["regional_coefficient"] is None:
+            item["regional_coefficient"] = _parse_optional_number(catalog_row.regional_coefficient)
+
+    for (region, filename), item in grouped.items():
+        _record_imported_file(
+            connection,
+            source_id=source_id,
+            region_folder=region,
+            filename=filename,
+            status=STATUS_LEGACY_IMPORTED,
+            rows_ok=int(item["rows_ok"]),
+            rows_rejected=int(item["rows_rejected"]),
+            failure_reason="",
+            task_number=_text(item["task_number"]),
+            legacy_note="legacy catalog source_file",
+            lsr_quarter=_text(item["lsr_quarter"]),
+            planned_start=_text(item["planned_start"]),
+            planned_finish=_text(item["planned_finish"]),
+            regional_coefficient=item["regional_coefficient"],
+        )
 
 
 def _legacy_file_log_headers(sheet) -> dict[str, int]:
@@ -1315,12 +1549,18 @@ def _row_to_catalog_row(row: sqlite3.Row) -> CatalogRow:
         quantity=row["quantity"],
         region=row["region"],
         added_date=None if added_date is None else str(added_date),
+        price_original=row["price_original"],
+        price_zlvl=row["price_zlvl"],
         total_price=row["total_price"],
         labor_unit=row["labor_unit"],
         labor_total=row["labor_total"],
         machine_labor_unit=row["machine_labor_unit"],
         machine_labor_total=row["machine_labor_total"],
         regional_coefficient=row["regional_coefficient"],
+        lsr_quarter=row["lsr_quarter"],
+        planned_start=row["planned_start"],
+        planned_finish=row["planned_finish"],
+        source_filename=row["source_filename"],
     )
 
 
@@ -1328,6 +1568,17 @@ def _text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _metadata_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    text = _text(value)
+    return "" if text in {"-", "—"} else text
 
 
 def _parse_positive_price(value: object) -> float | None:

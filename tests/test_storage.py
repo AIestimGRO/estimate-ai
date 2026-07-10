@@ -12,6 +12,7 @@ from core.exclusions import is_name_excluded
 from core.macro_workbook import NAME_EXCLUSIONS_SHEET, load_all_rules_from_workbook
 from core.storage import (
     connect,
+    filename_is_processed,
     import_catalog_from_excel,
     import_rules_from_workbook,
     init_database,
@@ -322,3 +323,135 @@ def test_approve_risk_writes_gesn_exception_and_clears_open_flag(tmp_path: Path)
     assert not row.risk_result.is_flagged
     assert row.risk_result.reason == REASON_NONE
     assert result.flagged_row_count == 0
+
+
+def _write_zlvl_catalog_workbook(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Каталог"
+    worksheet.append([])
+    worksheet.append([None, None, None, None, None, None, "ZLVL"])
+    worksheet.append(
+        [
+            "№_пп",
+            "Номер задачи",
+            "Наименование работ",
+            "Ед.изм.",
+            "Кол-во",
+            "Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС",
+            "Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС ZLVL",
+            "Итого стоимость, руб. с НДС",
+            "Итого стоимость, руб. без НДС",
+            "ТЗ на ед., чел-час",
+            "ТЗ всего, чел-час",
+            "ТЗм на ед., чел-час",
+            "ТЗм всего, чел-час",
+            "Перечень ГЭСН/ФЕР/ТЕР/КР",
+            "source_file",
+            "Регион",
+            "Год Квартал ЛСР",
+            "Планирумый срок начала работ",
+            "Планируемый срок окончания работ",
+            "Региональный коэффициент",
+            "Дата добавления в каталог",
+        ]
+    )
+    worksheet.append(
+        [
+            1,
+            "TASK-ZLVL",
+            "Legacy work",
+            "шт",
+            "2,5",
+            120,
+            100,
+            300,
+            250,
+            1.1,
+            2.2,
+            0.3,
+            0.6,
+            CODE,
+            "source-rnmc.xlsx",
+            "Москва",
+            "2026 Q1",
+            "2026-07-01",
+            "2026-09-01",
+            1.2,
+            "2026-07-10",
+        ]
+    )
+    workbook.save(path)
+    workbook.close()
+
+
+def test_import_zlvl_catalog_maps_all_required_columns(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "РНМЦ_КА_ЖО_ZLVL_V3.xlsx"
+    _write_zlvl_catalog_workbook(catalog_path)
+
+    connection = connect(":memory:")
+    try:
+        init_database(connection)
+        result = import_catalog_from_excel(connection, catalog_path, source_name="main")
+        rows = list_catalog_rows(connection, source_name="main")
+        db_row = connection.execute(
+            """
+            SELECT * FROM catalog_items
+            INNER JOIN catalog_sources ON catalog_sources.id = catalog_items.source_id
+            WHERE catalog_sources.name = 'main'
+            """
+        ).fetchone()
+        source_import = connection.execute(
+            """
+            SELECT * FROM imported_files
+            WHERE filename = 'source-rnmc.xlsx'
+            """
+        ).fetchone()
+        consolidated_import = connection.execute(
+            """
+            SELECT * FROM imported_files
+            WHERE filename = ?
+            """,
+            (catalog_path.name,),
+        ).fetchone()
+        source_is_processed = filename_is_processed(connection, "source-rnmc.xlsx")
+    finally:
+        connection.close()
+
+    assert result.rows_imported == 1
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.task_id == "TASK-ZLVL"
+    assert row.work_name == "Legacy work"
+    assert row.unit == "шт"
+    assert row.quantity == pytest.approx(2.5)
+    assert row.price_original == pytest.approx(120)
+    assert row.price_zlvl == pytest.approx(100)
+    assert row.price == pytest.approx(100)
+    assert row.total_price == pytest.approx(250)
+    assert row.labor_unit == pytest.approx(1.1)
+    assert row.labor_total == pytest.approx(2.2)
+    assert row.machine_labor_unit == pytest.approx(0.3)
+    assert row.machine_labor_total == pytest.approx(0.6)
+    assert row.code == CODE
+    assert row.region == "Москва"
+    assert row.source_filename == "source-rnmc.xlsx"
+    assert row.lsr_quarter == "2026 Q1"
+    assert row.planned_start == "2026-07-01"
+    assert row.planned_finish == "2026-09-01"
+    assert row.regional_coefficient == pytest.approx(1.2)
+    assert db_row["source_filename"] == "source-rnmc.xlsx"
+    assert db_row["added_date"] == "2026-07-10"
+    assert source_import is not None
+    assert source_import["status"] == "legacy_imported"
+    assert source_import["region_folder"] == "Москва"
+    assert source_import["filename_key"] == "source-rnmc.xlsx"
+    assert source_import["rows_ok"] == 1
+    assert source_import["lsr_quarter"] == "2026 Q1"
+    assert source_import["planned_start"] == "2026-07-01"
+    assert source_import["planned_finish"] == "2026-09-01"
+    assert source_import["regional_coefficient"] == pytest.approx(1.2)
+    assert consolidated_import is not None
+    assert consolidated_import["status"] == "success"
+    assert source_is_processed is True

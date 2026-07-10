@@ -32,12 +32,18 @@ class CatalogRow:
     quantity: object = None
     region: object = ""
     added_date: object = None
+    price_original: object = None
+    price_zlvl: object = None
     total_price: object = None
     labor_unit: object = None
     labor_total: object = None
     machine_labor_unit: object = None
     machine_labor_total: object = None
     regional_coefficient: object = None
+    lsr_quarter: object = ""
+    planned_start: object = ""
+    planned_finish: object = ""
+    source_filename: object = ""
 
 
 @dataclass(frozen=True)

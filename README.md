@@ -17,12 +17,12 @@ Implemented product flows:
 
 - Upload an estimate file and produce a WA Excel result.
 - Use a catalog from SQLite or from an uploaded Excel file.
-- Review and edit catalog rows, catalog sources, import history, risks, approvals, rules, and settings
+- Review and edit catalog rows, including original/ZLVL unit prices, catalog sources, import history, risks, approvals, rules, and settings
   in `/admin`.
 - Import legacy `File_Log.xlsx` records into `imported_files`.
 - Upload RNMC ZIP archives, run dry-run checks, use a tabbed 30-row workbook
-  preview, import valid rows into `catalog_items`, detect workbook metadata, and
-  inspect per-file import details.
+  preview, import valid rows into `catalog_items`, detect workbook metadata, store
+  original and ZLVL unit prices, and inspect per-file import details.
 - Approve price risks into `gesn_exceptions`.
 - Edit task color entries and name exclusion rules from the admin UI.
 

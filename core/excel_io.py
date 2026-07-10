@@ -104,6 +104,9 @@ def read_catalog_rows_with_positions(
     try:
         worksheet = _find_sheet_by_part(workbook.worksheets, CATALOG_SHEET_PART)
         data_limit = int(getattr(worksheet, "max_row", 0) or 0)
+        named_rows = _read_named_catalog_rows_with_positions(worksheet)
+        if named_rows is not None:
+            return named_rows
         defaults = catalog_default_columns(active_settings)
         catalog_config = load_catalog_layout_config()
         layout = (
@@ -294,6 +297,137 @@ def read_estimate_rows_by_columns(
         )
 
     return rows
+
+
+NAMED_CATALOG_HEADER_ALIASES = {
+    "task_id": ("номерзадачи",),
+    "work_name": ("наименованиеработ", "наименование"),
+    "unit": ("ед.изм.", "ед.изм", "единицаизмерения"),
+    "quantity": ("кол-во", "количество"),
+    "total_price": ("итогостоимостьруб.безндс", "итогостоимостьбезндс"),
+    "labor_unit": ("тзнаед.чел-час", "тзнаедчелчас"),
+    "labor_total": ("тзвсегочел-час", "тзвсегочелчас"),
+    "machine_labor_unit": ("тзмнаед.чел-час", "тзмнаедчелчас"),
+    "machine_labor_total": ("тзмвсегочел-час", "тзмвсегочелчас"),
+    "code": ("переченьгэсн/фер/тер/кр", "переченьгэсн/фер/гэсн/кр"),
+    "source_filename": ("source_file", "исходныйфайл"),
+    "region": ("регион",),
+    "lsr_quarter": ("годкварталлср", "год/кварталлср"),
+    "planned_start": ("планирумыйсрокначаларабот", "планируемыйсрокначаларабот"),
+    "planned_finish": ("планируемыйсрококончанияработ",),
+    "regional_coefficient": ("региональныйкоэффициент",),
+    "added_date": ("датадобавлениявкаталог", "датадобавления", "датадобав"),
+}
+
+
+def _read_named_catalog_rows_with_positions(worksheet: Worksheet) -> list[tuple[int, CatalogRow]] | None:
+    header_row, headers = _detect_named_catalog_header(worksheet)
+    if header_row == 0:
+        return None
+
+    required = ("task_id", "work_name", "unit", "quantity", "price_original", "price_zlvl", "code")
+    if any(headers.get(name, 0) <= 0 for name in required):
+        return None
+
+    rows: list[tuple[int, CatalogRow]] = []
+    max_row = int(getattr(worksheet, "max_row", 0) or 0)
+    max_col = max(headers.values())
+    for row_offset, values in enumerate(
+        worksheet.iter_rows(
+            min_row=header_row + 1,
+            max_row=max_row,
+            min_col=1,
+            max_col=max_col,
+            values_only=True,
+        ),
+        start=1,
+    ):
+        row_number = header_row + row_offset
+        price_zlvl = _value_by_header(values, headers, "price_zlvl")
+        rows.append(
+            (
+                row_number,
+                CatalogRow(
+                    task_id=_value_by_header(values, headers, "task_id"),
+                    price=price_zlvl,
+                    price_original=_value_by_header(values, headers, "price_original"),
+                    price_zlvl=price_zlvl,
+                    code=_value_by_header(values, headers, "code"),
+                    unit=_value_by_header(values, headers, "unit"),
+                    quantity=_value_by_header(values, headers, "quantity"),
+                    work_name=_value_by_header(values, headers, "work_name"),
+                    region=_value_by_header(values, headers, "region"),
+                    added_date=_value_by_header(values, headers, "added_date"),
+                    total_price=_value_by_header(values, headers, "total_price"),
+                    labor_unit=_value_by_header(values, headers, "labor_unit"),
+                    labor_total=_value_by_header(values, headers, "labor_total"),
+                    machine_labor_unit=_value_by_header(values, headers, "machine_labor_unit"),
+                    machine_labor_total=_value_by_header(values, headers, "machine_labor_total"),
+                    regional_coefficient=_value_by_header(values, headers, "regional_coefficient"),
+                    lsr_quarter=_clean_metadata_value(_value_by_header(values, headers, "lsr_quarter")),
+                    planned_start=_clean_metadata_value(_value_by_header(values, headers, "planned_start")),
+                    planned_finish=_clean_metadata_value(_value_by_header(values, headers, "planned_finish")),
+                    source_filename=_value_by_header(values, headers, "source_filename"),
+                ),
+            )
+        )
+    return rows
+
+
+def _detect_named_catalog_header(worksheet: Worksheet) -> tuple[int, dict[str, int]]:
+    max_row = min(50, int(getattr(worksheet, "max_row", 0) or 0))
+    max_col = min(80, int(getattr(worksheet, "max_column", 0) or 0))
+    for row_number in range(1, max_row + 1):
+        values = [worksheet.cell(row=row_number, column=column).value for column in range(1, max_col + 1)]
+        normalized = {_compact_header(value): index + 1 for index, value in enumerate(values) if _compact_header(value)}
+        headers = _named_catalog_header_map(normalized)
+        if headers.get("price_original", 0) > 0 and headers.get("price_zlvl", 0) > 0 and headers.get("code", 0) > 0:
+            return row_number, headers
+    return 0, {}
+
+
+def _named_catalog_header_map(normalized: dict[str, int]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for key, column in normalized.items():
+        if "ценаединицыработ" in key and "zlvl" in key and "итого" not in key:
+            result["price_zlvl"] = column
+        elif "ценаединицыработ" in key and "zlvl" not in key and "итого" not in key:
+            result.setdefault("price_original", column)
+        elif "итогостоимость" in key and "безндс" in key:
+            result.setdefault("total_price", column)
+
+    for field, aliases in NAMED_CATALOG_HEADER_ALIASES.items():
+        if field in result:
+            continue
+        for alias in aliases:
+            column = normalized.get(_compact_header(alias))
+            if column is not None:
+                result[field] = column
+                break
+    return result
+
+
+def _value_by_header(values: tuple[object, ...], headers: dict[str, int], field: str) -> object:
+    column = headers.get(field, 0)
+    if column <= 0 or column > len(values):
+        return None
+    return values[column - 1]
+
+
+def _compact_header(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).casefold().replace("ё", "е")
+    text = text.replace("\xa0", " ")
+    return "".join(ch for ch in text if ch.isalnum() or ch in {"/", ".", "-", "_"})
+
+
+def _clean_metadata_value(value: object) -> object:
+    if value is None:
+        return ""
+    if isinstance(value, str) and value.strip() in {"", "-", "—"}:
+        return ""
+    return value
 
 
 def _find_sheet_by_part(worksheets: list[Worksheet], part: str) -> Worksheet:

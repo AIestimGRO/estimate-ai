@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from io import BytesIO
 from pathlib import Path
+
+import pytest
 from zipfile import ZipFile
 
 from openpyxl import Workbook
@@ -232,6 +234,12 @@ def test_consolidation_region_and_coefficient_are_detected_and_stored(tmp_path: 
     assert len(rows) == 1
     assert rows[0].region == "Якутия"
     assert rows[0].regional_coefficient == 1.4
+    assert rows[0].lsr_quarter == "2025 Q4"
+    assert rows[0].planned_start == "2026-07-01"
+    assert rows[0].planned_finish == "2026-09-01"
+    assert rows[0].price_original == 100
+    assert rows[0].price_zlvl == pytest.approx(100 / 1.4)
+    assert rows[0].price == pytest.approx(100 / 1.4)
 
 
 def test_manual_region_override_wins_over_workbook_region(tmp_path: Path) -> None:
@@ -358,6 +366,74 @@ def _workbook_with_bad_coefficient_metadata() -> bytes:
         "Цена единицы работ, руб. без НДС",
     ])
     sheet.append([1, "Work A", "шт", 1, "ГЭСН01-01-001-01", 100])
+    sheet.append([None] * 6)
+    sheet.append([None] * 6)
+    sheet.append([None] * 6)
+    return _to_bytes(workbook)
+
+
+
+def test_manual_coefficient_update_recalculates_catalog_zlvl_price(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"FolderRegion/manual-coef.xlsx": _workbook_without_coefficient_metadata()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        import_rnmc_zip_catalog_rows(connection, str(zip_path))
+        from core.storage.catalog import (
+            RNMC_ZIP_SOURCE_NAME,
+            list_catalog_rows,
+            list_imported_files,
+            update_imported_file_metadata,
+        )
+
+        record = next(item for item in list_imported_files(connection) if item.filename == "manual-coef.xlsx")
+        rows_before = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+        assert rows_before[0].price_original == 120
+        assert rows_before[0].price_zlvl == 120
+        assert rows_before[0].price == 120
+
+        update_imported_file_metadata(
+            connection,
+            record.id,
+            region_folder="Manual Region",
+            task_number="TASK-MANUAL",
+            lsr_quarter="2026 Q2",
+            planned_start="2026-07-01",
+            planned_finish="2026-09-01",
+            regional_coefficient="1,2",
+        )
+        rows_after = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+
+    assert rows_after[0].region == "Manual Region"
+    assert rows_after[0].task_id == "TASK-MANUAL"
+    assert rows_after[0].regional_coefficient == pytest.approx(1.2)
+    assert rows_after[0].lsr_quarter == "2026 Q2"
+    assert rows_after[0].planned_start == "2026-07-01"
+    assert rows_after[0].planned_finish == "2026-09-01"
+    assert rows_after[0].price_original == pytest.approx(120)
+    assert rows_after[0].price_zlvl == pytest.approx(100)
+    assert rows_after[0].price == pytest.approx(100)
+
+
+def _workbook_without_coefficient_metadata() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-NO-COEF"
+    sheet.append([])
+    sheet.append([
+        "№ п/п",
+        "Наименование работ",
+        "Ед.изм.",
+        "Кол-во",
+        "Перечень ГЭСН",
+        "Цена единицы работ, руб. без НДС",
+    ])
+    sheet.append([1, "Work A", "шт", 1, "ГЭСН01-01-001-01", 120])
     sheet.append([None] * 6)
     sheet.append([None] * 6)
     sheet.append([None] * 6)

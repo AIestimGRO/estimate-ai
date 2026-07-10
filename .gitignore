@@ -149,3 +149,7 @@ _rnmc_quantity_ztr_review/
 # Admin catalog editor confirm delivery artifacts
 admin-catalog-editor-confirm-updated-files.zip
 _admin_catalog_editor_confirm_review/
+
+# RNMC ZLVL price model skip log delivery artifacts
+rnmc-zlvl-price-model-skip-log-updated-files.zip
+_rnmc_zlvl_price_model_skip_log_review/
