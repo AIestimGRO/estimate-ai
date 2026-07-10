@@ -182,7 +182,9 @@ Labor columns are stored separately:
 - `ТЗм на ед., чел-час` -> `machine_labor_unit`;
 - `ТЗм всего, чел-час` -> `machine_labor_total`;
 - `ТЗр на ед., чел-час` -> `labor_unit`;
-- `ТЗр всего, чел-час` -> `labor_total`.
+- `ТЗр всего, чел-час` -> `labor_total`;
+- `ЗТР на ед., чел-час` -> `labor_unit`;
+- `ЗТР всего, чел-час` -> `labor_total`.
 
 
 ## Code column selection

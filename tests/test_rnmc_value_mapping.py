@@ -43,6 +43,33 @@ def test_import_maps_unit_price_total_and_labor_columns(tmp_path: Path) -> None:
     assert row.machine_labor_total == pytest.approx(15.0)
 
 
+def test_import_maps_ztr_headers_to_labor_columns(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(
+        zip_path,
+        {
+            "Moscow/ztr.xlsx": _value_workbook_bytes(
+                price_header=_unit_price_aux_without_vat(),
+                labor_unit_header=_ztr_unit_header(),
+                labor_total_header=_ztr_total_header(),
+            )
+        },
+    )
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = import_rnmc_zip_catalog_rows(connection, str(zip_path))
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+
+    assert result.success_count == 1
+    assert len(rows) == 1
+    assert rows[0].labor_unit == pytest.approx(2.5)
+    assert rows[0].labor_total == pytest.approx(25.0)
+
+
 def test_import_accepts_unit_price_with_auxiliary_materials_without_vat(tmp_path: Path) -> None:
     zip_path = tmp_path / "rnmc.zip"
     _write_zip(zip_path, {"Tula/aux.xlsx": _value_workbook_bytes(price_header=_unit_price_aux_without_vat())})
@@ -107,7 +134,12 @@ def _write_zip(path: Path, files: dict[str, bytes]) -> None:
             archive.writestr(name, data)
 
 
-def _value_workbook_bytes(*, price_header: str) -> bytes:
+def _value_workbook_bytes(
+    *,
+    price_header: str,
+    labor_unit_header: str = "\u0422\u0417\u0440 \u043d\u0430 \u0435\u0434., \u0447\u0435\u043b-\u0447\u0430\u0441",
+    labor_total_header: str = "\u0422\u0417\u0440 \u0432\u0441\u0435\u0433\u043e, \u0447\u0435\u043b-\u0447\u0430\u0441",
+) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Data"
@@ -122,8 +154,8 @@ def _value_workbook_bytes(*, price_header: str) -> bytes:
             "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0413\u042d\u0421\u041d/\u041a\u0420",
             price_header,
             "\u0418\u0442\u043e\u0433\u043e \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c, \u0440\u0443\u0431. \u0441 \u041d\u0414\u0421",
-            "\u0422\u0417\u0440 \u043d\u0430 \u0435\u0434., \u0447\u0435\u043b-\u0447\u0430\u0441",
-            "\u0422\u0417\u0440 \u0432\u0441\u0435\u0433\u043e, \u0447\u0435\u043b-\u0447\u0430\u0441",
+            labor_unit_header,
+            labor_total_header,
             "\u0422\u0417\u043c \u043d\u0430 \u0435\u0434., \u0447\u0435\u043b-\u0447\u0430\u0441",
             "\u0422\u0417\u043c \u0432\u0441\u0435\u0433\u043e, \u0447\u0435\u043b-\u0447\u0430\u0441",
         ]
@@ -171,6 +203,14 @@ def _average_only_workbook_bytes() -> bytes:
     sheet.append([None] * 7)
     sheet.append([None] * 7)
     return _to_bytes(workbook)
+
+
+def _ztr_unit_header() -> str:
+    return "\u0417\u0422\u0420 \u043d\u0430 \u0435\u0434., \u0447\u0435\u043b-\u0447\u0430\u0441"
+
+
+def _ztr_total_header() -> str:
+    return "\u0417\u0422\u0420 \u0432\u0441\u0435\u0433\u043e, \u0447\u0435\u043b-\u0447\u0430\u0441"
 
 
 def _unit_price_aux_without_vat() -> str:

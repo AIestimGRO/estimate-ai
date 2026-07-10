@@ -223,7 +223,7 @@ divided by 1.2 before storage; values marked `без НДС` are stored as-is.
 normalization rule. Average values are not source values: headers containing
 `средняя` or `ср знач` are ignored for both unit price and total price.
 
-Labor import mappings are deterministic: `ТЗ` and `ТЗр` unit/total values map to
+Labor import mappings are deterministic: `ТЗ`, `ТЗр`, and `ЗТР` unit/total values map to
 `labor_unit` / `labor_total`; `ТЗм` unit/total values map to
 `machine_labor_unit` / `machine_labor_total`. Formula cells are read as cached
 calculated values, and numeric strings with comma or dot decimal separators are

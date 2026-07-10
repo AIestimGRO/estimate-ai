@@ -137,3 +137,7 @@ _rnmc_strict_code_section_rows_review/
 # RNMC real import hardening delivery artifacts
 rnmc-real-import-hardening-updated-files.zip
 _rnmc_real_import_hardening_review/
+
+# RNMC ZTR labor headers delivery artifacts
+rnmc-ztr-labor-headers-updated-files.zip
+_rnmc_ztr_labor_headers_review/

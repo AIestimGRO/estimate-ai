@@ -1923,6 +1923,7 @@ def _is_labor_unit_header(normalized_header: str) -> bool:
     return (
         "\u0442\u0437\u043d\u0430\u0435\u0434" in normalized_header
         or "\u0442\u0437\u0440\u043d\u0430\u0435\u0434" in normalized_header
+        or "\u0437\u0442\u0440\u043d\u0430\u0435\u0434" in normalized_header
     )
 
 
@@ -1930,6 +1931,7 @@ def _is_labor_total_header(normalized_header: str) -> bool:
     return (
         "\u0442\u0437\u0432\u0441\u0435\u0433\u043e" in normalized_header
         or "\u0442\u0437\u0440\u0432\u0441\u0435\u0433\u043e" in normalized_header
+        or "\u0437\u0442\u0440\u0432\u0441\u0435\u0433\u043e" in normalized_header
     )
 
 
