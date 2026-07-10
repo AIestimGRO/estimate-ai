@@ -69,6 +69,7 @@ from core.storage.rules import (
     upsert_task_color_entry,
 )
 from core.storage.connection import connect, default_database_path, init_database
+from core.excel_io import read_catalog_rows_with_positions
 from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
     XLSX_MIME,
@@ -641,13 +642,34 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         data = await rnmc_file.read()
         is_legacy_catalog = raw_name.casefold() == LEGACY_ZLVL_CATALOG_FILENAME.casefold()
 
+        legacy_catalog_preview = None
         if is_legacy_catalog:
             saved_path = _save(upload_dir, f"rnmc_stage_{stage_token}{suffix}", data)
             import_kind = "legacy_catalog"
             row_preview_result = None
+            try:
+                positioned_rows = read_catalog_rows_with_positions(saved_path)
+            except (ValueError, OSError) as exc:
+                saved_path.unlink(missing_ok=True)
+                connection = connect(default_database_path())
+                try:
+                    init_database(connection)
+                    imports = list_imported_files(connection)
+                    return HTMLResponse(
+                        render_admin_imports(
+                            imports,
+                            error=f"Не удалось разобрать каталог: {exc}",
+                        ),
+                        status_code=400,
+                    )
+                finally:
+                    connection.close()
+            legacy_catalog_preview = {
+                "total_rows": len(positioned_rows),
+                "rows": positioned_rows[:30],
+            }
             notice = (
-                "Распознан старый ZLVL-каталог. После подтверждения он будет загружен "
-                "по правилам полного каталога."
+                "Распознан старый ZLVL-каталог. Проверьте строки и подтвердите полную загрузку."
             )
         else:
             saved_path = upload_dir / f"rnmc_stage_{stage_token}.zip"
@@ -693,6 +715,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     stage_token=stage_token,
                     stage_filename=raw_name,
                     stage_mode=import_kind,
+                    legacy_catalog_preview=legacy_catalog_preview,
                 )
             )
         finally:

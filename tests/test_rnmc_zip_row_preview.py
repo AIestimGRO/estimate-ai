@@ -508,6 +508,10 @@ def test_admin_recognizes_named_legacy_zlvl_catalog(tmp_path: Path, monkeypatch)
         assert preview.status_code == 200
         assert match is not None
         assert "Распознан старый ZLVL-каталог" in preview.text
+        assert "Предпросмотр полного каталога" in preview.text
+        assert "Строк распознано" in preview.text
+        assert "Legacy work" in preview.text
+        assert "old-source.xlsx" in preview.text
         committed = client.post(
             "/admin/imports/rnmc-stage-commit",
             data={"stage_token": match.group(1)},

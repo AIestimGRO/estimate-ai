@@ -165,3 +165,7 @@ _admin_ui_import_workflow_review/
 # Admin UI single file import delivery artifacts
 estimate-ai-admin-ui-single-file-import.zip
 _admin_ui_single_file_import_review/
+
+# Admin UI legacy catalog preview fix delivery artifacts
+estimate-ai-admin-ui-legacy-catalog-preview-fix.zip
+_admin_ui_legacy_catalog_preview_fix_review/

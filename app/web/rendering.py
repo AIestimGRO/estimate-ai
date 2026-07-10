@@ -818,6 +818,7 @@ def render_admin_imports(
     stage_token: str = "",
     stage_filename: str = "",
     stage_mode: str = "",
+    legacy_catalog_preview: dict | None = None,
 ) -> str:
     notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
     error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
@@ -841,6 +842,7 @@ def render_admin_imports(
         '</div></div>'
         f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
         f'{_render_rnmc_zip_row_preview_result(row_preview_result)}'
+        f'{_render_legacy_catalog_preview(legacy_catalog_preview)}'
         f'{_render_rnmc_stage_commit(stage_token, stage_filename, stage_mode)}'
         f'{_render_rnmc_zip_catalog_import_result(catalog_import_result)}'
         '<div class="admin-section-head"><h2 class="section">История импортов</h2>'
@@ -857,6 +859,43 @@ def render_admin_imports(
         content=content,
     )
 
+
+
+def _render_legacy_catalog_preview(preview: dict | None) -> str:
+    if preview is None:
+        return ""
+    total_rows = int(preview.get("total_rows", 0))
+    positioned_rows = preview.get("rows", [])
+    rows_html = []
+    for row_number, row in positioned_rows:
+        rows_html.append(
+            '<tr>'
+            f'<td>{row_number}</td>'
+            f'<td>{html.escape(str(row.task_id or ""))}</td>'
+            f'<td>{html.escape(str(row.region or ""))}</td>'
+            f'<td>{html.escape(str(row.code or ""))}</td>'
+            f'<td>{html.escape(str(row.work_name or ""))}</td>'
+            f'<td>{html.escape(str(row.unit or ""))}</td>'
+            f'<td>{html.escape(str(row.quantity or ""))}</td>'
+            f'<td>{html.escape(str(row.price_original or ""))}</td>'
+            f'<td>{html.escape(str(row.price_zlvl or row.price or ""))}</td>'
+            f'<td>{html.escape(str(row.source_filename or ""))}</td>'
+            '</tr>'
+        )
+    table = (
+        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        '<th>Строка</th><th>Задача</th><th>Регион</th><th>Код</th><th>Наименование</th>'
+        '<th>Ед.</th><th>Кол-во</th><th>Цена исходная</th><th>Цена ZLVL</th><th>source_file</th>'
+        '</tr></thead><tbody>' + ''.join(rows_html) + '</tbody></table></div>'
+    )
+    return (
+        '<div class="admin-form">'
+        '<h2 class="section">Предпросмотр полного каталога</h2>'
+        f'<dl class="stats"><div><dt>Строк распознано</dt><dd>{total_rows}</dd></div>'
+        f'<div><dt>Показано в предпросмотре</dt><dd>{len(positioned_rows)}</dd></div></dl>'
+        '<p class="muted">Показаны первые 30 строк. После подтверждения импортируются все распознанные строки файла.</p>'
+        f'{table}</div>'
+    )
 
 def _render_rnmc_stage_commit(stage_token: str, stage_filename: str, stage_mode: str = "") -> str:
     if not stage_token:
