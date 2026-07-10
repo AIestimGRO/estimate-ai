@@ -237,7 +237,7 @@ def test_admin_catalog_clear_removes_catalog_and_import_log(tmp_path, monkeypatc
         connection.close()
 
     assert catalog_count == 0
-    assert import_count == 0
+    assert import_count == 1
     assert row_log_count == 0
     assert source_count == 1
 

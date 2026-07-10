@@ -455,3 +455,49 @@ def test_import_zlvl_catalog_maps_all_required_columns(tmp_path: Path) -> None:
     assert consolidated_import is not None
     assert consolidated_import["status"] == "success"
     assert source_is_processed is True
+
+
+def test_final_filename_keys_for_preview_recovers_from_catalog_source_filename(tmp_path):
+    from core.storage.catalog import final_filename_keys_for_preview, replace_catalog_rows_for_file
+    from core.storage.connection import connect, init_database
+    from core.catalog import CatalogRow
+
+    connection = connect(tmp_path / "catalog.db")
+    init_database(connection)
+    replace_catalog_rows_for_file(
+        connection,
+        [
+            __import__('core.storage.catalog', fromlist=['CatalogRowStorageItem']).CatalogRowStorageItem(
+                catalog_row=CatalogRow(task_id="1", code="GESN01", unit="m", work_name="Work", price=10.0),
+                source_region_folder="Region",
+                source_filename="Recovered RNMC.xlsx",
+                source_row_number=2,
+            )
+        ],
+        region_folder="Region",
+        filename="Recovered RNMC.xlsx",
+    )
+    connection.execute("DELETE FROM imported_files")
+    connection.commit()
+
+    assert "recovered rnmc.xlsx" in final_filename_keys_for_preview(connection)
+    connection.close()
+
+
+def test_clear_catalog_for_rebuild_preserves_imported_file_history(tmp_path):
+    from core.storage.catalog import clear_catalog_for_rebuild, record_imported_file
+    from core.storage.connection import connect, init_database
+
+    connection = connect(tmp_path / "catalog.db")
+    init_database(connection)
+    record_imported_file(
+        connection,
+        region_folder="Region",
+        filename="History.xlsx",
+        status="legacy_imported",
+    )
+    clear_catalog_for_rebuild(connection)
+
+    count = connection.execute("SELECT COUNT(*) AS c FROM imported_files").fetchone()["c"]
+    assert count == 1
+    connection.close()

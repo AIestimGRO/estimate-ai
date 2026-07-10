@@ -173,3 +173,7 @@ _admin_ui_legacy_catalog_preview_fix_review/
 # Admin UI maintenance clear delivery artifacts
 estimate-ai-admin-ui-maintenance-clear.zip
 _admin_ui_maintenance_clear_review/
+
+# Admin UI history repaired delivery artifacts
+estimate-ai-admin-ui-history-repaired.zip
+_admin_ui_history_repaired_review/

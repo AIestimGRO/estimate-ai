@@ -477,6 +477,11 @@ def bulk_delete_catalog_items(connection: sqlite3.Connection, item_ids: list[int
 
 
 def clear_catalog_for_rebuild(connection: sqlite3.Connection) -> tuple[int, int]:
+    """Clear catalog rows while preserving processed-file history.
+
+    imported_files is the durable replacement for legacy File_Log.xlsx and must
+    survive catalog rebuilds so already processed RNMC files remain skippable.
+    """
     catalog_count = int(
         connection.execute("SELECT COUNT(*) AS count FROM catalog_items").fetchone()["count"]
     )
@@ -484,8 +489,8 @@ def clear_catalog_for_rebuild(connection: sqlite3.Connection) -> tuple[int, int]
         connection.execute("SELECT COUNT(*) AS count FROM imported_files").fetchone()["count"]
     )
     with connection:
+        connection.execute("DELETE FROM import_row_log")
         connection.execute("DELETE FROM catalog_items")
-        connection.execute("DELETE FROM imported_files")
     return catalog_count, import_count
 
 
@@ -761,7 +766,12 @@ def filename_is_final_for_preview(connection: sqlite3.Connection, filename: str)
 
 
 def final_filename_keys_for_preview(connection: sqlite3.Connection) -> set[str]:
-    """Return normalized file names that should be skipped before workbook parsing."""
+    """Return normalized file names that should be skipped before workbook parsing.
+
+    imported_files is authoritative, while catalog_items.source_filename is a
+    recovery source for databases created by older legacy-catalog imports that
+    did not fully reconstruct File_Log history.
+    """
     placeholders = ", ".join("?" for _ in FINAL_PREVIEW_SKIP_STATUSES)
     rows = connection.execute(
         f"""
@@ -772,7 +782,20 @@ def final_filename_keys_for_preview(connection: sqlite3.Connection) -> set[str]:
         """,
         tuple(sorted(FINAL_PREVIEW_SKIP_STATUSES)),
     ).fetchall()
-    return {_text(row["filename_key"]) for row in rows if _text(row["filename_key"])}
+    keys = {_text(row["filename_key"]) for row in rows if _text(row["filename_key"])}
+    catalog_rows = connection.execute(
+        """
+        SELECT DISTINCT source_filename
+        FROM catalog_items
+        WHERE TRIM(COALESCE(source_filename, '')) <> ''
+        """
+    ).fetchall()
+    keys.update(
+        normalize_import_filename(row["source_filename"])
+        for row in catalog_rows
+        if normalize_import_filename(row["source_filename"])
+    )
+    return keys
 
 
 def _filename_has_status(

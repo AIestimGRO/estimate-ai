@@ -305,3 +305,7 @@ The regular admin workflow is intentionally limited to one staged action:
 
 Legacy `File_Log.xlsx` migration and low-level log-only endpoints remain available for compatibility and tests, but they are not shown in the regular admin interface. One-time catalog migrations should be run as maintenance scripts instead of permanent UI actions.
 
+
+## Processed-file history during rebuilds
+
+`imported_files` is the durable replacement for legacy `File_Log.xlsx` and is preserved when catalog rows are cleared for a rebuild. ZIP preview uses both final `imported_files.filename_key` values and distinct `catalog_items.source_filename` values as a recovery fallback. This prevents already loaded source files from being parsed again when an older catalog import reconstructed the log incompletely.
