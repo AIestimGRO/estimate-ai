@@ -53,6 +53,32 @@ FINAL_PREVIEW_SKIP_STATUSES = frozenset(
     }
 )
 
+CATALOG_EDITOR_TEXT_FIELDS = frozenset(
+    {
+        "task_id",
+        "region",
+        "code",
+        "unit",
+        "work_name",
+        "source_region_folder",
+        "source_filename",
+    }
+)
+CATALOG_EDITOR_NUMERIC_FIELDS = frozenset(
+    {
+        "quantity",
+        "price",
+        "total_price",
+        "labor_unit",
+        "labor_total",
+        "machine_labor_unit",
+        "machine_labor_total",
+        "regional_coefficient",
+        "source_row_number",
+    }
+)
+REQUIRED_CATALOG_TEXT_FIELDS = frozenset({"task_id", "code", "unit"})
+REQUIRED_CATALOG_NUMERIC_FIELDS = frozenset({"price"})
 
 
 @dataclass(frozen=True)
@@ -102,6 +128,40 @@ class CatalogItemRecord:
     machine_labor_total: float | None
     regional_coefficient: float | None
     source_row_number: int
+
+
+@dataclass(frozen=True)
+class CatalogEditorRow:
+    id: int
+    source_name: str
+    source_kind: str
+    task_id: str
+    region: str
+    code: str
+    unit: str
+    quantity: float | None
+    work_name: str
+    price: float
+    total_price: float | None
+    labor_unit: float | None
+    labor_total: float | None
+    machine_labor_unit: float | None
+    machine_labor_total: float | None
+    regional_coefficient: float | None
+    source_region_folder: str
+    source_filename: str
+    source_row_number: int
+    added_date: str
+
+
+@dataclass(frozen=True)
+class CatalogEditorPage:
+    rows: list[CatalogEditorRow]
+    total_rows: int
+    page: int
+    page_size: int
+    total_pages: int
+    filters: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -286,6 +346,291 @@ def count_catalog_rows(
     ).fetchone()
     return 0 if row is None else int(row["row_count"])
 
+
+
+
+def list_catalog_editor_page(
+    connection: sqlite3.Connection,
+    *,
+    filters: dict[str, str] | None = None,
+    page: int = 1,
+    page_size: int = 100,
+) -> CatalogEditorPage:
+    normalized_filters = _catalog_editor_filters(filters or {})
+    safe_page = max(1, int(page))
+    safe_page_size = min(500, max(25, int(page_size)))
+    where_sql, params = _catalog_editor_where(normalized_filters)
+    total_row = connection.execute(
+        f"""
+        SELECT COUNT(*) AS row_count
+        FROM catalog_items
+        INNER JOIN catalog_sources ON catalog_sources.id = catalog_items.source_id
+        {where_sql}
+        """,
+        params,
+    ).fetchone()
+    total_rows = 0 if total_row is None else int(total_row["row_count"])
+    total_pages = max(1, (total_rows + safe_page_size - 1) // safe_page_size)
+    safe_page = min(safe_page, total_pages)
+    offset = (safe_page - 1) * safe_page_size
+    rows = connection.execute(
+        f"""
+        SELECT
+            catalog_items.id,
+            catalog_sources.name AS source_name,
+            catalog_sources.kind AS source_kind,
+            catalog_items.task_id,
+            catalog_items.region,
+            catalog_items.code,
+            catalog_items.unit,
+            catalog_items.quantity,
+            catalog_items.work_name,
+            catalog_items.price,
+            catalog_items.total_price,
+            catalog_items.labor_unit,
+            catalog_items.labor_total,
+            catalog_items.machine_labor_unit,
+            catalog_items.machine_labor_total,
+            catalog_items.regional_coefficient,
+            catalog_items.source_region_folder,
+            catalog_items.source_filename,
+            catalog_items.source_row_number,
+            catalog_items.added_date
+        FROM catalog_items
+        INNER JOIN catalog_sources ON catalog_sources.id = catalog_items.source_id
+        {where_sql}
+        ORDER BY catalog_items.id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (*params, safe_page_size, offset),
+    ).fetchall()
+    return CatalogEditorPage(
+        rows=[_catalog_editor_row(row) for row in rows],
+        total_rows=total_rows,
+        page=safe_page,
+        page_size=safe_page_size,
+        total_pages=total_pages,
+        filters=normalized_filters,
+    )
+
+
+def update_catalog_item(
+    connection: sqlite3.Connection,
+    item_id: int,
+    *,
+    values: dict[str, object],
+) -> bool:
+    cleaned = _clean_catalog_editor_values(values)
+    if not cleaned:
+        return False
+    assignments = ", ".join(f"{field} = ?" for field in cleaned)
+    cursor = connection.execute(
+        f"UPDATE catalog_items SET {assignments} WHERE id = ?",
+        (*cleaned.values(), int(item_id)),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def delete_catalog_item(connection: sqlite3.Connection, item_id: int) -> bool:
+    cursor = connection.execute(
+        "DELETE FROM catalog_items WHERE id = ?",
+        (int(item_id),),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def bulk_delete_catalog_items(connection: sqlite3.Connection, item_ids: list[int]) -> int:
+    ids = _valid_catalog_item_ids(item_ids)
+    if not ids:
+        return 0
+    placeholders = ", ".join("?" for _ in ids)
+    cursor = connection.execute(
+        f"DELETE FROM catalog_items WHERE id IN ({placeholders})",
+        tuple(ids),
+    )
+    connection.commit()
+    return int(cursor.rowcount)
+
+
+def bulk_update_catalog_items(
+    connection: sqlite3.Connection,
+    item_ids: list[int],
+    *,
+    field: str,
+    operation: str,
+    value: object,
+) -> int:
+    ids = _valid_catalog_item_ids(item_ids)
+    if not ids:
+        return 0
+    field_name = _text(field)
+    op = _text(operation)
+    placeholders = ", ".join("?" for _ in ids)
+
+    if field_name in CATALOG_EDITOR_TEXT_FIELDS:
+        if op != "set":
+            raise ValueError("Text fields support only set operation")
+        cleaned = _clean_catalog_editor_values({field_name: value})
+        if not cleaned:
+            return 0
+        cursor = connection.execute(
+            f"UPDATE catalog_items SET {field_name} = ? WHERE id IN ({placeholders})",
+            (cleaned[field_name], *ids),
+        )
+    elif field_name in CATALOG_EDITOR_NUMERIC_FIELDS:
+        number = _parse_catalog_editor_number(field_name, value)
+        if op == "set":
+            cursor = connection.execute(
+                f"UPDATE catalog_items SET {field_name} = ? WHERE id IN ({placeholders})",
+                (number, *ids),
+            )
+        elif op == "add":
+            if field_name in REQUIRED_CATALOG_NUMERIC_FIELDS:
+                cursor = connection.execute(
+                    f"""
+                    UPDATE catalog_items
+                    SET {field_name} = {field_name} + ?
+                    WHERE id IN ({placeholders})
+                      AND {field_name} + ? > 0
+                    """,
+                    (number, *ids, number),
+                )
+            else:
+                cursor = connection.execute(
+                    f"""
+                    UPDATE catalog_items
+                    SET {field_name} = COALESCE({field_name}, 0) + ?
+                    WHERE id IN ({placeholders})
+                    """,
+                    (number, *ids),
+                )
+        elif op == "multiply":
+            if number == 0 and field_name in REQUIRED_CATALOG_NUMERIC_FIELDS:
+                raise ValueError("Required numeric fields cannot be multiplied by zero")
+            cursor = connection.execute(
+                f"""
+                UPDATE catalog_items
+                SET {field_name} = CASE
+                    WHEN {field_name} IS NULL THEN NULL
+                    ELSE {field_name} * ?
+                END
+                WHERE id IN ({placeholders})
+                """,
+                (number, *ids),
+            )
+        else:
+            raise ValueError("Unsupported bulk operation")
+    else:
+        raise ValueError("Unsupported catalog field")
+
+    connection.commit()
+    return int(cursor.rowcount)
+
+
+def _catalog_editor_filters(filters: dict[str, str]) -> dict[str, str]:
+    allowed = {"q", "source", "region", "task_id", "code", "unit", "filename"}
+    return {key: _text(filters.get(key)) for key in allowed}
+
+
+def _catalog_editor_where(filters: dict[str, str]) -> tuple[str, tuple[object, ...]]:
+    clauses: list[str] = []
+    params: list[object] = []
+    if filters.get("source"):
+        clauses.append("catalog_sources.name LIKE ?")
+        params.append(f'%{filters["source"]}%')
+    if filters.get("region"):
+        clauses.append("catalog_items.region LIKE ?")
+        params.append(f'%{filters["region"]}%')
+    if filters.get("task_id"):
+        clauses.append("catalog_items.task_id LIKE ?")
+        params.append(f'%{filters["task_id"]}%')
+    if filters.get("code"):
+        clauses.append("catalog_items.code LIKE ?")
+        params.append(f'%{filters["code"]}%')
+    if filters.get("unit"):
+        clauses.append("catalog_items.unit LIKE ?")
+        params.append(f'%{filters["unit"]}%')
+    if filters.get("filename"):
+        clauses.append("catalog_items.source_filename LIKE ?")
+        params.append(f'%{filters["filename"]}%')
+    if filters.get("q"):
+        search = f'%{filters["q"]}%'
+        clauses.append(
+            "(catalog_items.work_name LIKE ? OR catalog_items.code LIKE ? "
+            "OR catalog_items.task_id LIKE ? OR catalog_items.region LIKE ? "
+            "OR catalog_items.source_filename LIKE ?)"
+        )
+        params.extend([search, search, search, search, search])
+    where = "" if not clauses else "WHERE " + " AND ".join(clauses)
+    return where, tuple(params)
+
+
+def _catalog_editor_row(row: sqlite3.Row) -> CatalogEditorRow:
+    return CatalogEditorRow(
+        id=int(row["id"]),
+        source_name=str(row["source_name"]),
+        source_kind=str(row["source_kind"]),
+        task_id=str(row["task_id"]),
+        region=str(row["region"]),
+        code=str(row["code"]),
+        unit=str(row["unit"]),
+        quantity=_optional_float(row["quantity"]),
+        work_name=str(row["work_name"]),
+        price=float(row["price"]),
+        total_price=_optional_float(row["total_price"]),
+        labor_unit=_optional_float(row["labor_unit"]),
+        labor_total=_optional_float(row["labor_total"]),
+        machine_labor_unit=_optional_float(row["machine_labor_unit"]),
+        machine_labor_total=_optional_float(row["machine_labor_total"]),
+        regional_coefficient=_optional_float(row["regional_coefficient"]),
+        source_region_folder=str(row["source_region_folder"]),
+        source_filename=str(row["source_filename"]),
+        source_row_number=int(row["source_row_number"]),
+        added_date="" if row["added_date"] is None else str(row["added_date"]),
+    )
+
+
+def _clean_catalog_editor_values(values: dict[str, object]) -> dict[str, object]:
+    cleaned: dict[str, object] = {}
+    for field, value in values.items():
+        field_name = _text(field)
+        if field_name in CATALOG_EDITOR_TEXT_FIELDS:
+            text = _text(value)
+            if field_name in REQUIRED_CATALOG_TEXT_FIELDS and text == "":
+                raise ValueError(f"{field_name} cannot be empty")
+            cleaned[field_name] = text
+        elif field_name in CATALOG_EDITOR_NUMERIC_FIELDS:
+            cleaned[field_name] = _parse_catalog_editor_number(field_name, value)
+        else:
+            raise ValueError(f"unsupported catalog field: {field_name}")
+    return cleaned
+
+
+def _parse_catalog_editor_number(field_name: str, value: object) -> float | int | None:
+    number = _parse_optional_number(value)
+    if number is None:
+        if field_name in REQUIRED_CATALOG_NUMERIC_FIELDS:
+            raise ValueError(f"{field_name} cannot be empty")
+        return None
+    if field_name in REQUIRED_CATALOG_NUMERIC_FIELDS and number <= 0:
+        raise ValueError(f"{field_name} must be positive")
+    if field_name == "source_row_number":
+        return max(0, int(number))
+    return number
+
+
+def _valid_catalog_item_ids(item_ids: list[int]) -> list[int]:
+    result = []
+    for item_id in item_ids:
+        try:
+            value = int(item_id)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            result.append(value)
+    return result
 
 
 

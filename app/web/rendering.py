@@ -11,7 +11,7 @@ import html
 from datetime import datetime, timezone
 from pathlib import Path
 from string import Template
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from app.services.write_result import RunAndWriteResult
 from app.services.catalog_source import catalog_status_label, database_has_catalog
@@ -23,7 +23,7 @@ from app.services.rnmc_excel import (
 )
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
-from core.storage.catalog import CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord
+from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord
 from core.storage.risk_log import PriceRiskLogEntry
 from core.exclusions import NameExclusionRule, TaskColorEntry
 
@@ -49,6 +49,12 @@ ADMIN_SECTIONS = [
         "title": "\u0418\u043c\u043f\u043e\u0440\u0442\u044b \u0444\u0430\u0439\u043b\u043e\u0432",
         "description": "\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043e\u043a, \u043f\u0440\u0438\u043d\u044f\u0442\u044b\u0435 \u0438 \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u043d\u044b\u0435 \u0441\u0442\u0440\u043e\u043a\u0438, \u0440\u0435\u0433\u0438\u043e\u043d, \u0444\u0430\u0439\u043b \u0438 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a.",
         "status": "\u0418\u0441\u0442\u043e\u0440\u0438\u044f \u0438\u043c\u043f\u043e\u0440\u0442\u043e\u0432 \u0438\u0437 imported_files \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0432 read-only \u0440\u0435\u0436\u0438\u043c\u0435.",
+    },
+    {
+        "slug": "catalog",
+        "title": "Каталог аналогов",
+        "description": "Просмотр, фильтрация и ручная корректировка строк catalog_items после загрузки РНМЦ и других источников.",
+        "status": "Подключен редактор строк каталога с фильтрами, удалением и групповыми действиями.",
     },
     {
         "slug": "risks",
@@ -211,6 +217,33 @@ table.preview td.path {
   background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 600; }
 .status-pill.ok { background: #ecfdf5; color: #047857; }
 .status-pill.warn { background: #fff7ed; color: #c2410c; }
+.catalog-editor-form { margin: 0; }
+.catalog-filter-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px; align-items: end; margin-bottom: 12px;
+}
+.catalog-filter-grid label { margin: 0; }
+.catalog-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 10px 0 12px;
+  padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;
+}
+.catalog-actions label { width: auto; margin: 0; min-width: 150px; font-size: 12px; color: #475569; }
+.catalog-actions select, .catalog-actions input[type=text] { margin-top: 4px; padding: 7px 9px; border-radius: 8px; }
+.catalog-actions button { width: auto; margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+.catalog-table input[type=text], .catalog-table input[type=number] {
+  min-width: 86px; width: 100%; margin: 0; padding: 5px 6px; border-radius: 6px; font-size: 12px;
+}
+.catalog-table textarea { min-width: 260px; min-height: 42px; margin: 0; padding: 5px 6px; border-radius: 6px; font-size: 12px; }
+.catalog-table .short-cell { min-width: 84px; }
+.catalog-table .number-cell { min-width: 96px; }
+.catalog-table .work-cell { min-width: 320px; }
+.catalog-table .file-cell { min-width: 220px; }
+.catalog-table button { width: auto; margin: 2px 0; padding: 6px 8px; font-size: 12px; border-radius: 7px; }
+.catalog-table button.danger { background: #dc2626; }
+.catalog-table button.danger:hover { background: #b91c1c; }
+.catalog-pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; color: #475569; }
+.catalog-pager a { padding: 7px 10px; border-radius: 8px; background: #eef2ff; color: #3730a3; text-decoration: none; font-weight: 600; }
+.catalog-warning { padding: 10px; margin: 10px 0; background: #fffbeb; color: #92400e; border-radius: 10px; }
 .muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
 .build { margin-top: 20px; font-size: 12px; color: #94a3b8; text-align: center; }
 .admin-nav {
@@ -499,6 +532,209 @@ def _render_catalog_source_table(sources: list[CatalogSource]) -> str:
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table>'
+
+def render_admin_catalog(
+    catalog_page: CatalogEditorPage,
+    *,
+    notice: str = "",
+    error: str = "",
+    return_url: str = "/admin/catalog",
+) -> str:
+    notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
+    error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">Каталог аналогов</h2>'
+        '<p>Здесь можно смотреть актуальные строки catalog_items, фильтровать их, править значения, удалять строки и применять групповые действия к выделенным строкам.</p>'
+        '<p class="catalog-warning">Перед массовыми изменениями сделайте backup базы. Matching/pricing использует эти строки как источник аналогов.</p>'
+        f'{notice_html}'
+        f'{error_html}'
+        f'{_render_catalog_editor_filters(catalog_page)}'
+        f'{_render_catalog_editor_pager(catalog_page)}'
+        f'{_render_catalog_editor_table(catalog_page, return_url)}'
+        f'{_render_catalog_editor_pager(catalog_page)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="Каталог аналогов",
+        subtitle="Редактор строк базы аналогов.",
+        admin_nav=_render_admin_nav(active_slug="catalog"),
+        content=content,
+    )
+
+
+def _render_catalog_editor_filters(catalog_page: CatalogEditorPage) -> str:
+    filters = catalog_page.filters
+    def val(name: str) -> str:
+        return html.escape(filters.get(name, ""), quote=True)
+
+    return (
+        '<form class="admin-form" action="/admin/catalog" method="get">'
+        '<h2 class="section">Фильтры</h2>'
+        '<div class="catalog-filter-grid">'
+        f'<label>Общий поиск<input type="text" name="q" value="{val("q")}" placeholder="работа, код, файл, регион"></label>'
+        f'<label>Источник<input type="text" name="source" value="{val("source")}" placeholder="rnmc_zip_upload"></label>'
+        f'<label>Регион<input type="text" name="region" value="{val("region")}"></label>'
+        f'<label>Задача<input type="text" name="task_id" value="{val("task_id")}"></label>'
+        f'<label>Код<input type="text" name="code" value="{val("code")}"></label>'
+        f'<label>Ед.<input type="text" name="unit" value="{val("unit")}"></label>'
+        f'<label>Файл<input type="text" name="filename" value="{val("filename")}"></label>'
+        f'<label>Строк на странице<select name="page_size">{_catalog_page_size_options(catalog_page.page_size)}</select></label>'
+        '</div>'
+        '<button type="submit">Применить фильтры</button>'
+        '<a class="back" href="/admin/catalog">Очистить фильтры</a>'
+        '</form>'
+    )
+
+
+def _catalog_page_size_options(current: int) -> str:
+    options = []
+    for value in [50, 100, 200, 500]:
+        selected = " selected" if int(current) == value else ""
+        options.append(f'<option value="{value}"{selected}>{value}</option>')
+    return "".join(options)
+
+
+def _render_catalog_editor_pager(catalog_page: CatalogEditorPage) -> str:
+    parts = [
+        f'<strong>Всего строк: {catalog_page.total_rows}</strong>',
+        f'<span>Страница {catalog_page.page} из {catalog_page.total_pages}</span>',
+    ]
+    if catalog_page.page > 1:
+        parts.append(f'<a href="{html.escape(_catalog_editor_url(catalog_page, catalog_page.page - 1))}">← Назад</a>')
+    if catalog_page.page < catalog_page.total_pages:
+        parts.append(f'<a href="{html.escape(_catalog_editor_url(catalog_page, catalog_page.page + 1))}">Вперед →</a>')
+    return '<div class="catalog-pager">' + "".join(parts) + '</div>'
+
+
+def _catalog_editor_url(catalog_page: CatalogEditorPage, page: int) -> str:
+    params = {key: value for key, value in catalog_page.filters.items() if value}
+    params["page"] = str(page)
+    params["page_size"] = str(catalog_page.page_size)
+    return "/admin/catalog?" + urlencode(params)
+
+
+def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: str) -> str:
+    if not catalog_page.rows:
+        return '<p class="muted">Строки каталога по заданным фильтрам не найдены.</p>'
+
+    header = (
+        '<form class="catalog-editor-form" method="post">'
+        f'<input type="hidden" name="return_url" value="{html.escape(return_url, quote=True)}">'
+        '<div class="catalog-actions">'
+        '<label><input type="checkbox" onclick="document.querySelectorAll(\'.catalog-row-check\').forEach(cb => cb.checked = this.checked)"> Выделить все на странице</label>'
+        '<label>Действие<select name="bulk_action"><option value="update">Изменить поле</option><option value="delete">Удалить выделенные</option></select></label>'
+        f'<label>Поле<select name="bulk_field">{_catalog_bulk_field_options()}</select></label>'
+        '<label>Операция<select name="bulk_operation"><option value="set">Заменить</option><option value="add">Прибавить</option><option value="multiply">Умножить</option></select></label>'
+        '<label>Значение<input type="text" name="bulk_value" placeholder="например 1,2"></label>'
+        '<button type="submit" formaction="/admin/catalog/bulk" onclick="return confirmCatalogBulkAction(this.form)">Применить к выделенным</button>'
+        '</div>'
+        f'{_render_catalog_bulk_confirm_script()}'
+        '<div class="preview-wide">'
+        '<table class="preview catalog-table"><thead><tr>'
+        '<th></th><th>ID</th><th>Источник</th><th>Регион</th><th>Задача</th><th>Код</th><th>Ед.</th>'
+        '<th>Кол-во</th><th>Цена</th><th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
+        '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th class="wrap">Работа</th>'
+        '<th>Папка</th><th>Файл</th><th>Excel row</th><th>Действия</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = "".join(_render_catalog_editor_row(row) for row in catalog_page.rows)
+    return header + rows + '</tbody></table></div></form>'
+
+
+
+def _render_catalog_bulk_confirm_script() -> str:
+    return """
+<script>
+function confirmCatalogBulkAction(form) {
+  const checked = Array.from(form.querySelectorAll('.catalog-row-check:checked'));
+  if (checked.length === 0) {
+    alert('Выберите хотя бы одну строку каталога.');
+    return false;
+  }
+  if (checked.length < 2) {
+    return true;
+  }
+  const actionSelect = form.querySelector('[name="bulk_action"]');
+  const fieldSelect = form.querySelector('[name="bulk_field"]');
+  const operationSelect = form.querySelector('[name="bulk_operation"]');
+  const valueInput = form.querySelector('[name="bulk_value"]');
+  const action = actionSelect ? actionSelect.value : '';
+  const actionText = action === 'delete' ? 'удалить' : 'изменить';
+  const fieldText = fieldSelect && fieldSelect.selectedOptions.length ? fieldSelect.selectedOptions[0].text : '';
+  const operationText = operationSelect && operationSelect.selectedOptions.length ? operationSelect.selectedOptions[0].text : '';
+  const valueText = valueInput && valueInput.value ? valueInput.value : '';
+  let message = 'Вы уверены, что хотите ' + actionText + ' ' + checked.length + ' строк каталога?';
+  if (action !== 'delete') {
+    message += '\nПоле: ' + fieldText + '\nОперация: ' + operationText + '\nЗначение: ' + valueText;
+  }
+  message += '\n\nДействие нельзя отменить автоматически. Перед массовыми изменениями желательно иметь backup базы.';
+  return confirm(message);
+}
+</script>
+"""
+
+def _catalog_bulk_field_options() -> str:
+    options = [
+        ("region", "Регион"),
+        ("task_id", "Задача"),
+        ("code", "Код"),
+        ("unit", "Ед."),
+        ("work_name", "Работа"),
+        ("quantity", "Кол-во"),
+        ("price", "Цена"),
+        ("total_price", "Итого"),
+        ("labor_unit", "ТЗ ед."),
+        ("labor_total", "ТЗ всего"),
+        ("machine_labor_unit", "ТЗм ед."),
+        ("machine_labor_total", "ТЗм всего"),
+        ("regional_coefficient", "Коэф."),
+    ]
+    return "".join(f'<option value="{html.escape(value)}">{html.escape(label)}</option>' for value, label in options)
+
+
+def _render_catalog_editor_row(row: CatalogEditorRow) -> str:
+    item_id = row.id
+    return (
+        '<tr>'
+        f'<td><input class="catalog-row-check" type="checkbox" name="selected_ids" value="{item_id}"></td>'
+        f'<td>{item_id}</td>'
+        f'<td title="{html.escape(row.source_kind)}">{html.escape(row.source_name)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("region", item_id, row.region)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("task_id", item_id, row.task_id)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("code", item_id, row.code)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("unit", item_id, row.unit)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("quantity", item_id, _format_optional_number(row.quantity))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("price", item_id, _format_optional_number(row.price))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("total_price", item_id, _format_optional_number(row.total_price))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("labor_unit", item_id, _format_optional_number(row.labor_unit))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("labor_total", item_id, _format_optional_number(row.labor_total))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("machine_labor_unit", item_id, _format_optional_number(row.machine_labor_unit))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("machine_labor_total", item_id, _format_optional_number(row.machine_labor_total))}</td>'
+        f'<td class="number-cell">{_catalog_text_input("regional_coefficient", item_id, _format_optional_number(row.regional_coefficient))}</td>'
+        f'<td class="work-cell"><textarea name="work_name_{item_id}">{html.escape(row.work_name)}</textarea></td>'
+        f'<td class="file-cell">{_catalog_text_input("source_region_folder", item_id, row.source_region_folder)}</td>'
+        f'<td class="file-cell">{_catalog_text_input("source_filename", item_id, row.source_filename)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("source_row_number", item_id, str(row.source_row_number))}</td>'
+        '<td>'
+        f'<button type="submit" name="row_id" value="{item_id}" formaction="/admin/catalog/update-row">Сохранить</button>'
+        f'<button class="danger" type="submit" name="row_id" value="{item_id}" formaction="/admin/catalog/delete-row" onclick="return confirm(\'Удалить строку каталога?\')">Удалить</button>'
+        '</td>'
+        '</tr>'
+    )
+
+
+def _catalog_text_input(name: str, item_id: int, value: object) -> str:
+    return f'<input type="text" name="{html.escape(name)}_{item_id}" value="{html.escape(str(value), quote=True)}">'
+
+
+def _format_optional_number(value: float | None) -> str:
+    if value is None:
+        return ""
+    text = f"{float(value):.10f}".rstrip("0").rstrip(".")
+    return text if text else "0"
+
 
 def render_admin_imports(
     imports: list[ImportedFileRecord],

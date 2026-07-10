@@ -17,12 +17,12 @@ Flow:
 
 import tempfile
 import uuid
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.services.catalog_source import CatalogNotAvailableError, database_has_catalog
@@ -36,13 +36,18 @@ from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_impo
 from app.services.rnmc_excel import analyze_rnmc_zip_row_preview, import_rnmc_zip_catalog_rows
 from core.storage.catalog import (
     allow_import_retry,
+    bulk_delete_catalog_items,
+    bulk_update_catalog_items,
     count_catalog_rows,
+    delete_catalog_item,
     get_imported_file,
     import_legacy_file_log,
+    list_catalog_editor_page,
     list_catalog_items_for_imported_file,
     list_catalog_sources,
     list_import_row_logs,
     list_imported_files,
+    update_catalog_item,
     update_imported_file_metadata,
 )
 from core.storage.risk_log import (
@@ -65,6 +70,7 @@ from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
     XLSX_MIME,
     render_admin_approvals,
+    render_admin_catalog,
     render_admin_gesn_exceptions,
     render_admin_import_detail,
     render_admin_imports,
@@ -212,6 +218,125 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             f"/admin/imports/{import_id}?error={quote(error)}",
             status_code=303,
         )
+
+    @app.get("/admin/catalog", response_class=HTMLResponse)
+    def admin_catalog(
+        request: Request,
+        message: str = "",
+        error: str = "",
+        q: str = "",
+        source: str = "",
+        region: str = "",
+        task_id: str = "",
+        code: str = "",
+        unit: str = "",
+        filename: str = "",
+        page: int = 1,
+        page_size: int = 100,
+    ) -> HTMLResponse:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            catalog_page = list_catalog_editor_page(
+                connection,
+                filters={
+                    "q": q,
+                    "source": source,
+                    "region": region,
+                    "task_id": task_id,
+                    "code": code,
+                    "unit": unit,
+                    "filename": filename,
+                },
+                page=page,
+                page_size=page_size,
+            )
+            return HTMLResponse(
+                render_admin_catalog(
+                    catalog_page,
+                    notice=message,
+                    error=error,
+                    return_url=_request_path_with_query(request),
+                )
+            )
+        finally:
+            connection.close()
+
+    @app.post("/admin/catalog/update-row")
+    async def admin_catalog_update_row(request: Request) -> RedirectResponse:
+        form = await request.form()
+        item_id = int(str(form.get("row_id") or "0"))
+        values = _catalog_row_form_values(form, item_id)
+        return_url = _safe_admin_catalog_return_url(str(form.get("return_url") or ""))
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                changed = update_catalog_item(connection, item_id, values=values)
+            except Exception as exc:
+                return RedirectResponse(
+                    _append_message(return_url, "error", f"Не удалось сохранить строку: {exc}"),
+                    status_code=303,
+                )
+        finally:
+            connection.close()
+        message = "Строка каталога обновлена." if changed else "Строка каталога не найдена."
+        return RedirectResponse(_append_message(return_url, "message", message), status_code=303)
+
+    @app.post("/admin/catalog/delete-row")
+    async def admin_catalog_delete_row(request: Request) -> RedirectResponse:
+        form = await request.form()
+        item_id = int(str(form.get("row_id") or "0"))
+        return_url = _safe_admin_catalog_return_url(str(form.get("return_url") or ""))
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            deleted = delete_catalog_item(connection, item_id)
+        finally:
+            connection.close()
+        message = "Строка каталога удалена." if deleted else "Строка каталога не найдена."
+        return RedirectResponse(_append_message(return_url, "message", message), status_code=303)
+
+    @app.post("/admin/catalog/bulk")
+    async def admin_catalog_bulk_action(request: Request) -> RedirectResponse:
+        form = await request.form()
+        return_url = _safe_admin_catalog_return_url(str(form.get("return_url") or ""))
+        selected_ids = [int(value) for value in form.getlist("selected_ids") if str(value).isdigit()]
+        action = str(form.get("bulk_action") or "")
+        if not selected_ids:
+            return RedirectResponse(
+                _append_message(return_url, "error", "Сначала выделите строки каталога."),
+                status_code=303,
+            )
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                if action == "delete":
+                    changed = bulk_delete_catalog_items(connection, selected_ids)
+                    message = f"Удалено строк: {changed}."
+                elif action == "update":
+                    changed = bulk_update_catalog_items(
+                        connection,
+                        selected_ids,
+                        field=str(form.get("bulk_field") or ""),
+                        operation=str(form.get("bulk_operation") or ""),
+                        value=str(form.get("bulk_value") or ""),
+                    )
+                    message = f"Групповое действие применено к строкам: {changed}."
+                else:
+                    return RedirectResponse(
+                        _append_message(return_url, "error", "Неизвестное групповое действие."),
+                        status_code=303,
+                    )
+            except Exception as exc:
+                return RedirectResponse(
+                    _append_message(return_url, "error", f"Не удалось выполнить групповое действие: {exc}"),
+                    status_code=303,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse(_append_message(return_url, "message", message), status_code=303)
 
     @app.get("/admin/{section_slug}", response_class=HTMLResponse)
     def admin_section(section_slug: str, message: str = "", status: str = "") -> HTMLResponse:
@@ -825,6 +950,51 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         )
 
     return app
+
+
+def _request_path_with_query(request: Request) -> str:
+    query = str(request.url.query)
+    return str(request.url.path) + (f"?{query}" if query else "")
+
+
+def _safe_admin_catalog_return_url(value: str) -> str:
+    text = str(value or "").strip()
+    if not text.startswith("/admin/catalog"):
+        return "/admin/catalog"
+    return text
+
+
+def _append_message(return_url: str, key: str, value: str) -> str:
+    if "?" in return_url:
+        path, query = return_url.split("?", 1)
+    else:
+        path, query = return_url, ""
+    pairs = [(name, item) for name, item in parse_qsl(query, keep_blank_values=True) if name not in {"message", "error"}]
+    pairs.append((key, value))
+    return f"{path}?{urlencode(pairs)}"
+
+
+def _catalog_row_form_values(form, item_id: int) -> dict[str, object]:
+    fields = [
+        "task_id",
+        "region",
+        "code",
+        "unit",
+        "quantity",
+        "work_name",
+        "price",
+        "total_price",
+        "labor_unit",
+        "labor_total",
+        "machine_labor_unit",
+        "machine_labor_total",
+        "regional_coefficient",
+        "source_region_folder",
+        "source_filename",
+        "source_row_number",
+    ]
+    return {field: form.get(f"{field}_{item_id}") for field in fields}
+
 
 
 def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLResponse:

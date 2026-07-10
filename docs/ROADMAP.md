@@ -55,6 +55,7 @@ flow.
 - Main web flow: upload estimate/catalog, run matching, choose sheet when needed,
   download WA workbook.
 - `/admin/sources` — catalog source overview.
+- `/admin/catalog` — editable catalog table with filters, row updates, deletes, and bulk actions.
 - `/admin/imports` — RNMC import dashboard and control center.
 - `/admin/risks` — price risk log.
 - `/admin/approvals` — approve open price risks into `gesn_exceptions`.
@@ -109,16 +110,20 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - [x] Real-RNMC import hardening: `Код раздела` is excluded as a catalog code,
   unlabeled code columns before `Код раздела` are supported, section rows are
   skipped, and metadata parsing is stricter.
+- [x] Admin catalog editor MVP: filter catalog rows, edit text/numeric values,
+  delete rows, and apply grouped text/numeric actions to selected rows with a
+  confirmation guard for multi-row operations.
 
 ## Next milestone — RNMC import quality automation
 
-1. Improve rejected-row diagnostics and export/download of rejected rows.
-2. Review the remaining average-only/no-data RNMC files and decide whether to
+1. Add persisted calculated/custom catalog columns if catalog-editor workflows require reusable derived values.
+2. Improve rejected-row diagnostics and export/download of rejected rows.
+3. Review the remaining average-only/no-data RNMC files and decide whether to
    repair those workbooks or leave them out of the catalog.
-3. Add `.xls` support if real incoming files still require it.
-4. Decide whether to store original uploaded workbooks for true one-click retry
+4. Add `.xls` support if real incoming files still require it.
+5. Decide whether to store original uploaded workbooks for true one-click retry
    without re-uploading the ZIP.
-5. Add a duplicate-name review workflow for `duplicate_name` records.
+6. Add a duplicate-name review workflow for `duplicate_name` records.
 
 ## Later web service path
 

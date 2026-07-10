@@ -5,46 +5,54 @@
 > UI, and base RNMC ZIP import are implemented; see `docs/ROADMAP.md` and
 > `docs/RNMC_IMPORT.md` for current state.
 
+## Catalog editor — next decisions
+
+1. **Persisted calculated/custom columns.** The admin catalog editor can edit
+   existing text/numeric columns and perform grouped arithmetic on selected rows.
+   Multi-row operations are protected by a confirmation prompt. A future block
+   should define how user-created calculated columns are stored, typed, named,
+   exported, and consumed by matching/pricing before adding them to the database.
+
 ## RNMC import — next decisions and improvements
 
-1. **Review the remaining no-data RNMC files.** The current real-file pass imports
+2. **Review the remaining no-data RNMC files.** The current real-file pass imports
    the normal files and intentionally leaves average-only price templates as
    `no_data`, because `Цена средняя` and `Итого стоимость средняя` are not
    accepted source values. Decide whether those files should be repaired at the
    workbook level or kept out of the catalog.
 
-2. **Support `.xls` detailed parsing if needed.** ZIP dry-run recognizes `.xls`
+3. **Support `.xls` detailed parsing if needed.** ZIP dry-run recognizes `.xls`
    as an Excel file, but row preview/import currently supports `.xlsx` and
    `.xlsm`. Add an `.xls` reader only if real incoming files still require it.
 
-3. **True one-click retry requires storing source files.** Current retry unlock
+4. **True one-click retry requires storing source files.** Current retry unlock
    changes `failed` / `no_data` records to `pending`; the user uploads the ZIP
    again. To retry without re-upload, the service must store original workbooks
    in a durable file store and define retention/cleanup rules.
 
-4. **Duplicate-name review workflow.** Duplicate filenames are correctly marked
+5. **Duplicate-name review workflow.** Duplicate filenames are correctly marked
    as `duplicate_name`, because filenames must be globally unique. A future UI
    should make it easy to review which folders/regions produced the conflict.
 
-5. **Rejected-row export.** Rejected rows are stored in `import_row_log` and shown
+6. **Rejected-row export.** Rejected rows are stored in `import_row_log` and shown
    on the detail page. A download/export path would make manual cleanup easier.
 
 ## From excel_io.py
 
-6. **Silent empty result when estimate header row is not found.**
+7. **Silent empty result when estimate header row is not found.**
    `read_estimate_rows` returns `[]` with no error/warning if the header row
    detection fails. Higher layers should surface this as a clear message.
 
-7. **Formula cells are read as formula text, not computed values. — RESOLVED
+8. **Formula cells are read as formula text, not computed values. — RESOLVED
    (2026-07).** Reading now uses `data_only=True` where needed. Caveat:
    `data_only=True` depends on Excel-cached values being present.
 
 ## From catalog.py (lower priority)
 
-8. `_parse_iso_date` only accepts strict ISO format (`YYYY-MM-DD`) for string
+9. `_parse_iso_date` only accepts strict ISO format (`YYYY-MM-DD`) for string
    dates. Revisit if source files provide dates as non-ISO plain text.
 
-9. Dedup within a single task_id in `BuildCatalog` is O(n^2). Fine for current
+10. Dedup within a single task_id in `BuildCatalog` is O(n^2). Fine for current
    catalog sizes; revisit only if groups grow large.
 
 ## Flexible layout resolution — deferred rules

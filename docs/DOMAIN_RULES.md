@@ -212,6 +212,18 @@ encode business rules that must be preserved:
   grey (`dupFill`) = a second-or-later price within the same task
   (visual de-emphasis, not a data quality flag).
 
+## 6.0 Admin catalog editor rules
+
+The `/admin/catalog` editor works directly with `catalog_items`. Manual edits are
+therefore source-of-truth changes for subsequent matching runs. Text and numeric
+fields may be updated row-by-row, selected rows may be deleted, and selected rows
+may receive grouped text/numeric operations. Bulk editor actions that affect two
+or more selected rows must show a browser confirmation before submitting the
+change. Required catalog identity/value fields remain protected: `task_id`,
+`code`, and `unit` cannot be set to blank, and `price` must remain a positive
+number. Grouped arithmetic updates are limited to existing numeric columns and do
+not create persisted custom columns yet.
+
 ## 6.1 RNMC catalog import value normalization
 
 For RNMC ZIP imports, `catalog_items.quantity` stores the source `Кол-во` value, and `catalog_items.price` stores unit price without VAT. Unit
