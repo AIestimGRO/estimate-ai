@@ -153,3 +153,7 @@ _admin_catalog_editor_confirm_review/
 # RNMC ZLVL price model skip log delivery artifacts
 rnmc-zlvl-price-model-skip-log-updated-files.zip
 _rnmc_zlvl_price_model_skip_log_review/
+
+# Admin UI catalog clear delivery artifacts
+estimate-ai-admin-ui-catalog-clear.zip
+_admin_ui_catalog_clear_review/

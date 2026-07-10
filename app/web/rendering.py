@@ -550,6 +550,7 @@ def render_admin_catalog(
         f'{notice_html}'
         f'{error_html}'
         f'{_render_catalog_editor_filters(catalog_page)}'
+        f'{_render_catalog_clear_form(catalog_page.total_rows)}'
         f'{_render_catalog_editor_pager(catalog_page)}'
         f'{_render_catalog_editor_table(catalog_page, return_url)}'
         f'{_render_catalog_editor_pager(catalog_page)}'
@@ -561,6 +562,19 @@ def render_admin_catalog(
         subtitle="Редактор строк базы аналогов.",
         admin_nav=_render_admin_nav(active_slug="catalog"),
         content=content,
+    )
+
+
+def _render_catalog_clear_form(total_rows: int) -> str:
+    return (
+        '<form class="admin-form" action="/admin/catalog/clear" method="post" '
+        'onsubmit="return confirm(\'Полностью очистить каталог и журнал импортов?\\n\\n'
+        'Это действие нужно только перед полной пересборкой и его нельзя отменить.\')">'
+        '<h2 class="section">Полная пересборка</h2>'
+        f'<p class="muted">Сейчас в каталоге строк: {total_rows}. Очистка удалит строки каталога и журнал imported_files, но не затронет настройки и правила.</p>'
+        '<input type="hidden" name="confirmation" value="clear_catalog">'
+        '<button class="danger" type="submit">Очистить каталог для пересборки</button>'
+        '</form>'
     )
 
 
@@ -628,7 +642,7 @@ def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: st
         f'<label>Поле<select name="bulk_field">{_catalog_bulk_field_options()}</select></label>'
         '<label>Операция<select name="bulk_operation"><option value="set">Заменить</option><option value="add">Прибавить</option><option value="multiply">Умножить</option></select></label>'
         '<label>Значение<input type="text" name="bulk_value" placeholder="например 1,2"></label>'
-        '<button type="submit" formaction="/admin/catalog/bulk" onclick="return confirmCatalogBulkAction(this.form)">Применить к выделенным</button>'
+        '<button type="submit" formaction="/admin/catalog/bulk" onclick="return prepareCatalogBulkAction(this.form)">Применить к выделенным</button>'
         '</div>'
         f'{_render_catalog_bulk_confirm_script()}'
         '<div class="preview-wide">'
@@ -647,6 +661,16 @@ def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: st
 def _render_catalog_bulk_confirm_script() -> str:
     return """
 <script>
+function prepareCatalogBulkAction(form) {
+  if (!confirmCatalogBulkAction(form)) {
+    return false;
+  }
+  form.querySelectorAll('tbody input:not(.catalog-row-check), tbody textarea').forEach(field => {
+    field.disabled = true;
+  });
+  return true;
+}
+
 function confirmCatalogBulkAction(form) {
   const checked = Array.from(form.querySelectorAll('.catalog-row-check:checked'));
   if (checked.length === 0) {

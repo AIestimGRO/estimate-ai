@@ -37,6 +37,7 @@ from app.services.rnmc_excel import analyze_rnmc_zip_row_preview, import_rnmc_zi
 from core.storage.catalog import (
     allow_import_retry,
     bulk_delete_catalog_items,
+    clear_catalog_for_rebuild,
     bulk_update_catalog_items,
     count_catalog_rows,
     delete_catalog_item,
@@ -296,6 +297,29 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             connection.close()
         message = "Строка каталога удалена." if deleted else "Строка каталога не найдена."
         return RedirectResponse(_append_message(return_url, "message", message), status_code=303)
+
+    @app.post("/admin/catalog/clear")
+    async def admin_catalog_clear(request: Request) -> RedirectResponse:
+        form = await request.form()
+        if str(form.get("confirmation") or "") != "clear_catalog":
+            return RedirectResponse(
+                "/admin/catalog?error=" + quote("Очистка каталога не подтверждена."),
+                status_code=303,
+            )
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            catalog_count, import_count = clear_catalog_for_rebuild(connection)
+        finally:
+            connection.close()
+        message = (
+            f"Каталог очищен: удалено строк {catalog_count}, "
+            f"записей журнала импорта {import_count}."
+        )
+        return RedirectResponse(
+            "/admin/catalog?message=" + quote(message),
+            status_code=303,
+        )
 
     @app.post("/admin/catalog/bulk")
     async def admin_catalog_bulk_action(request: Request) -> RedirectResponse:

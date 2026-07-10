@@ -184,6 +184,97 @@ def test_admin_catalog_bulk_action_has_confirmation_guard(tmp_path, monkeypatch)
 
     assert response.status_code == 200
     assert "confirmCatalogBulkAction" in response.text
-    assert 'onclick="return confirmCatalogBulkAction(this.form)"' in response.text
+    assert 'onclick="return prepareCatalogBulkAction(this.form)"' in response.text
     assert "Вы уверены, что хотите" in response.text
     assert "Действие нельзя отменить автоматически" in response.text
+
+
+def test_admin_catalog_clear_removes_catalog_and_import_log(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_catalog_row(db_path)
+
+    connection = connect(db_path)
+    try:
+        source_id = connection.execute(
+            "SELECT id FROM catalog_sources WHERE name = ?",
+            ("rnmc_zip_upload",),
+        ).fetchone()["id"]
+        cursor = connection.execute(
+            """
+            INSERT INTO imported_files (
+                source_id, region_folder, filename, status, filename_key
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (source_id, "Moscow", "catalog.xlsx", "success", "catalog.xlsx"),
+        )
+        file_id = int(cursor.lastrowid)
+        connection.execute(
+            "INSERT INTO import_row_log(file_id, row_number, status, reason) VALUES (?, ?, ?, ?)",
+            (file_id, 42, "rejected", "test"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/catalog/clear",
+            data={"confirmation": "clear_catalog"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert "message=" in response.headers["location"]
+
+    connection = connect(db_path)
+    try:
+        catalog_count = connection.execute("SELECT COUNT(*) AS c FROM catalog_items").fetchone()["c"]
+        import_count = connection.execute("SELECT COUNT(*) AS c FROM imported_files").fetchone()["c"]
+        row_log_count = connection.execute("SELECT COUNT(*) AS c FROM import_row_log").fetchone()["c"]
+        source_count = connection.execute("SELECT COUNT(*) AS c FROM catalog_sources").fetchone()["c"]
+    finally:
+        connection.close()
+
+    assert catalog_count == 0
+    assert import_count == 0
+    assert row_log_count == 0
+    assert source_count == 1
+
+
+def test_admin_catalog_clear_requires_confirmation(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_catalog_row(db_path)
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/catalog/clear",
+            data={},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+
+    connection = connect(db_path)
+    try:
+        count = connection.execute("SELECT COUNT(*) AS c FROM catalog_items").fetchone()["c"]
+    finally:
+        connection.close()
+    assert count == 1
+
+
+def test_admin_catalog_bulk_submission_disables_row_editor_fields(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_catalog_row(db_path)
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.get("/admin/catalog")
+
+    assert response.status_code == 200
+    assert "prepareCatalogBulkAction" in response.text
+    assert "tbody input:not(.catalog-row-check), tbody textarea" in response.text
+    assert 'action="/admin/catalog/clear"' in response.text
+    assert "Очистить каталог для пересборки" in response.text

@@ -476,6 +476,19 @@ def bulk_delete_catalog_items(connection: sqlite3.Connection, item_ids: list[int
     return int(cursor.rowcount)
 
 
+def clear_catalog_for_rebuild(connection: sqlite3.Connection) -> tuple[int, int]:
+    catalog_count = int(
+        connection.execute("SELECT COUNT(*) AS count FROM catalog_items").fetchone()["count"]
+    )
+    import_count = int(
+        connection.execute("SELECT COUNT(*) AS count FROM imported_files").fetchone()["count"]
+    )
+    with connection:
+        connection.execute("DELETE FROM catalog_items")
+        connection.execute("DELETE FROM imported_files")
+    return catalog_count, import_count
+
+
 def bulk_update_catalog_items(
     connection: sqlite3.Connection,
     item_ids: list[int],
