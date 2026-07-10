@@ -76,8 +76,8 @@ flow.
 - Real ZIP import into `catalog_items`.
 - Per-file detail page with metadata, imported rows, rejected-row log, and retry
   unlock for `failed` / `no_data`.
-- RNMC value mapping for unit price without VAT, total cost without VAT, and
-  labor columns, including VAT normalization and average-value exclusion.
+- RNMC value mapping for quantity, unit price without VAT, total cost without VAT,
+  and labor columns, including VAT normalization and average-value exclusion.
 - RNMC consolidation metadata detection for object region and regional
   coefficient, with manual region override priority.
 

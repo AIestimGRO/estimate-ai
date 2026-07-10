@@ -729,6 +729,7 @@ def _extract_catalog_row_candidates(
             price=parsed_price if parsed_price is not None else price_value,
             code=code_value,
             unit=unit_value,
+            quantity=_parse_optional_value(qty_value),
             work_name=name_value,
             region=region_folder,
             added_date=_row_value(row_values, date_col),
@@ -1035,6 +1036,7 @@ def _preview_table_rows(
             price=parsed_price if parsed_price is not None else price_source_value,
             code=code_value,
             unit=unit_value,
+            quantity=_parse_optional_value(qty_value),
             work_name=name_value,
             region="preview-region",
         )

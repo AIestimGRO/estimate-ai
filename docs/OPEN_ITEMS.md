@@ -61,7 +61,6 @@ Deferred robustness rules:
   sub-header / units-row handling is still open.
 - **R5 remainder** — total/summary-row skipping (`итого` / `всего`) needs a
   config-driven decision.
-- **R10** — quantity column detection for future qty-aware output.
 - **R11** — detected-layout section writing is still pending when the template
   layout is not used.
 - **R13 full** — current R13-lite places analogs in the first free column;

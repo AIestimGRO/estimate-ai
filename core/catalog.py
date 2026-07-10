@@ -29,6 +29,7 @@ class CatalogRow:
     code: object
     unit: object
     work_name: object
+    quantity: object = None
     region: object = ""
     added_date: object = None
     total_price: object = None

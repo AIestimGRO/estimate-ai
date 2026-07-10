@@ -92,6 +92,7 @@ class CatalogItemRecord:
     region: str
     code: str
     unit: str
+    quantity: float | None
     work_name: str
     price: float
     total_price: float | None
@@ -257,7 +258,7 @@ def list_catalog_rows(
     rows = connection.execute(
         """
         SELECT
-            task_id, region, code, unit, work_name, price, added_date,
+            task_id, region, code, unit, quantity, work_name, price, added_date,
             total_price, labor_unit, labor_total,
             machine_labor_unit, machine_labor_total, regional_coefficient
         FROM catalog_items
@@ -541,6 +542,7 @@ def list_catalog_items_for_imported_file(
             catalog_items.region,
             catalog_items.code,
             catalog_items.unit,
+            catalog_items.quantity,
             catalog_items.work_name,
             catalog_items.price,
             catalog_items.total_price,
@@ -567,6 +569,7 @@ def list_catalog_items_for_imported_file(
             region=str(row["region"]),
             code=str(row["code"]),
             unit=str(row["unit"]),
+            quantity=_optional_float(row["quantity"]),
             work_name=str(row["work_name"]),
             price=float(row["price"]),
             total_price=_optional_float(row["total_price"]),
@@ -670,6 +673,7 @@ def replace_catalog_rows_for_file(
                 _text(row.region),
                 _text(row.code),
                 _text(row.unit),
+                _parse_optional_number(row.quantity),
                 _text(row.work_name),
                 price,
                 _parse_optional_number(row.total_price),
@@ -689,11 +693,11 @@ def replace_catalog_rows_for_file(
         connection.executemany(
             """
             INSERT INTO catalog_items (
-                source_id, task_id, region, code, unit, work_name, price,
+                source_id, task_id, region, code, unit, quantity, work_name, price,
                 total_price, labor_unit, labor_total, machine_labor_unit,
                 machine_labor_total, regional_coefficient, added_date, source_region_folder,
                 source_filename, source_row_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             payload[offset : offset + BATCH_SIZE],
         )
@@ -963,6 +967,7 @@ def _row_to_catalog_row(row: sqlite3.Row) -> CatalogRow:
         code=row["code"],
         unit=row["unit"],
         work_name=row["work_name"],
+        quantity=row["quantity"],
         region=row["region"],
         added_date=None if added_date is None else str(added_date),
         total_price=row["total_price"],

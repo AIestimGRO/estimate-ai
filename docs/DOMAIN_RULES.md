@@ -214,7 +214,7 @@ encode business rules that must be preserved:
 
 ## 6.1 RNMC catalog import value normalization
 
-For RNMC ZIP imports, `catalog_items.price` stores unit price without VAT. Unit
+For RNMC ZIP imports, `catalog_items.quantity` stores the source `Кол-во` value, and `catalog_items.price` stores unit price without VAT. Unit
 price headers with auxiliary materials are valid source columns when the header
 still describes a unit price. Unit-price source values marked `с НДС` are
 divided by 1.2 before storage; values marked `без НДС` are stored as-is.

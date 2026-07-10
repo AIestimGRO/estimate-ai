@@ -164,6 +164,8 @@ The catalog stores deterministic numeric values only. Workbooks are opened with
 when Excel has saved one. Numeric parsing accepts spaces, comma decimals, and
 dot decimals, then stores SQLite `REAL` values.
 
+`Кол-во` is stored in `catalog_items.quantity` as the source row quantity.
+
 The main matching price is `catalog_items.price`, which means unit price without
 VAT. The importer accepts unit-price headers with auxiliary materials when the
 header is still a unit price. If the source header says `с НДС`, the value is

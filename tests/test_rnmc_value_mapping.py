@@ -35,39 +35,13 @@ def test_import_maps_unit_price_total_and_labor_columns(tmp_path: Path) -> None:
     assert result.success_count == 1
     assert len(rows) == 1
     row = rows[0]
+    assert row.quantity == pytest.approx(10.0)
     assert row.price == pytest.approx(1000.0)
     assert row.total_price == pytest.approx(2000.0)
     assert row.labor_unit == pytest.approx(2.5)
     assert row.labor_total == pytest.approx(25.0)
     assert row.machine_labor_unit == pytest.approx(1.5)
     assert row.machine_labor_total == pytest.approx(15.0)
-
-
-def test_import_maps_ztr_headers_to_labor_columns(tmp_path: Path) -> None:
-    zip_path = tmp_path / "rnmc.zip"
-    _write_zip(
-        zip_path,
-        {
-            "Moscow/ztr.xlsx": _value_workbook_bytes(
-                price_header=_unit_price_aux_without_vat(),
-                labor_unit_header=_ztr_unit_header(),
-                labor_total_header=_ztr_total_header(),
-            )
-        },
-    )
-
-    connection = connect(tmp_path / "estimate_ai.db")
-    try:
-        init_database(connection)
-        result = import_rnmc_zip_catalog_rows(connection, str(zip_path))
-        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
-    finally:
-        connection.close()
-
-    assert result.success_count == 1
-    assert len(rows) == 1
-    assert rows[0].labor_unit == pytest.approx(2.5)
-    assert rows[0].labor_total == pytest.approx(25.0)
 
 
 def test_import_accepts_unit_price_with_auxiliary_materials_without_vat(tmp_path: Path) -> None:
@@ -128,18 +102,32 @@ def test_import_reads_workbooks_with_data_only(tmp_path: Path, monkeypatch: pyte
     assert all(call.get("data_only") is True for call in calls)
 
 
+def test_import_maps_ztr_labor_headers_to_labor_columns(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Moscow/ztr.xlsx": _ztr_workbook_bytes()})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = import_rnmc_zip_catalog_rows(connection, str(zip_path))
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+
+    assert result.success_count == 1
+    assert len(rows) == 1
+    assert rows[0].quantity == pytest.approx(2.5)
+    assert rows[0].labor_unit == pytest.approx(3.5)
+    assert rows[0].labor_total == pytest.approx(8.75)
+
+
 def _write_zip(path: Path, files: dict[str, bytes]) -> None:
     with ZipFile(path, "w") as archive:
         for name, data in files.items():
             archive.writestr(name, data)
 
 
-def _value_workbook_bytes(
-    *,
-    price_header: str,
-    labor_unit_header: str = "\u0422\u0417\u0440 \u043d\u0430 \u0435\u0434., \u0447\u0435\u043b-\u0447\u0430\u0441",
-    labor_total_header: str = "\u0422\u0417\u0440 \u0432\u0441\u0435\u0433\u043e, \u0447\u0435\u043b-\u0447\u0430\u0441",
-) -> bytes:
+def _value_workbook_bytes(*, price_header: str) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Data"
@@ -154,8 +142,8 @@ def _value_workbook_bytes(
             "\u041f\u0435\u0440\u0435\u0447\u0435\u043d\u044c \u0413\u042d\u0421\u041d/\u0424\u0415\u0420/\u0413\u042d\u0421\u041d/\u041a\u0420",
             price_header,
             "\u0418\u0442\u043e\u0433\u043e \u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c, \u0440\u0443\u0431. \u0441 \u041d\u0414\u0421",
-            labor_unit_header,
-            labor_total_header,
+            "\u0422\u0417\u0440 \u043d\u0430 \u0435\u0434., \u0447\u0435\u043b-\u0447\u0430\u0441",
+            "\u0422\u0417\u0440 \u0432\u0441\u0435\u0433\u043e, \u0447\u0435\u043b-\u0447\u0430\u0441",
             "\u0422\u0417\u043c \u043d\u0430 \u0435\u0434., \u0447\u0435\u043b-\u0447\u0430\u0441",
             "\u0422\u0417\u043c \u0432\u0441\u0435\u0433\u043e, \u0447\u0435\u043b-\u0447\u0430\u0441",
         ]
@@ -181,6 +169,32 @@ def _value_workbook_bytes(
     return _to_bytes(workbook)
 
 
+def _ztr_workbook_bytes() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Data"
+    sheet["A1"] = "№ задачи 1Ф: TASK-ZTR"
+    sheet.append([])
+    sheet.append(
+        [
+            "№ п/п",
+            "Наименование работ",
+            "Ед.изм.",
+            "Кол-во",
+            "Перечень ГЭСН/ФЕР/ТЕР/КР",
+            "Цена единицы работ, руб. без НДС",
+            "Итого стоимость, руб. без НДС",
+            "ЗТР на ед., чел-час",
+            "ЗТР всего, чел-час",
+        ]
+    )
+    sheet.append([1, "Work ZTR", "шт", "2,5", "ГЭСН01-01-001-01", 100, 250, "3,5", "8,75"])
+    sheet.append([None] * 9)
+    sheet.append([None] * 9)
+    sheet.append([None] * 9)
+    return _to_bytes(workbook)
+
+
 def _average_only_workbook_bytes() -> bytes:
     workbook = Workbook()
     sheet = workbook.active
@@ -203,14 +217,6 @@ def _average_only_workbook_bytes() -> bytes:
     sheet.append([None] * 7)
     sheet.append([None] * 7)
     return _to_bytes(workbook)
-
-
-def _ztr_unit_header() -> str:
-    return "\u0417\u0422\u0420 \u043d\u0430 \u0435\u0434., \u0447\u0435\u043b-\u0447\u0430\u0441"
-
-
-def _ztr_total_header() -> str:
-    return "\u0417\u0422\u0420 \u0432\u0441\u0435\u0433\u043e, \u0447\u0435\u043b-\u0447\u0430\u0441"
 
 
 def _unit_price_aux_without_vat() -> str:

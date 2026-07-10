@@ -64,6 +64,7 @@ def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "imported_files", "planned_start", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "imported_files", "planned_finish", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "imported_files", "regional_coefficient", "REAL")
+    _ensure_column(connection, "catalog_items", "quantity", "REAL")
     _ensure_column(connection, "catalog_items", "total_price", "REAL")
     _ensure_column(connection, "catalog_items", "labor_unit", "REAL")
     _ensure_column(connection, "catalog_items", "labor_total", "REAL")

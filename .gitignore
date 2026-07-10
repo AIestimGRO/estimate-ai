@@ -141,3 +141,7 @@ _rnmc_real_import_hardening_review/
 # RNMC ZTR labor headers delivery artifacts
 rnmc-ztr-labor-headers-updated-files.zip
 _rnmc_ztr_labor_headers_review/
+
+# RNMC quantity ZTR delivery artifacts
+rnmc-quantity-ztr-updated-files.zip
+_rnmc_quantity_ztr_review/

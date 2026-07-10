@@ -1263,7 +1263,7 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
     header = (
         '<div class="admin-form"><h2 class="section">Импортированные строки</h2>'
         '<table class="preview"><thead><tr>'
-        '<th>Excel row</th><th>Код</th><th>Ед.</th><th>Цена ед.</th>'
+        '<th>Excel row</th><th>Код</th><th>Ед.</th><th>Кол-во</th><th>Цена ед.</th>'
         '<th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
         '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th>Работа</th>'
         '</tr></thead><tbody>'
@@ -1275,6 +1275,7 @@ def _render_import_catalog_rows(rows: list[CatalogItemRecord]) -> str:
             f'<td>{row.source_row_number}</td>'
             f'<td>{html.escape(row.code)}</td>'
             f'<td>{html.escape(row.unit)}</td>'
+            f'<td>{_display_optional_number(row.quantity)}</td>'
             f'<td>{row.price:g}</td>'
             f'<td>{_display_optional_number(row.total_price)}</td>'
             f'<td>{_display_optional_number(row.labor_unit)}</td>'
