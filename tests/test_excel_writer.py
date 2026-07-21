@@ -27,6 +27,7 @@ def _make_catalog_file(
     prices: list[tuple[str, float]],
     *,
     region: str = "",
+    regions: list[str] | None = None,
 ) -> Path:
     workbook = Workbook()
     worksheet = workbook.active
@@ -38,8 +39,9 @@ def _make_catalog_file(
         worksheet.cell(row=row, column=4).value = METER
         worksheet.cell(row=row, column=7).value = price
         worksheet.cell(row=row, column=14).value = CODE
-        if region:
-            worksheet.cell(row=row, column=16).value = region
+        row_region = regions[offset] if regions is not None else region
+        if row_region:
+            worksheet.cell(row=row, column=16).value = row_region
     workbook.save(path)
     workbook.close()
     return path
@@ -51,6 +53,7 @@ def _make_estimate_file(
     base_price: float = 50.0,
     neighbour_value: object = None,
     with_coefficient: float | None = None,
+    region_name: str = REGION_NAME,
 ) -> Path:
     workbook = Workbook()
     worksheet = workbook.active
@@ -64,7 +67,7 @@ def _make_estimate_file(
         worksheet.cell(row=9, column=7).value = neighbour_value
     if with_coefficient is not None:
         worksheet.cell(row=1, column=1).value = REGION_LABEL
-        worksheet.cell(row=1, column=2).value = REGION_NAME
+        worksheet.cell(row=1, column=2).value = region_name
         worksheet.cell(row=2, column=1).value = COEFFICIENT_LABEL
         worksheet.cell(row=2, column=2).value = with_coefficient
     workbook.save(path)
@@ -214,6 +217,46 @@ def test_average_column_inserted_when_neighbour_occupied(tmp_path: Path) -> None
         workbook.close()
 
 
+def test_existing_formulas_are_repointed_when_average_column_is_inserted(
+    tmp_path: Path,
+) -> None:
+    """Regression test for the eV-grup web-app bug (2026-07).
+
+    ``Worksheet.insert_cols()`` moves cell values but does not rewrite
+    formulas living in *other* cells, so a pre-existing "ИТОГО" total (or a
+    leftover average-price formula from a prior run) silently ends up
+    summing/averaging the wrong column once the insert has shifted the real
+    data one column to the right. Real files showed this as totals summing
+    the neighbouring column and average-price formulas missing the first or
+    last analog column.
+    """
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100), ("task-2", 120)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx", neighbour_value=999)
+
+    # A pre-existing "ИТОГО" total that (before the fix) already lives in a
+    # column to the right of the insertion point (average column = 7), and
+    # therefore must be re-pointed one column to the right after the insert.
+    workbook = load_workbook(estimate, data_only=False)
+    sheet = workbook[ESTIMATE_TITLE]
+    sheet.cell(row=3, column=10).value = "=SUM($J$9:J9)"  # column J = 10
+    workbook.save(estimate)
+    workbook.close()
+
+    output = tmp_path / "out.xlsx"
+    run_and_write(catalog, estimate, output)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        # insert_cols() itself already moved the formula cell from J3 (10) to
+        # K3 (11); the fix must also update its *text* so the SUM still
+        # points at column K (its own, now-shifted column), not the stale J.
+        assert sheet.cell(row=3, column=10).value is None
+        assert sheet.cell(row=3, column=11).value == "=SUM($K$9:K9)"
+    finally:
+        workbook.close()
+
+
 def test_analog_headers_include_task_number_and_region(tmp_path: Path) -> None:
     catalog = _make_catalog_file(
         tmp_path / "catalog.xlsx",
@@ -232,6 +275,90 @@ def test_analog_headers_include_task_number_and_region(tmp_path: Path) -> None:
         assert sheet.cell(row=8, column=17).value == REGION_NAME
         assert sheet.cell(row=7, column=18).value == "task-2"
         assert sheet.cell(row=8, column=18).value == REGION_NAME
+    finally:
+        workbook.close()
+
+
+def test_analog_columns_are_grouped_own_region_first_then_az(tmp_path: Path) -> None:
+    """2026-07 rule: analog columns for the file's own region come first,
+    remaining regions follow grouped together in А-Я order."""
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("task-kostroma", 100), ("task-yakutia", 120), ("task-tula", 140)],
+        regions=["\u041a\u043e\u0441\u0442\u0440\u043e\u043c\u0430", "\u042f\u043a\u0443\u0442\u0438\u044f", "\u0422\u0443\u043b\u0430"],
+    )
+    # "71. Тульская область" should match the catalog's short "Тула" region
+    # via the curated alias table (adjective softening: тул->туль-).
+    estimate = _make_estimate_file(
+        tmp_path / "estimate.xlsx",
+        with_coefficient=1.0,
+        region_name="71. \u0422\u0443\u043b\u044c\u0441\u043a\u0430\u044f \u043e\u0431\u043b\u0430\u0441\u0442\u044c",
+    )
+    output = tmp_path / "out.xlsx"
+
+    run_and_write(catalog, estimate, output)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        # Own region (Тула) first, then the rest alphabetically: Кострома
+        # before Якутия.
+        assert sheet.cell(row=7, column=17).value == "task-tula"
+        assert sheet.cell(row=7, column=18).value == "task-kostroma"
+        assert sheet.cell(row=7, column=19).value == "task-yakutia"
+    finally:
+        workbook.close()
+
+
+def test_kr_gets_plain_code_without_suffix_when_no_analog_found(tmp_path: Path) -> None:
+    """2026-07 rule: rows with no analog still get /КР filled, but with the
+    plain ГЭСН code -- no "/КР" suffix is appended."""
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    output = tmp_path / "out.xlsx"
+
+    run_and_write(catalog, estimate, output)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=9, column=15).value == CODE
+        assert not str(sheet.cell(row=9, column=15).value).endswith(KR_END)
+    finally:
+        workbook.close()
+
+
+def test_reprocessing_reuses_existing_average_formula_column(tmp_path: Path) -> None:
+    """2026-07 rule: re-running on an already-processed file must overwrite
+    the existing "Цена средняя" formula in place, not insert a duplicate
+    column next to it."""
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100), ("task-2", 120)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+
+    # Simulate a prior run: the average-formula column already sits at
+    # base_price + 1 (column 7), referencing a since-stale analog range.
+    workbook = load_workbook(estimate, data_only=False)
+    sheet = workbook[ESTIMATE_TITLE]
+    sheet.cell(row=9, column=7).value = "=MAX(F9, IFERROR(AVERAGE(F9, Q9:Q9), F9))"
+    workbook.save(estimate)
+    workbook.close()
+
+    output = tmp_path / "out.xlsx"
+    outcome = run_and_write(catalog, estimate, output)
+
+    assert outcome.write_report.inserted_average_column is False
+    assert outcome.write_report.average_column == 7
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        # Formula rewritten in place, no leftover duplicate column: KR/section
+        # and the analog block land at their normal columns, same as a
+        # first-time run -- nothing got shifted right by a phantom insert.
+        assert sheet.cell(row=9, column=7).value == (
+            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
+        )
+        assert sheet.cell(row=9, column=17).value == 100
+        assert sheet.cell(row=9, column=18).value == 120
     finally:
         workbook.close()
 

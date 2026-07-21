@@ -96,6 +96,31 @@ def _files(catalog_bytes, estimate_bytes):
     }
 
 
+def _hidden_value(page_text, name):
+    match = re.search(rf'name="{name}"[^>]*\svalue="([^"]*)"', page_text)
+    assert match is not None, f"no hidden/prefilled field named {name!r} on the page"
+    return match.group(1)
+
+
+def _confirm(client, page, *, coefficient=None, region=None):
+    """POST /confirm using the token/sheet from a rendered confirm page.
+
+    Defaults to whatever the confirm screen pre-filled (i.e. "just click
+    confirm"); pass `coefficient`/`region` to simulate the user editing a
+    field before submitting.
+    """
+    token = _hidden_value(page.text, "token")
+    sheet = _hidden_value(page.text, "sheet")
+    if coefficient is None:
+        coefficient = _hidden_value(page.text, "coefficient")
+    if region is None:
+        region = _hidden_value(page.text, "region")
+    return client.post(
+        "/confirm",
+        data={"token": token, "sheet": sheet, "coefficient": coefficient, "region": region},
+    )
+
+
 def test_index_page_has_upload_form(client):
     response = client.get("/")
 
@@ -124,12 +149,15 @@ def test_run_from_database_without_catalog_upload(client, tmp_path, monkeypatch)
     files = {
         "estimate": ("estimate.xlsx", _template_estimate_bytes(), XLSX_MIME),
     }
-    page = client.post("/run", files=files, data={"coefficient": ""})
-
+    page = client.post("/run", files=files)
     assert page.status_code == 200
-    assert "\u0411\u0430\u0437\u0430 \u0430\u043d\u0430\u043b\u043e\u0433\u043e\u0432" in page.text
-    assert "\u0411\u0414" in page.text
-    assert '<table class="preview">' in page.text
+    assert "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u0438 \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c" in page.text
+
+    result = _confirm(client, page)
+    assert result.status_code == 200
+    assert "\u0411\u0430\u0437\u0430 \u0430\u043d\u0430\u043b\u043e\u0433\u043e\u0432" in result.text
+    assert "\u0411\u0414" in result.text
+    assert '<table class="preview">' in result.text
 
 
 def test_missing_catalog_when_database_empty(client, tmp_path, monkeypatch):
@@ -153,12 +181,15 @@ def test_missing_catalog_when_database_empty(client, tmp_path, monkeypatch):
 def test_full_run_and_download(client):
     files = _files(_catalog_bytes([("t-1", 100), ("t-2", 120)]), _template_estimate_bytes())
 
-    page = client.post("/run", files=files, data={"coefficient": ""})
-
+    page = client.post("/run", files=files)
     assert page.status_code == 200
-    assert '<table class="preview">' in page.text
-    assert CODE in page.text
-    match = re.search(r'href="(/download\?token=[0-9a-f]+)"', page.text)
+    assert "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u0438 \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c" in page.text
+
+    result = _confirm(client, page)
+    assert result.status_code == 200
+    assert '<table class="preview">' in result.text
+    assert CODE in result.text
+    match = re.search(r'href="(/download\?token=[0-9a-f]+)"', result.text)
     assert match is not None
 
     download = client.get(match.group(1))
@@ -189,10 +220,14 @@ def test_missing_estimate_shows_notice(client):
 def test_invalid_coefficient_shows_notice(client):
     files = _files(_catalog_bytes([("t-1", 100)]), _template_estimate_bytes())
 
-    page = client.post("/run", files=files, data={"coefficient": "abc"})
+    page = client.post("/run", files=files)
+    assert page.status_code == 200
 
-    assert page.status_code == 400
-    assert "\u0447\u0438\u0441\u043b\u043e\u043c" in page.text
+    result = _confirm(client, page, coefficient="abc")
+    assert result.status_code == 400
+    assert "\u0447\u0438\u0441\u043b\u043e\u043c" in result.text
+    # the user's own token/sheet must survive the error round-trip
+    assert _hidden_value(result.text, "token") == _hidden_value(page.text, "token")
 
 
 def test_multiple_sheets_choice_then_run(client):
@@ -208,15 +243,47 @@ def test_multiple_sheets_choice_then_run(client):
 
     chosen = client.get(match.group(1).replace("&amp;", "&"))
     assert chosen.status_code == 200
-    assert "/download?token=" in chosen.text
+    # sheet choice lands on the confirmation screen first, not the result
+    assert "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u0438 \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u0430\u0442\u044c" in chosen.text
+
+    result = _confirm(client, chosen)
+    assert result.status_code == 200
+    assert "/download?token=" in result.text
 
 
 def test_regional_coefficient_scales_result(client):
     files = _files(_catalog_bytes([("t-1", 100), ("t-2", 120)]), _template_estimate_bytes())
 
-    page = client.post("/run", files=files, data={"coefficient": "1,5"})
+    page = client.post("/run", files=files)
     assert page.status_code == 200
 
-    match = re.search(r'href="(/download\?token=[0-9a-f]+)"', page.text)
+    result = _confirm(client, page, coefficient="1,5")
+    assert result.status_code == 200
+
+    match = re.search(r'href="(/download\?token=[0-9a-f]+)"', result.text)
+    assert match is not None
     download = client.get(match.group(1))
     assert download.content[:2] == b"PK"
+
+
+def test_confirm_screen_shows_detected_values_and_lets_user_edit(client):
+    files = _files(_catalog_bytes([("t-1", 100)]), _template_estimate_bytes())
+
+    page = client.post("/run", files=files)
+    assert page.status_code == 200
+    assert 'name="region"' in page.text
+    assert 'name="coefficient"' in page.text
+    # nothing was found in this template file -> defaults to 1.0, and the
+    # screen must warn about it instead of silently applying it (2026-07 rule)
+    assert _hidden_value(page.text, "coefficient") == "1"
+    assert "\u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d" in page.text
+
+
+def test_confirm_screen_warns_when_coefficient_defaulted(client):
+    files = _files(_catalog_bytes([("t-1", 100)]), _template_estimate_bytes())
+
+    page = client.post("/run", files=files)
+
+    assert page.status_code == 200
+    assert "\u26a0" in page.text
+    assert "1.0" in page.text

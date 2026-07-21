@@ -13,12 +13,13 @@ is supplied by the caller so both the fixed template layout and a detected
 layout (Step 4c) can be written correctly.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.services.run_matching import EstimateRowResult, MatchingRunResult
@@ -96,8 +97,14 @@ def write_run_result(
     regional_coefficient: float = 1.0,
     sheet_title: str | None = None,
     task_color_entries: list[TaskColorEntry] | None = None,
+    target_region: str | None = None,
 ) -> WriteReport:
-    """Write `result` into a copy of the estimate workbook at `output_path`."""
+    """Write `result` into a copy of the estimate workbook at `output_path`.
+
+    `target_region` is the estimate file's own declared region (e.g. from
+    "Регион:"); when given, analog columns whose region matches it are placed
+    first (R.. rule, 2026-07). See `_regions_match` for how matching works.
+    """
     if len(row_numbers) != len(result.rows):
         raise ValueError("row_numbers length must match result.rows length")
 
@@ -113,6 +120,7 @@ def write_run_result(
         placement = _plan_average_column(worksheet, columns.base_price, row_numbers)
         if placement.needs_insert:
             worksheet.insert_cols(placement.column)
+            _shift_formulas_after_insert(worksheet, placement.column)
 
         layout_columns = _ensure_kr_and_section_columns(
             worksheet,
@@ -128,7 +136,9 @@ def write_run_result(
         output_columns = _plan_output_columns(layout_columns, placement, analog_start_base)
 
         header_row = _effective_header_row(layout_columns, row_numbers)
-        analog_plan = _build_global_analog_plan(result, output_columns.analog_start)
+        analog_plan = _build_global_analog_plan(
+            result, output_columns.analog_start, target_region
+        )
         last_data_row = max(row_numbers) if row_numbers else output_columns.analog_start
         if analog_plan.columns:
             _clear_analog_block(
@@ -184,6 +194,58 @@ class _OutputColumns:
     analog_start: int
 
 
+# Matches a column reference inside a formula, e.g. "H29", "$H$29", "AVERAGE(F32,Q32:CK32)".
+# Deliberately does not match things preceded by a letter/digit/underscore, so it
+# skips sheet-name prefixes (e.g. "Дефлятор!$P$9" is still matched correctly on P9,
+# which is what we want -- the fix must also re-point same-sheet formulas that
+# happen to reference another sheet's fixed cells is out of scope here, since those
+# don't move).
+_CELL_REF_RE = re.compile(r"(\$?)([A-Z]{1,3})(\$?)(\d+)")
+
+
+def _shift_formula_columns(formula: str, insert_at_column: int) -> str:
+    """Re-point column references in `formula` after a column was inserted.
+
+    ``Worksheet.insert_cols()`` moves cell values/styles to the right but does
+    NOT rewrite formulas living in *other* cells of the sheet (this is a known
+    openpyxl limitation -- real Excel does this automatically). Any formula
+    written before the insert that references a column >= insert_at_column
+    therefore silently ends up pointing at the wrong data once the insert has
+    shifted that data one column to the right (typical symptoms: an "ИТОГО"
+    SUM formula summing the neighbouring column instead of its own, or a
+    leftover average-price formula whose AVERAGE() range is off by one).
+
+    Call this immediately after every ``worksheet.insert_cols(insert_at_column)``.
+    """
+    if not isinstance(formula, str) or not formula.startswith("="):
+        return formula
+
+    def _replace(match: re.Match[str]) -> str:
+        dollar_col, col_letters, dollar_row, row_digits = match.groups()
+        col_index = column_index_from_string(col_letters)
+        if col_index >= insert_at_column:
+            col_index += 1
+        return f"{dollar_col}{get_column_letter(col_index)}{dollar_row}{row_digits}"
+
+    return _CELL_REF_RE.sub(_replace, formula)
+
+
+def _shift_formulas_after_insert(worksheet: Worksheet, insert_at_column: int) -> None:
+    """Fix up every existing formula on the sheet after a column insert.
+
+    The newly inserted column itself (``insert_at_column``) is left alone --
+    it is blank until the caller writes the new formula/header into it.
+    """
+    for row in worksheet.iter_rows():
+        for cell in row:
+            if cell.column == insert_at_column:
+                continue
+            if isinstance(cell.value, str) and cell.value.startswith("="):
+                shifted = _shift_formula_columns(cell.value, insert_at_column)
+                if shifted != cell.value:
+                    cell.value = shifted
+
+
 def _plan_average_column(
     worksheet: Worksheet,
     base_price_column: int,
@@ -192,10 +254,25 @@ def _plan_average_column(
     neighbour = base_price_column + 1
     occupied: set[int] = set()
     for row_number in row_numbers:
-        if worksheet.cell(row=row_number, column=neighbour).value not in (None, ""):
-            occupied.add(neighbour)
-            break
+        value = worksheet.cell(row=row_number, column=neighbour).value
+        if value in (None, ""):
+            continue
+        if _looks_like_average_formula(value):
+            # A previous run already placed the average-price formula here
+            # (re-processing an already-processed file). Reuse this column --
+            # `_write_average_formula` overwrites it with a fresh formula
+            # below -- instead of inserting a duplicate one next to it.
+            continue
+        occupied.add(neighbour)
+        break
     return resolve_average_placement(base_price_column, occupied)
+
+
+def _looks_like_average_formula(value: object) -> bool:
+    if not isinstance(value, str) or not value.startswith("="):
+        return False
+    upper = value.upper().replace(" ", "")
+    return upper.startswith("=MAX(") and "AVERAGE(" in upper
 
 
 def _plan_output_columns(columns: WriterColumns, placement, analog_start_base: int) -> _OutputColumns:
@@ -267,6 +344,7 @@ def _ensure_kr_and_section_columns(
 
     for insert_at, label in sorted(pending_inserts, key=lambda item: item[0], reverse=True):
         worksheet.insert_cols(insert_at)
+        _shift_formulas_after_insert(worksheet, insert_at)
         _write_output_header(worksheet, header_row, insert_at, label)
 
     for column, label in pending_headers:
@@ -382,12 +460,21 @@ def _is_section_header(value: object) -> bool:
 def _build_global_analog_plan(
     result: MatchingRunResult,
     analog_start: int,
+    target_region: str | None = None,
 ) -> GlobalAnalogPlan:
-    """Assign one worksheet column per (task_id, price_position) pair (Module4 step 2)."""
+    """Assign one worksheet column per (task_id, price_position) pair (Module4 step 2).
+
+    Column order (2026-07 rule): all analog columns whose region matches the
+    region of the file being processed come first (original first-seen order
+    kept as a stable tiebreaker within that group); then every remaining
+    region, grouped together, ordered alphabetically А-Я. A task's columns
+    (its price positions) are always kept adjacent.
+    """
     task_order: list[str] = []
     seen_tasks: set[str] = set()
     task_max_pi: dict[str, int] = {}
     region_by_key: dict[tuple[str, int], str] = {}
+    task_region: dict[str, str] = {}
 
     for row in result.rows:
         for analog in row.analogs:
@@ -397,12 +484,15 @@ def _build_global_analog_plan(
                 task_order.append(task_id)
             task_max_pi[task_id] = max(task_max_pi.get(task_id, 0), analog.price_position)
             region_by_key[(task_id, analog.price_position)] = analog.entry.region
+            task_region.setdefault(task_id, analog.entry.region)
+
+    ordered_tasks = _order_tasks_by_region(task_order, task_region, target_region)
 
     by_key: dict[tuple[str, int], int] = {}
     column_defs: list[AnalogColumnDef] = []
     next_column = analog_start
 
-    for task_id in task_order:
+    for task_id in ordered_tasks:
         for price_position in range(1, task_max_pi[task_id] + 1):
             key = (task_id, price_position)
             by_key[key] = next_column
@@ -418,6 +508,116 @@ def _build_global_analog_plan(
 
     last_column = next_column - 1 if column_defs else analog_start - 1
     return GlobalAnalogPlan(by_key=by_key, columns=tuple(column_defs), last_column=last_column)
+
+
+def _order_tasks_by_region(
+    task_order: list[str],
+    task_region: dict[str, str],
+    target_region: str | None,
+) -> list[str]:
+    appearance_index = {task_id: index for index, task_id in enumerate(task_order)}
+
+    def sort_key(task_id: str) -> tuple[int, str, int]:
+        region = task_region.get(task_id, "")
+        is_target = bool(target_region) and _regions_match(region, target_region)
+        rank = 0 if is_target else 1
+        region_sort = "" if is_target else _normalize_region_text(region)
+        return (rank, region_sort, appearance_index[task_id])
+
+    return sorted(task_order, key=sort_key)
+
+
+# --- Region-name matching -------------------------------------------------
+#
+# The catalog's analog region (a free-text folder name picked by whoever
+# built the catalog, e.g. "Якутия", "Тула" -- see DOMAIN_RULES.md 9.5) and
+# the estimate file's own declared region (typed by hand next to "Регион:",
+# e.g. "71. Тульская область", "14. Республика Саха (Якутия)") are two
+# unrelated, differently-worded naming systems; there is no shared code or
+# lookup table between them elsewhere in this project. The matching below is
+# therefore a best-effort heuristic, not an exact lookup:
+#   - numeric prefixes ("71. ") and common administrative suffix words
+#     ("область", "край", "округ", "республика", ...) are stripped;
+#   - text inside parentheses is also tried on its own, since official names
+#     often carry the informal/short name in parentheses, e.g.
+#     "Республика Саха (Якутия)" -> "Якутия";
+#   - a small curated table of synonym roots below handles the common
+#     Russian noun/adjective mismatch a plain prefix check misses (e.g.
+#     "Тула" vs "Тульская область" -- the adjective softens "л" to "ль",
+#     so they only share a 3-letter root, "тул", not a straightforward
+#     prefix or substring match);
+#   - anything not in the table falls back to: normalized forms equal, one
+#     contains the other, or they share the same 4-letter prefix.
+# If real-world files turn up a region pair this still gets wrong, add its
+# root to _REGION_ALIAS_GROUPS rather than special-casing whole names.
+
+_REGION_PREFIX_RE = re.compile(r"^\s*\d+\s*[.)]\s*")
+_REGION_PAREN_RE = re.compile(r"\(([^)]+)\)")
+_REGION_NON_LETTER_RE = re.compile(r"[^\u0430-\u044f\s]")
+_REGION_WHITESPACE_RE = re.compile(r"\s+")
+_REGION_SUFFIX_WORDS = (
+    "область", "обл", "край", "округ", "республика", "автономный",
+    "авт", "ао", "город", "г", "район", "р-н",
+)
+_REGION_STEM_LENGTH = 4
+
+# Curated synonym roots for regions seen in real files, where the file's
+# "Регион:" wording and the catalog's short folder name diverge more than a
+# simple prefix/substring check can bridge. A region matches a group if its
+# normalized text *contains* any one of the group's roots.
+_REGION_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"тула", "тульск"}),
+    frozenset({"кострома", "костромск"}),
+    frozenset({"якутия", "саха"}),
+    frozenset({"башкортостан", "башкирия", "башкирск"}),
+    frozenset({"челябинск"}),
+    frozenset({"забайкал"}),
+    frozenset({"ямал", "янао", "ямао"}),
+    frozenset({"урал"}),
+    frozenset({"москва", "московск"}),
+)
+
+
+def _normalize_region_text(text: str) -> str:
+    normalized = text.strip().lower().replace("\u0451", "\u0435")  # ё -> е
+    for suffix in _REGION_SUFFIX_WORDS:
+        normalized = re.sub(rf"\b{suffix}\.?\b", " ", normalized)
+    normalized = _REGION_NON_LETTER_RE.sub(" ", normalized)
+    return _REGION_WHITESPACE_RE.sub(" ", normalized).strip()
+
+
+def _region_aliases(raw_text: object) -> set[str]:
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        return set()
+
+    text = _REGION_PREFIX_RE.sub("", raw_text)
+    aliases = {_normalize_region_text(text)}
+    for parenthetical in _REGION_PAREN_RE.findall(text):
+        aliases.add(_normalize_region_text(parenthetical))
+    aliases.add(_normalize_region_text(_REGION_PAREN_RE.sub(" ", text)))
+    return {alias for alias in aliases if alias}
+
+
+def _regions_match(region_a: object, region_b: object) -> bool:
+    aliases_a = _region_aliases(region_a)
+    aliases_b = _region_aliases(region_b)
+
+    for group in _REGION_ALIAS_GROUPS:
+        a_hits = any(root in alias for alias in aliases_a for root in group)
+        b_hits = any(root in alias for alias in aliases_b for root in group)
+        if a_hits and b_hits:
+            return True
+
+    for alias_a in aliases_a:
+        for alias_b in aliases_b:
+            if alias_a == alias_b:
+                return True
+            if len(alias_a) >= _REGION_STEM_LENGTH and len(alias_b) >= _REGION_STEM_LENGTH:
+                if alias_a[:_REGION_STEM_LENGTH] == alias_b[:_REGION_STEM_LENGTH]:
+                    return True
+                if alias_a in alias_b or alias_b in alias_a:
+                    return True
+    return False
 
 
 def _clear_analog_block(
@@ -481,6 +681,11 @@ def _write_row(
 
     _write_average_formula(worksheet, row_number, columns, plan)
 
+    if row.kr_code is not None:
+        kr_cell = worksheet.cell(row=row_number, column=columns.code_kr)
+        kr_cell.number_format = "@"
+        kr_cell.value = row.kr_code
+
     if not row.has_analogs:
         return False
 
@@ -490,11 +695,6 @@ def _write_row(
         price_cell.value = round(analog.entry.price * coefficient, 2)
         price_cell.number_format = PRICE_NUMBER_FORMAT
         _apply_cell_colour(price_cell, row, analog, task_colors)
-
-    if row.kr_code is not None:
-        kr_cell = worksheet.cell(row=row_number, column=columns.code_kr)
-        kr_cell.number_format = "@"
-        kr_cell.value = row.kr_code
 
     return True
 

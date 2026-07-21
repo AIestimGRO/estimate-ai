@@ -51,6 +51,56 @@ class RunAndWriteResult:
     catalog_row_count: int = 0
 
 
+@dataclass(frozen=True)
+class EstimatePreview:
+    """Region + coefficient as detected, shown to the user before the real run.
+
+    Read-only: resolves the sheet and the regional coefficient/region exactly
+    the way `run_and_write` will, but does not touch the catalog or run any
+    matching. Used by the web UI's confirmation screen (2026-07 rule:
+    "защита от дурака" -- the detected region/coefficient must be shown and
+    editable before processing, not silently applied).
+    """
+
+    sheet_title: str
+    region_text: str | None
+    coefficient_value: float
+    coefficient_method: str
+
+
+def preview_estimate_context(
+    estimate_path: str | Path,
+    *,
+    settings: Settings | None = None,
+    selected_sheet_title: str | None = None,
+    layout_config: LayoutConfig | None = None,
+) -> EstimatePreview:
+    """Resolve sheet + region + coefficient without running the full match.
+
+    Raises the same `MultipleSheetsError` / `KeyDataNotFoundError` /
+    `EstimateReadError` as `run_and_write` for the caller to handle (e.g. the
+    web UI's existing sheet-choice screen).
+    """
+    active_settings = Settings() if settings is None else settings
+    config = load_layout_config() if layout_config is None else layout_config
+
+    estimate = load_estimate(
+        estimate_path,
+        settings=active_settings,
+        config=config,
+        selected_sheet_title=selected_sheet_title,
+    )
+    coefficient, method, region = _resolve_coefficient(
+        estimate_path, estimate.sheet_title, None, config
+    )
+    return EstimatePreview(
+        sheet_title=estimate.sheet_title,
+        region_text=region,
+        coefficient_value=coefficient,
+        coefficient_method=method,
+    )
+
+
 def run_and_write(
     catalog_path: str | Path | None,
     estimate_path: str | Path,
@@ -66,6 +116,7 @@ def run_and_write(
     demontazh_filter_enabled: bool = True,
     price_spread_limit: float | None = None,
     regional_coefficient: float | None = None,
+    target_region: str | None = None,
     layout_config: LayoutConfig | None = None,
 ) -> RunAndWriteResult:
     """Run matching over the files and write the result into a `WA` copy."""
@@ -99,12 +150,13 @@ def run_and_write(
     row_numbers = [row_number for row_number, _ in estimate.positioned_rows]
     estimate_rows = [estimate_row for _, estimate_row in estimate.positioned_rows]
 
-    coefficient, coefficient_method = _resolve_coefficient(
+    coefficient, coefficient_method, resolved_region = _resolve_coefficient(
         estimate_path,
         estimate.sheet_title,
         regional_coefficient,
         config,
     )
+    effective_region = target_region if target_region is not None else resolved_region
 
     result = run_matching(
         catalog.rows,
@@ -139,6 +191,7 @@ def run_and_write(
         regional_coefficient=coefficient,
         sheet_title=estimate.sheet_title,
         task_color_entries=task_colors,
+        target_region=effective_region,
     )
 
     return RunAndWriteResult(
@@ -217,10 +270,7 @@ def _resolve_coefficient(
     sheet_title: str,
     explicit: float | None,
     config: LayoutConfig,
-) -> tuple[float, str]:
-    if explicit is not None:
-        return explicit, "explicit"
-
+) -> tuple[float, str, str | None]:
     workbook = load_workbook(estimate_path, data_only=True)
     try:
         worksheet = workbook[sheet_title]
@@ -228,7 +278,10 @@ def _resolve_coefficient(
     finally:
         workbook.close()
 
-    return resolution.value, resolution.method
+    if explicit is not None:
+        return explicit, "explicit", resolution.region
+
+    return resolution.value, resolution.method, resolution.region
 
 
 def _resolve_output_path(

@@ -110,7 +110,7 @@ def test_regional_coefficient_applies_to_analogs_but_not_base() -> None:
     assert result.rows[0].recommended_price == 125
 
 
-def test_no_match_row_keeps_base_price_and_has_no_kr() -> None:
+def test_no_match_row_keeps_base_price_and_gets_plain_code_in_kr() -> None:
     result = run_matching(
         [catalog_row(code=CODE)],
         [estimate_row(code=OTHER_CODE, base_price=50)],
@@ -119,7 +119,8 @@ def test_no_match_row_keeps_base_price_and_has_no_kr() -> None:
 
     assert row.status == REASON_NO_MATCH
     assert not row.has_analogs
-    assert row.kr_code is None
+    # 2026-07 rule: no analog found -> /КР gets the plain ГЭСН code, no suffix.
+    assert row.kr_code == OTHER_CODE
     assert row.recommended_price == 50
     assert row.section_code == "02"
 
@@ -141,7 +142,7 @@ def test_name_excluded_estimate_row_is_skipped_but_still_priced() -> None:
 
     assert row.status == REASON_EXCLUDED_BY_NAME
     assert not row.has_analogs
-    assert row.kr_code is None
+    assert row.kr_code == CODE
     assert row.recommended_price == 50
     assert row.section_code == "01"
 
@@ -152,7 +153,7 @@ def test_invalid_input_row_has_no_recommended_price() -> None:
 
     assert row.status == REASON_INVALID_INPUT
     assert row.recommended_price is None
-    assert row.kr_code is None
+    assert row.kr_code == CODE
 
 
 def test_ratio_spread_below_default_limit_is_not_flagged() -> None:

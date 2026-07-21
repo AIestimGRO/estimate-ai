@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estimate AI — проверьте перед обработкой</title>
+  <style>$styles</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Проверьте перед обработкой</h1>
+    <p class="sub">Приложение нашло эти значения в файле. Проверьте и при
+      необходимости поправьте вручную — это защита от опечаток в шаблоне.</p>
+    $warning
+    <form method="post" action="/confirm">
+      <input type="hidden" name="token" value="$token">
+      <input type="hidden" name="sheet" value="$sheet">
+      <label>Лист сметы
+        <input type="text" value="$sheet_display" disabled>
+      </label>
+      <label>Регион ($region_source)
+        <input type="text" name="region" value="$region_value"
+               placeholder="например: 71. Тульская область">
+      </label>
+      <label>Коэффициент ($coefficient_source)
+        <input type="text" name="coefficient" inputmode="decimal" value="$coefficient_value">
+      </label>
+      <button type="submit">Подтвердить и обработать</button>
+    </form>
+    <a class="back" href="/">Назад</a>
+  </main>
+</body>
+</html>

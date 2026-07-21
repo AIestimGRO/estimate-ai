@@ -4,15 +4,19 @@ Thin HTTP layer only: it accepts two uploads, delegates to
 app.services.write_result.run_and_write, and renders the outcome. All
 matching / pricing / reading logic stays in the tested core and service
 modules. Uploaded files (and the produced `WA` workbook) are kept per session
-token so the multi-sheet choice can re-run without a re-upload.
+token so the multi-sheet choice / confirmation step can re-run without a
+re-upload.
 
 Flow:
-  GET  /                    -> upload form
-  GET  /admin               -> admin dashboard (placeholder sections)
-  GET  /admin/{section}     -> admin section placeholder
-  POST /run                 -> save uploads, run, render result / sheet choice
-  GET  /run?token=&sheet=   -> re-run stored uploads for a chosen sheet
-  GET  /download?token=     -> download the produced WA workbook
+  GET  /                       -> upload form
+  GET  /admin                  -> admin dashboard
+  GET  /admin/{section}        -> admin section
+  POST /run                    -> save uploads, resolve sheet, show
+                                   region/coefficient confirmation (or sheet
+                                   choice first, if the file has several)
+  GET  /run?token=&sheet=      -> re-run preview for a chosen sheet
+  POST /confirm                -> user-confirmed region/coefficient -> run
+  GET  /download?token=        -> download the produced WA workbook
 """
 
 import tempfile
@@ -32,7 +36,7 @@ from app.services.read_estimate import (
     KeyDataNotFoundError,
     MultipleSheetsError,
 )
-from app.services.write_result import run_and_write
+from app.services.write_result import preview_estimate_context, run_and_write
 from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_import_log
 from app.services.rnmc_excel import analyze_rnmc_zip_row_preview, import_rnmc_zip_catalog_rows
 from core.storage.catalog import (
@@ -88,6 +92,7 @@ from app.web.rendering import (
     render_admin_settings,
     render_admin_sources,
     render_choice,
+    render_confirm,
     render_error,
     render_index,
     render_result,
@@ -101,13 +106,15 @@ _INVALID = object()
 
 @dataclass
 class UploadRecord:
-    """Files and options stored for one upload token (survives sheet choice)."""
+    """Files and options stored for one upload token (survives sheet choice
+    and the region/coefficient confirmation step)."""
 
     directory: Path
     catalog_path: Path | None
     estimate_path: Path
     estimate_name: str
-    coefficient: float | None
+    coefficient: float | None = None
+    target_region: str | None = None
     use_database_catalog: bool = False
     output_path: Path | None = None
     output_name: str = ""
@@ -1106,16 +1113,8 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
     async def run(
         catalog: UploadFile | None = File(None),
         estimate: UploadFile | None = File(None),
-        coefficient: str = Form(""),
     ) -> HTMLResponse:
         state: AppState = app.state.app_state
-
-        coef = _parse_coefficient(coefficient)
-        if coef is _INVALID:
-            return HTMLResponse(
-                render_index("\u041a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0447\u0438\u0441\u043b\u043e\u043c, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440 1.15."),
-                status_code=400,
-            )
 
         if estimate is None:
             return HTMLResponse(
@@ -1162,10 +1161,9 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             catalog_path=catalog_path,
             estimate_path=estimate_path,
             estimate_name=estimate_name,
-            coefficient=None if coef is _INVALID else coef,  # type: ignore[arg-type]
             use_database_catalog=use_database_catalog,
         )
-        return _process(state, token, selected_sheet=None)
+        return _preview(state, token, selected_sheet=None)
 
     @app.get("/run", response_class=HTMLResponse)
     def run_sheet(token: str, sheet: str | None = None) -> HTMLResponse:
@@ -1178,6 +1176,43 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 ),
                 status_code=404,
             )
+        return _preview(state, token, selected_sheet=sheet)
+
+    @app.post("/confirm", response_class=HTMLResponse)
+    def confirm(
+        token: str = Form(...),
+        sheet: str = Form(...),
+        region: str = Form(""),
+        coefficient: str = Form(""),
+    ) -> HTMLResponse:
+        state: AppState = app.state.app_state
+        if token not in state.store:
+            return HTMLResponse(
+                render_error(
+                    "\u0421\u0435\u0441\u0441\u0438\u044f \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u0430",
+                    "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u0444\u0430\u0439\u043b\u044b \u0437\u0430\u043d\u043e\u0432\u043e.",
+                ),
+                status_code=404,
+            )
+
+        coef = _parse_coefficient(coefficient)
+        if coef is _INVALID or coef is None:
+            return HTMLResponse(
+                render_confirm(
+                    token,
+                    sheet,
+                    region_value=region,
+                    region_method=None,
+                    coefficient_value=coefficient,
+                    coefficient_method="explicit",
+                    error="\u041a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0447\u0438\u0441\u043b\u043e\u043c, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440 1.15.",
+                ),
+                status_code=400,
+            )
+
+        record = state.store[token]
+        record.coefficient = coef  # type: ignore[assignment]
+        record.target_region = region.strip() or None
         return _process(state, token, selected_sheet=sheet)
 
     @app.get("/download")
@@ -1251,6 +1286,42 @@ def _catalog_row_form_values(form, item_id: int) -> dict[str, object]:
 
 
 
+def _preview(state: AppState, token: str, selected_sheet: str | None) -> HTMLResponse:
+    record = state.store[token]
+    try:
+        preview = preview_estimate_context(
+            record.estimate_path,
+            selected_sheet_title=selected_sheet,
+        )
+    except MultipleSheetsError as error:
+        return HTMLResponse(render_choice(token, error.candidates))
+    except KeyDataNotFoundError as error:
+        return HTMLResponse(
+            render_error(
+                "\u041a\u043b\u044e\u0447\u0435\u0432\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b",
+                f"\u041d\u0430 \u043b\u0438\u0441\u0442\u0435 \u00ab{error.sheet_title}\u00bb \u043d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438\u0442\u044c \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043e\u043b\u044f (\u043a\u043e\u0434, \u0435\u0434\u0438\u043d\u0438\u0446\u0430 \u0438\u0437\u043c\u0435\u0440\u0435\u043d\u0438\u044f, \u0431\u0430\u0437\u043e\u0432\u0430\u044f \u0446\u0435\u043d\u0430).",
+                detail=error.report,
+            ),
+            status_code=422,
+        )
+    except EstimateReadError as error:
+        return HTMLResponse(
+            render_error("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0441\u043c\u0435\u0442\u0443", str(error)),
+            status_code=400,
+        )
+
+    return HTMLResponse(
+        render_confirm(
+            token,
+            preview.sheet_title,
+            region_value=preview.region_text or "",
+            region_method=preview.region_text,
+            coefficient_value=preview.coefficient_value,
+            coefficient_method=preview.coefficient_method,
+        )
+    )
+
+
 def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLResponse:
     record = state.store[token]
     try:
@@ -1261,6 +1332,7 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             database_path=default_database_path(),
             selected_sheet_title=selected_sheet,
             regional_coefficient=record.coefficient,
+            target_region=record.target_region,
         )
     except MultipleSheetsError as error:
         return HTMLResponse(render_choice(token, error.candidates))

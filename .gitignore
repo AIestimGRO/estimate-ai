@@ -189,3 +189,11 @@ _admin_ui_preview_table_cleanup_review/
 # Admin UI coefficient preview delivery artifacts
 estimate-ai-admin-ui-coefficient-preview.zip
 _admin_ui_coefficient_preview_review/
+
+# Claude V1 matching/writer fixes delivery artifacts
+estimate_claude_V1.zip
+_estimate_claude_v1_review/
+
+# Claude V2 confirm screen delivery artifacts
+estimate_claudeV2.zip
+_estimate_claude_v2_review/

@@ -194,13 +194,29 @@ encode business rules that must be preserved:
   `08` regardless of the table; if NOT demolition, the table's non-`08`
   entry is preferred if one exists, else falls back to `08`.
 - **`/КР` suffix** is appended to the code column for any row that ended up
-  with at least one analog (not for rows without analogs). It is added
-  only if not already present, after stripping CR/LF/tab/nbsp from the
-  base code.
+  with at least one analog. It is added only if not already present, after
+  stripping CR/LF/tab/nbsp from the base code. **(2026-07 change)** For a
+  row with **no** analog, the `/КР` column is no longer left blank: the
+  plain ГЭСН code is copied across as-is, without the suffix.
+- **Analog column order (2026-07 rule, not a VBA port):** analog columns
+  are grouped by the catalog entry's region. Columns whose region matches
+  the estimate file's own declared region (read from the "Регион:" label,
+  §10.1/R16) are placed first; all remaining regions follow, grouped
+  together, in alphabetical (А-Я) order. A task's own columns (its price
+  positions) always stay adjacent. Region-name matching between the file's
+  free-text "Регион:" value and the catalog's short folder-name region is
+  a best-effort heuristic (`_regions_match` in `core/excel_writer.py`) —
+  see the comment there for how it handles Russian adjective forms (e.g.
+  "Тула" vs "Тульская область") and its curated synonym table; extend that
+  table if a real file exposes a pair it gets wrong.
 - **Average price formula**: `=MAX(base_price, IFERROR(AVERAGE(base_price,
   analog_range), base_price))` — written as an actual Excel formula, not a
   static value, into the average/total price column. This guarantees the
-  output is never below the base price.
+  output is never below the base price. **(2026-07 change)** If the column
+  right after the base price already holds a formula of this shape (i.e.
+  the file was already processed by a prior run), it is recognized and
+  overwritten in place rather than treated as "occupied" — this avoids
+  inserting a duplicate average column next to a stale one.
 - **Regional coefficient**: read from a single configurable cell address
   on the estimate sheet (e.g. `F12`); defaults to 1 if blank, non-numeric,
   ≤ 0, or the cell address itself is not configured. Applied as a
@@ -211,52 +227,6 @@ encode business rules that must be preserved:
   (`problemFill`) = analog is part of a flagged price problem (per §5);
   grey (`dupFill`) = a second-or-later price within the same task
   (visual de-emphasis, not a data quality flag).
-
-## 6.0 Admin catalog editor rules
-
-The `/admin/catalog` editor works directly with `catalog_items`. Manual edits are
-therefore source-of-truth changes for subsequent matching runs. Text and numeric
-fields may be updated row-by-row, selected rows may be deleted, and selected rows
-may receive grouped text/numeric operations. Bulk editor actions that affect two
-or more selected rows must show a browser confirmation before submitting the
-change. Required catalog identity/value fields remain protected: `task_id`,
-`code`, and `unit` cannot be set to blank, and `price` must remain a positive
-number. Grouped arithmetic updates are limited to existing numeric columns and do
-not create persisted custom columns yet.
-
-## 6.1 RNMC catalog import value normalization
-
-For RNMC ZIP imports, `catalog_items.quantity` stores the source `Кол-во` value.
-Unit price is stored in two levels: `price_original` is the source regional unit
-price without VAT, `price_zlvl` is `price_original / regional_coefficient`, and
-`price` remains the matching/pricing working value equal to `price_zlvl`. Unit
-price headers with auxiliary materials are valid source columns when the header
-still describes a unit price. Unit-price source values marked `с НДС` are divided
-by 1.2 before `price_original` is stored; values marked `без НДС` are stored as-is.
-
-`Итого стоимость` is stored separately as one `total_price` without VAT and is
-not split into original/ZLVL levels. Average values are not source values:
-headers containing `средняя` or `ср знач` are ignored for both unit price and
-total price.
-
-Labor import mappings are deterministic: `ТЗ`, `ТЗр`, and `ЗТР` unit/total values map to
-`labor_unit` / `labor_total`; `ТЗм` unit/total values map to
-`machine_labor_unit` / `machine_labor_total`. Formula cells are read as cached
-calculated values, and numeric strings with comma or dot decimal separators are
-normalized to SQLite numeric values. File-level regional coefficient from RNMC
-consolidation metadata is stored as metadata and copied to imported catalog rows;
-it is used to compute `price_zlvl` from `price_original`. `lsr_quarter`,
-`planned_start`, and `planned_finish` are copied to every imported catalog row.
-
-- `Код раздела` is not a GESN/FER/TER/KR code and must never populate
-  `catalog_items.code`. If the actual code column is unlabeled but sits
-  immediately before `Код раздела`, that unlabeled column may be used as the
-  code source.
-- Technical numbering rows below the header and section/subsection rows with no
-  unit, quantity, code, price, or total are skipped, not imported.
-- Workbook metadata parsing must be conservative: bare local `ЛСР ...` section
-  labels are not `Год/квартал ЛСР`, month parsing must not treat words like
-  `материалы` as May, and implausible coefficients such as years are ignored.
 
 ## 7. Name exclusion rules (Module7)
 
@@ -437,89 +407,98 @@ into catalog column 16; whatever the `catRegionCol` setting is in
 picked up correctly by matching — this is an implicit dependency between
 two modules that isn't enforced anywhere in code.
 
-### 9.6 Decisions for the DB/web RNMC import module
+### 9.6 Open questions (decide before porting, do not assume)
 
-These decisions supersede the original VBA importer where noted. Do not silently
-reinterpret them.
+These are things the current VBA does that may or may not be the intended
+behavior for the database version — flagging rather than guessing:
 
-1. **Dedup/skip is by normalized base filename only.**
-   - Normal repeated imports must skip any filename already present in
-     `imported_files`, regardless of region/folder.
-   - This is intentional: RNMC filenames are expected to be globally unique. If
-     the same filename appears in two different folders/regions, that is a
-     data-quality violation, not a new regional version of the same file.
-   - Duplicate filenames inside one uploaded ZIP are recorded as
-     `duplicate_name`.
-   - Content-hash-based dedup was considered unnecessary for the current
-     workflow. Filename is the business key.
+1. **Dedup is by filename only**, case-insensitive, not by file content
+   hash or modified-date. Re-importing a corrected version of a file with
+### 9.6 Decisions for the DB-targeted ingestion module
 
-2. **Legacy `File_Log.xlsx` rows are already processed.**
-   - All legacy rows count as processed, including rows whose old `Status` value
-     is `нет данных`, `новая РНМЦ`, `0`, or another manual note.
-   - The old `Status` value is not treated as the new status. It is stored as
-     `legacy_note`; if numeric, it is also stored as `rows_ok`.
-   - Legacy rows use status `legacy_imported` unless they are duplicate filename
-     violations.
+These were open questions during VBA review. Decisions below were made
+explicitly by the product owner and supersede the original VBA behavior
+where noted. Do not silently revert to VBA behavior, and do not silently
+reinterpret these decisions — they were clarified carefully after an
+earlier draft of this section got the dedup behavior wrong (see note in
+item 1).
 
-3. **Validate at import time and store row diagnostics.**
-   - The DB/web path validates rows before writing them into `catalog_items`.
-   - Required values for a catalog row: task number, valid code, valid unit, and
-     positive numeric price.
-   - Rejected rows are written to `import_row_log` with Excel row number and a
-     reason, not silently dropped.
+1. **Dedup: default behavior is SKIP, same as VBA. "Clean replace" is an
+   explicit, separate, user-triggered action — never automatic.**
+   - Normal repeated import runs (e.g. "I added more files to the watched
+     folder, run import again") must skip any filename already present in
+     the import log, exactly like the VBA macro does. This is the default
+     and most common path — re-running an import should never silently
+     re-process or duplicate files that were already successfully
+     imported.
+   - A SEPARATE, explicitly-invoked action — "force re-import this file"
+     — must exist for the rare case where a user knowingly corrected a
+     file and wants it re-processed. Only this explicit action triggers
+     "clean replace": delete all previously-imported catalog rows whose
+     `source_file` matches, then re-import. This requires `source_file`
+     to be a reliable, queryable attribute on every catalog row in the DB
+     schema (not just descriptive metadata), so "all rows from file X"
+     can be found and deleted atomically before the replacement insert.
+   - **Filename-based identity is per (region folder + filename), not
+     filename alone.** Two files with the same filename in two different
+     region subfolders (e.g. `region1/rnmc.xlsx` and `region2/rnmc.xlsx`)
+     are different files and must be tracked/deduped independently — the
+     import log key must include the region folder, not just the
+     filename, to avoid one region's file shadowing another's.
+   - Content-hash-based dedup was considered and explicitly rejected as
+     unnecessary; identity is filename+region-folder, with explicit user
+     action required for any re-processing.
+2. **Validate at ingestion time, and produce an import log/report.** Unlike
+   the VBA macro (raw copy, validation deferred entirely to matching
+   time), the DB ingestion path must check each row at import (missing
+   price, missing/unparseable code, missing unit, etc.) and record
+   per-row validation outcomes — this becomes the basis of an import log
+   shown in the future web UI, so a user can see exactly which rows in
+   which file were rejected or are incomplete, not just a silent row
+   count. Rows that fail validation should still be logged (with the
+   specific reason), not silently dropped without a trace — the log is
+   the point.
+3. **Region from immediate parent folder name is confirmed as the correct,
+   permanent convention** — real files are always organized as
+   `<root>/<RegionName>/file.xlsx`. This VBA behavior is kept as-is, not
+   just as a stopgap. The DB ingestion module can rely on this folder
+   structure being consistent and should treat a file found outside any
+   region subfolder (e.g. directly in `<root>/`) as a data-quality error
+   to surface, not silently default a region.
+4. **One task number per file, first-matching-sheet-only is CONFIRMED
+   correct and final** — real RNMC files always have exactly one task per
+   file. The existing VBA assumption (single task number, first matching
+   worksheet) is accurate and should be kept as-is in the Python port, no
+   multi-sheet/multi-task handling is needed.
+5. **Failed imports: no auto-retry, no transient/permanent distinction —
+   matches VBA behavior. A fast manual single-file (re-)import path is a
+   required feature, not an afterthought.** There are no known real cases
+   of transient failures (e.g. file briefly locked, network drive
+   briefly unavailable) that would resolve themselves without touching
+   the file — so the system does not need to guess or distinguish error
+   types. A file that fails import is logged as failed and is NOT
+   retried automatically on subsequent folder-walk runs, same as VBA.
+   Recovery is always manual: the user fixes the file (or it was a
+   transient issue that's now resolved) and explicitly re-imports just
+   that one file — this must be a quick, low-friction action in the
+   future UI (e.g. a "retry this file" button next to its failed-import
+   log entry), not a multi-step manual process. This reuses the same
+   "force re-import" mechanism from item 1.
 
-4. **Region comes from manual override, workbook metadata, then ZIP folder.**
-   - Manual upload override has highest priority and applies to all files in the upload action.
-   - Without manual override, newer RNMC workbook labels such as `Регион расположения объекта`, `Регион объекта`, or `Регион` can supply the region.
-   - If workbook region is not detected, the immediate parent folder inside the ZIP archive is used.
-   - Detected region is stored on `imported_files.region_folder` and copied to imported catalog rows.
-   - `Региональный коэффициент` / `Коэффициент` is stored as metadata and copied to imported catalog rows, but catalog prices are not multiplied by it.
+### 9.7 Implication for the planned database
 
-5. **One task number per file and first matching worksheet are kept.**
-   - The parser extracts one task number per workbook.
-   - The first worksheet with a matching table and accepted rows wins.
-   - Multi-task/multi-sheet import is not part of the current RNMC workflow.
-
-6. **Retry is explicit.**
-   - `failed` and `no_data` records are not automatically retried.
-   - The admin UI can allow retry by changing the record to `pending`.
-   - The user then uploads the ZIP again; true one-click retry without re-upload
-     is deferred until original source workbooks are stored durably.
-
-### 9.7 Current web implementation
-
-The current admin/import implementation is documented in `docs/RNMC_IMPORT.md`.
-In short:
-
-- `/admin/imports` imports legacy `File_Log.xlsx` into `imported_files`.
-- ZIP dry-run reports `will_process`, `skipped_processed`, and
-  `duplicate_name` without database writes.
-- ZIP log recording writes new files as `pending` without catalog rows.
-- ZIP row preview opens `.xlsx` / `.xlsm` files and reports detected rows.
-- ZIP row preview must skip final already-processed filenames before reading
-  workbook bytes from the archive. Final statuses include legacy imported,
-  success, skipped, no_data, duplicate_name, and manual_checked; pending and
-  failed remain previewable for retry checks.
-- ZIP row preview is intentionally limited to 30 real body rows per workbook for
-  UI performance. The limit starts after the detected header row. Technical numbering rows and section/subsection rows before the body do not consume it. Real catalog import must still read and validate all rows.
-- ZIP row preview should render large batches in separate views for summary,
-  file statuses, workbook metadata, detected source headers, and row samples.
-- ZIP row preview UI should provide column-style client-side filters to hide
-  already-processed files, show only problem rows, hide empty rows, and search
-  within the currently rendered table. These UI filters must not change import
-  behavior or matching/pricing logic.
-- ZIP row preview UI may provide local table zoom/density controls. These are
-  presentation-only controls and must not change parsed values.
-- ZIP catalog import writes accepted rows to `catalog_items`, writes rejected
-  rows to `import_row_log`, and updates `imported_files` with statuses such as
-  `success`, `no_data`, `failed`, `skipped`, and `duplicate_name`.
-- Per-file detail pages show metadata, imported catalog rows, rejected rows, and
-  retry controls for `failed` / `no_data`.
-
-`core/ingest.py` remains a lower-level, storage-agnostic helper. The web RNMC
-ZIP import path is implemented in `app/services/rnmc_zip.py`,
-`app/services/rnmc_excel.py`, and the storage helpers in
-`core/storage/catalog.py`.
+Conceptually this module is already an ETL pipeline: walk folder → parse
+file → normalize headers → map columns → write rows. Porting it to write
+to a database table (e.g. `catalog_items`) instead of an Excel sheet range
+is a natural fit — the folder-walk, header-detection, and row-mapping
+logic carry over largely unchanged; only the write target changes. The
+"logged files" dedup dictionary becomes a query against an
+`imported_files` table, keyed by (region folder, filename) per §9.6 item
+1 — normal runs query-and-skip, exactly like VBA; only the explicit
+"force re-import" action drives a delete-then-reinsert. All five
+originally-open questions from the VBA review now have explicit product
+decisions (§9.6 items 1-5) — `core/ingest.py` can be built directly
+against this section without further clarification needed.
 
 ## 10. Flexible layout resolution (decided extension, NOT a VBA port)
 
@@ -584,6 +563,19 @@ Implemented in `core/layout.py`:
   base price; if that neighbour already holds data, a new column is inserted
   there. This function only decides the target column and whether an insert
   is needed; the Excel writer performs the actual insert/shift.
+  **(2026-07 fix)** `Worksheet.insert_cols()` (openpyxl) moves cell
+  values/styles but does **not** rewrite formulas living in other cells of
+  the sheet — any pre-existing formula referencing a column at or past the
+  insertion point silently ends up pointing at the wrong data once the
+  insert has shifted that data one column right. This was the root cause of
+  a real bug: "ИТОГО" totals summing the neighbouring column, and a stale
+  leftover average-price formula (from re-processing an already-processed
+  file) surviving next to a newly inserted one with a different, also
+  wrong, `AVERAGE()` range. `_shift_formulas_after_insert` in
+  `core/excel_writer.py` now re-points every existing formula on the sheet
+  right after each `insert_cols` call; `_plan_average_column` also now
+  recognizes an existing average-formula cell (see the 2026-07 note above)
+  and reuses it instead of inserting a duplicate.
 - **Sheet selection** (R1, `rank_sheets` / `select_sheets`): every worksheet
   is scored by how well its layout resolves. A single sheet is used
   automatically; when several sheets qualify, the result flags
@@ -603,15 +595,3 @@ richer header detection incl. merged-cell/sub-header handling (R2-R4),
 total/summary-row skipping (rest of R5), section/quantity detection
 (R10-R11), analog-column placement in the first free column (R13), and
 tolerant number/code parsing at detection time (R17-R18).
-
-## Legacy ZLVL catalog reload
-
-The prepared legacy catalog `РНМЦ_КА_ЖО_ZLVL_V3.xlsx` has a direct header mapping.
-It loads `price_original` from the non-ZLVL unit-price column, `price_zlvl` and
-`price` from the ZLVL unit-price column, `total_price` from `Итого стоимость, руб.
-без НДС`, labor from the explicit `ТЗ` / `ТЗм` columns, and row metadata
-(`source_file`, region, LSR quarter, planned dates, coefficient, and added date)
-into the corresponding `catalog_items` columns. `Итого стоимость, руб. с НДС` is
-ignored for this reload. Each distinct `source_file` value must also be recorded
-in `imported_files` as `legacy_imported`, so the normalized filename skip rule
-continues to work for future ZIP uploads.

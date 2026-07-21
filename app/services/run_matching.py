@@ -198,9 +198,13 @@ def _match_one_row(
         regional_coefficient,
     )
 
-    kr_code = None
     if match_result.has_analogs:
         kr_code = _append_kr_suffix(estimate_row.code)
+    else:
+        # No analog found: still fill the /КР column, but with the plain
+        # ГЭСН code as-is -- no "/КР" suffix is added (2026-07 rule).
+        plain_code = _normalize_code_text(estimate_row.code)
+        kr_code = plain_code if plain_code != "" else None
 
     return EstimateRowResult(
         row_index=row_index,
@@ -239,8 +243,7 @@ def _recommended_price(
     return CalculateAveragePrice(base, analog_prices)
 
 
-def _append_kr_suffix(code: object) -> str:
-    """Append the `/KR` suffix to a code, mirroring step 8 of ProcessSmeta."""
+def _normalize_code_text(code: object) -> str:
     text = "" if code is None else str(code)
     text = text.replace("\r", " ")
     text = text.replace("\n", " ")
@@ -248,7 +251,12 @@ def _append_kr_suffix(code: object) -> str:
     text = text.replace("\u00a0", " ")
     while "  " in text:
         text = text.replace("  ", " ")
-    text = text.strip()
+    return text.strip()
+
+
+def _append_kr_suffix(code: object) -> str:
+    """Append the `/KR` suffix to a code, mirroring step 8 of ProcessSmeta."""
+    text = _normalize_code_text(code)
 
     if text == "":
         return KR_END
