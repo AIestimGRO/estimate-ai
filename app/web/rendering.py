@@ -716,8 +716,14 @@ def _render_catalog_editor_filters(catalog_page: CatalogEditorPage) -> str:
         '</div>'
         '<button type="submit">Применить фильтры</button>'
         '<a class="back" href="/admin/catalog">Очистить фильтры</a>'
+        f'<a class="back" href="{html.escape(_catalog_export_url(filters))}">⬇ Экспорт в Excel (с текущими фильтрами)</a>'
         '</form>'
     )
+
+
+def _catalog_export_url(filters: dict[str, str]) -> str:
+    params = {key: value for key, value in filters.items() if value}
+    return "/admin/catalog/export" + (f"?{urlencode(params)}" if params else "")
 
 
 def _catalog_page_size_options(current: int) -> str:

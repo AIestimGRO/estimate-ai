@@ -197,3 +197,7 @@ _estimate_claude_v1_review/
 # Claude V2 confirm screen delivery artifacts
 estimate_claudeV2.zip
 _estimate_claude_v2_review/
+
+# Catalog export V3 delivery artifacts
+upd_V3.zip
+_upd_v3_review/

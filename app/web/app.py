@@ -23,7 +23,7 @@ import tempfile
 import uuid
 from urllib.parse import parse_qsl, quote, urlencode
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -58,6 +58,7 @@ from core.storage.catalog import (
     list_imported_files,
     update_catalog_item,
     update_imported_file_metadata,
+    write_catalog_export_xlsx,
 )
 from core.storage.risk_log import (
     STATUS_OPEN,
@@ -298,6 +299,41 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             )
         finally:
             connection.close()
+
+    @app.get("/admin/catalog/export")
+    def admin_catalog_export(
+        q: str = "",
+        source: str = "",
+        region: str = "",
+        task_id: str = "",
+        code: str = "",
+        unit: str = "",
+        filename: str = "",
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as handle:
+                export_path = Path(handle.name)
+            row_count = write_catalog_export_xlsx(
+                connection,
+                export_path,
+                filters={
+                    "q": q,
+                    "source": source,
+                    "region": region,
+                    "task_id": task_id,
+                    "code": code,
+                    "unit": unit,
+                    "filename": filename,
+                },
+            )
+        finally:
+            connection.close()
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        download_name = f"catalog_export_{stamp}_{row_count}rows.xlsx"
+        return FileResponse(export_path, media_type=XLSX_MIME, filename=download_name)
 
     @app.post("/admin/catalog/update-row")
     async def admin_catalog_update_row(request: Request) -> RedirectResponse:

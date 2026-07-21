@@ -34,6 +34,9 @@ from core.storage.catalog import (
     delete_catalog_item,
     list_catalog_editor_page,
     update_catalog_item,
+    iter_catalog_export_rows,
+    write_catalog_export_xlsx,
+    CATALOG_EXPORT_HEADERS,
 )
 from core.storage.rules import (
     import_rules_from_workbook,
@@ -96,6 +99,9 @@ __all__ = [
     "delete_catalog_item",
     "list_catalog_editor_page",
     "update_catalog_item",
+    "iter_catalog_export_rows",
+    "write_catalog_export_xlsx",
+    "CATALOG_EXPORT_HEADERS",
     "import_rules_from_workbook",
     "list_name_exclusion_rules",
     "list_task_color_entries",

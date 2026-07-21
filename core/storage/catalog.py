@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from numbers import Real
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Iterator
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from core.catalog import CatalogRow
 from core.excel_io import Settings, read_catalog_rows_with_positions
@@ -434,6 +434,140 @@ def list_catalog_editor_page(
         total_pages=total_pages,
         filters=normalized_filters,
     )
+
+
+# Fixed, human-facing export layout (2026-07). Kept separate from
+# CatalogEditorRow's internal field names/order on purpose: the export is a
+# stable external contract the user asked for, while the DB/editor columns
+# may keep evolving independently.
+CATALOG_EXPORT_HEADERS = (
+    "№_пп",
+    "Номер задачи",
+    "Наименование работ",
+    "Ед.изм.",
+    "Кол-во",
+    "Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС",
+    "Цена единицы работ (с учетом вспомогательных материалов), руб. без НДС ZLVL",
+    "Итого стоимость, руб. с НДС",
+    "Итого стоимость, руб. без НДС",
+    "ТЗ на ед., чел-час",
+    "ТЗ всего, чел-час",
+    "ТЗм на ед., чел-час",
+    "ТЗм всего, чел-час",
+    "Перечень ГЭСН/ФЕР/ТЕР/КР",
+    "source_file",
+    "Регион",
+    "Год Квартал ЛСР",
+    "Планируемый срок начала работ",
+    "Планируемый срок окончания работ",
+    "Региональный коэффициент",
+    "Дата добавления в каталог",
+)
+
+# catalog_items.total_price (and every price_* column) is normalized to
+# "без НДС" at import time regardless of what the source file said -- see
+# _vat_divisor() in app/services/rnmc_excel.py. There is no separate
+# "с НДС" total stored anywhere, so the export derives it from scratch.
+CATALOG_EXPORT_VAT_MULTIPLIER = 1.2
+
+
+def iter_catalog_export_rows(
+    connection: sqlite3.Connection,
+    *,
+    filters: dict[str, str] | None = None,
+) -> Iterator[CatalogEditorRow]:
+    """Stream every catalog row matching `filters`, unpaginated."""
+    normalized_filters = _catalog_editor_filters(filters or {})
+    where_sql, params = _catalog_editor_where(normalized_filters)
+    cursor = connection.execute(
+        f"""
+        SELECT
+            catalog_items.id,
+            catalog_sources.name AS source_name,
+            catalog_sources.kind AS source_kind,
+            catalog_items.task_id,
+            catalog_items.region,
+            catalog_items.code,
+            catalog_items.unit,
+            catalog_items.quantity,
+            catalog_items.work_name,
+            catalog_items.price,
+            catalog_items.price_original,
+            catalog_items.price_zlvl,
+            catalog_items.total_price,
+            catalog_items.labor_unit,
+            catalog_items.labor_total,
+            catalog_items.machine_labor_unit,
+            catalog_items.machine_labor_total,
+            catalog_items.regional_coefficient,
+            catalog_items.lsr_quarter,
+            catalog_items.planned_start,
+            catalog_items.planned_finish,
+            catalog_items.source_region_folder,
+            catalog_items.source_filename,
+            catalog_items.source_row_number,
+            catalog_items.added_date
+        FROM catalog_items
+        INNER JOIN catalog_sources ON catalog_sources.id = catalog_items.source_id
+        {where_sql}
+        ORDER BY catalog_items.id ASC
+        """,
+        params,
+    )
+    for row in cursor:
+        yield _catalog_editor_row(row)
+
+
+def write_catalog_export_xlsx(
+    connection: sqlite3.Connection,
+    output_path: str | Path,
+    *,
+    filters: dict[str, str] | None = None,
+) -> int:
+    """Export catalog_items into an .xlsx with the fixed layout above."""
+    workbook = Workbook(write_only=True)
+    sheet = workbook.create_sheet("Каталог")
+    sheet.append(CATALOG_EXPORT_HEADERS)
+
+    row_count = 0
+    for index, row in enumerate(iter_catalog_export_rows(connection, filters=filters), start=1):
+        total_without_vat = row.total_price
+        total_with_vat = (
+            None
+            if total_without_vat is None
+            else total_without_vat * CATALOG_EXPORT_VAT_MULTIPLIER
+        )
+        sheet.append(
+            [
+                index,
+                row.task_id,
+                row.work_name,
+                row.unit,
+                row.quantity,
+                row.price_original,
+                row.price_zlvl,
+                total_with_vat,
+                total_without_vat,
+                row.labor_unit,
+                row.labor_total,
+                row.machine_labor_unit,
+                row.machine_labor_total,
+                row.code,
+                row.source_filename,
+                row.region,
+                row.lsr_quarter,
+                row.planned_start,
+                row.planned_finish,
+                row.regional_coefficient,
+                row.added_date,
+            ]
+        )
+        row_count += 1
+
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(destination)
+    return row_count
 
 
 def update_catalog_item(
