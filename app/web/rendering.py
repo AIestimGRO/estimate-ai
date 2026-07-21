@@ -23,7 +23,7 @@ from app.services.rnmc_excel import (
 )
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
-from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord
+from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord, normalize_import_filename
 from core.storage.risk_log import PriceRiskLogEntry
 from core.exclusions import NameExclusionRule, TaskColorEntry
 
@@ -156,6 +156,19 @@ table.preview th, table.preview td {
   white-space: nowrap; vertical-align: top; }
 table.preview th { position: sticky; top: 0; background: #f8fafc; color: #475569;
   font-weight: 600; z-index: 1; }
+table.preview[data-rnmc-table] { table-layout: fixed; width: max-content; min-width: 100%; }
+table.preview[data-rnmc-table] th { position: sticky; top: 0; padding-right: 16px; }
+.rnmc-preview-shell table.preview[data-rnmc-table] td.path { max-width: none; }
+.rnmc-col-resizer {
+  position: absolute; top: 0; right: -6px; width: 12px; height: 100%;
+  cursor: col-resize; user-select: none; z-index: 6; touch-action: none;
+}
+.rnmc-col-resizer::after {
+  content: ""; position: absolute; top: 5px; bottom: 5px; left: 5px;
+  width: 2px; border-radius: 999px; background: #93c5fd;
+}
+.rnmc-col-resizer:hover::after, .rnmc-col-resizer.active::after { background: #2563eb; width: 3px; }
+body.rnmc-resizing, body.rnmc-resizing * { cursor: col-resize !important; user-select: none !important; }
 table.preview td.risk { color: #b91c1c; text-align: center; font-weight: 700; }
 table.preview td.wrap, table.preview th.wrap {
   white-space: normal; min-width: 260px; max-width: 520px; line-height: 1.35;
@@ -189,6 +202,11 @@ table.preview td.path {
 .rnmc-preview-toolbar .rnmc-toggle { display: flex; gap: 6px; align-items: center; padding: 7px 0; }
 .rnmc-preview-toolbar input[type=checkbox] { margin: 0; }
 .rnmc-filter-count { color: #64748b; font-size: 12px; padding: 8px 0 0; }
+.rnmc-coef-input {
+  width: 96px; min-width: 84px; padding: 5px 7px; border: 1px solid #cbd5e1;
+  border-radius: 7px; font-size: 13px; background: #fff;
+}
+.rnmc-coef-input:focus { outline: 2px solid #c7d2fe; border-color: #818cf8; }
 .rnmc-hidden-row { display: none; }
 .card.wide { max-width: min(1600px, 98vw); }
 .rnmc-tabs { margin-top: 14px; }
@@ -851,7 +869,7 @@ def render_admin_imports(
         f'{_render_rnmc_zip_dry_run_result(dry_run_result)}'
         f'{_render_rnmc_zip_row_preview_result(row_preview_result)}'
         f'{_render_legacy_catalog_preview(legacy_catalog_preview)}'
-        f'{_render_rnmc_stage_commit(stage_token, stage_filename, stage_mode)}'
+        f'{_render_rnmc_stage_commit(stage_token, stage_filename, stage_mode, row_preview_result)}'
         f'{_render_rnmc_zip_catalog_import_result(catalog_import_result)}'
         '<div class="admin-section-head"><h2 class="section">История импортов</h2>'
         '<p class="muted">Журнал обновляется автоматически после сохранения ZIP.</p></div>'
@@ -905,7 +923,12 @@ def _render_legacy_catalog_preview(preview: dict | None) -> str:
         f'{table}</div>'
     )
 
-def _render_rnmc_stage_commit(stage_token: str, stage_filename: str, stage_mode: str = "") -> str:
+def _render_rnmc_stage_commit(
+    stage_token: str,
+    stage_filename: str,
+    stage_mode: str = "",
+    row_preview_result: RnmcZipRowPreviewResult | None = None,
+) -> str:
     if not stage_token:
         return ""
     object_label = 'Файл' if stage_mode else 'Архив'
@@ -914,11 +937,24 @@ def _render_rnmc_stage_commit(stage_token: str, stage_filename: str, stage_mode:
         if stage_mode == 'legacy_catalog'
         else ''
     )
+    coefficient_note = ""
+    if stage_mode != "legacy_catalog" and row_preview_result is not None:
+        editable_count = sum(
+            1 for entry in row_preview_result.entries
+            if _rnmc_coefficient_is_editable(entry)
+        )
+        if editable_count:
+            coefficient_note = (
+                '<p class="muted">Перед сохранением проверьте колонку <strong>Коэф.</strong> '
+                'на вкладке <strong>Метаданные</strong>. Значение из этой колонки будет применено '
+                'к строкам файла: price_zlvl = price_original / коэффициент.</p>'
+            )
     return (
         '<div class="admin-confirm-box">'
         '<h2 class="section">Предпросмотр готов</h2>'
         f'<p>{object_label} <strong>{html.escape(stage_filename)}</strong> проверен.{mode_note} Сохраните данные, если всё верно.</p>'
-        '<form action="/admin/imports/rnmc-stage-commit" method="post">'
+        f'{coefficient_note}'
+        '<form id="rnmc-stage-commit-form" action="/admin/imports/rnmc-stage-commit" method="post">'
         f'<input type="hidden" name="stage_token" value="{html.escape(stage_token, quote=True)}">'
         '<button type="submit">Сохранить в каталог</button>'
         '</form></div>'
@@ -1089,7 +1125,8 @@ def _rnmc_zoom_toolbar() -> str:
         '<option value="normal" selected>Обычно</option>'
         '<option value="large">Крупно</option>'
         '</select></label>'
-        '<span class="muted">Масштаб меняет только таблицы предпросмотра.</span>'
+        '<button type="button" data-rnmc-reset-widths>Сбросить ширины</button>'
+        '<span class="muted">Масштаб меняет только таблицы предпросмотра. Ширину столбцов можно менять за синюю границу заголовка.</span>'
         '</div>'
     )
 
@@ -1166,7 +1203,96 @@ def _rnmc_preview_script() -> str:
     shell.style.setProperty('--rnmc-preview-scale', zoom);
     shell.classList.toggle('compact', density === 'compact');
     shell.classList.toggle('large', density === 'large');
+    window.setTimeout(initResizableTables, 0);
   }
+  function widthKey(table) {
+    return 'estimate-ai:rnmc-preview-widths:' + (table.getAttribute('data-rnmc-table') || 'table');
+  }
+  function tableColumns(table) {
+    return Array.prototype.slice.call(table.querySelectorAll('colgroup.rnmc-colgroup col'));
+  }
+  function saveWidths(table) {
+    var widths = tableColumns(table).map(function (col) { return parseInt(col.style.width || '0', 10) || 0; });
+    try { window.localStorage.setItem(widthKey(table), JSON.stringify(widths)); } catch (error) {}
+  }
+  function setTableWidth(table) {
+    var sum = tableColumns(table).reduce(function (total, col) {
+      return total + (parseInt(col.style.width || '0', 10) || 0);
+    }, 0);
+    if (sum > 0) table.style.width = sum + 'px';
+  }
+  function initResizableTable(table) {
+    if (!table || table.dataset.resizableReady === '1') return;
+    var headers = Array.prototype.slice.call(table.querySelectorAll('thead th'));
+    if (!headers.length) return;
+    var stored = [];
+    try { stored = JSON.parse(window.localStorage.getItem(widthKey(table)) || '[]') || []; } catch (error) { stored = []; }
+    var group = document.createElement('colgroup');
+    group.className = 'rnmc-colgroup';
+    table.insertBefore(group, table.firstChild);
+    headers.forEach(function (header, index) {
+      var width = parseInt(stored[index] || '0', 10);
+      if (!width) width = Math.max(70, Math.ceil(header.getBoundingClientRect().width || header.scrollWidth || 120));
+      var col = document.createElement('col');
+      col.style.width = width + 'px';
+      group.appendChild(col);
+      var handle = document.createElement('span');
+      handle.className = 'rnmc-col-resizer';
+      handle.setAttribute('title', 'Потяните, чтобы изменить ширину столбца');
+      handle.setAttribute('data-rnmc-col-index', String(index));
+      header.appendChild(handle);
+    });
+    setTableWidth(table);
+    table.dataset.resizableReady = '1';
+  }
+  function initResizableTables() {
+    document.querySelectorAll('table[data-rnmc-table]').forEach(initResizableTable);
+  }
+  function resetResizableTables() {
+    document.querySelectorAll('table[data-rnmc-table]').forEach(function (table) {
+      try { window.localStorage.removeItem(widthKey(table)); } catch (error) {}
+      table.dataset.resizableReady = '0';
+      var group = table.querySelector('colgroup.rnmc-colgroup');
+      if (group) group.remove();
+      table.querySelectorAll('.rnmc-col-resizer').forEach(function (handle) { handle.remove(); });
+      table.style.width = '';
+      initResizableTable(table);
+    });
+  }
+  var resizeState = null;
+  document.addEventListener('pointerdown', function (event) {
+    var handle = event.target.closest ? event.target.closest('.rnmc-col-resizer') : null;
+    if (!handle) return;
+    var table = handle.closest('table[data-rnmc-table]');
+    if (!table) return;
+    var col = tableColumns(table)[parseInt(handle.getAttribute('data-rnmc-col-index') || '0', 10)];
+    if (!col) return;
+    resizeState = {
+      table: table,
+      col: col,
+      handle: handle,
+      startX: event.clientX,
+      startWidth: parseInt(col.style.width || '0', 10) || handle.parentElement.getBoundingClientRect().width
+    };
+    handle.classList.add('active');
+    document.body.classList.add('rnmc-resizing');
+    if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  document.addEventListener('pointermove', function (event) {
+    if (!resizeState) return;
+    var next = Math.max(60, Math.round(resizeState.startWidth + event.clientX - resizeState.startX));
+    resizeState.col.style.width = next + 'px';
+    setTableWidth(resizeState.table);
+    event.preventDefault();
+  });
+  document.addEventListener('pointerup', function () {
+    if (!resizeState) return;
+    saveWidths(resizeState.table);
+    resizeState.handle.classList.remove('active');
+    document.body.classList.remove('rnmc-resizing');
+    resizeState = null;
+  });
   document.addEventListener('input', function (event) {
     var id = event.target.getAttribute('data-rnmc-search');
     if (id) applyFilter(id);
@@ -1182,6 +1308,7 @@ def _rnmc_preview_script() -> str:
   document.addEventListener('click', function (event) {
     var id = event.target.getAttribute('data-rnmc-clear');
     if (id) clearFilter(id);
+    if (event.target.hasAttribute('data-rnmc-reset-widths')) resetResizableTables();
   });
   document.querySelectorAll('[data-rnmc-table]').forEach(function (table) {
     var id = table.getAttribute('data-rnmc-table');
@@ -1313,13 +1440,33 @@ def _render_rnmc_preview_metadata_table(entries) -> str:
             f'data-problem="{_flag(problem)}" data-empty="{_flag(empty)}">'
             f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
             f'<td>{html.escape(entry.region_folder)}</td>'
-            f'<td>{_display_optional_number(entry.regional_coefficient)}</td>'
+            f'<td>{_render_rnmc_coefficient_input(entry)}</td>'
             f'<td>{html.escape(entry.lsr_quarter)}</td>'
             f'<td>{html.escape(entry.planned_start)}</td>'
             f'<td>{html.escape(entry.planned_finish)}</td>'
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table></div>'
+
+
+
+def _rnmc_coefficient_is_editable(entry) -> bool:
+    return entry.status not in {"skipped_processed", "duplicate_name", "unsupported_format", "parse_error"}
+
+
+def _render_rnmc_coefficient_input(entry) -> str:
+    value = _display_optional_number(entry.regional_coefficient)
+    if not _rnmc_coefficient_is_editable(entry):
+        return value
+    key = normalize_import_filename(entry.filename)
+    name = f"coefficient_override__{key}"
+    placeholder = "например 1.2"
+    return (
+        f'<input class="rnmc-coef-input" type="text" inputmode="decimal" '
+        f'name="{html.escape(name, quote=True)}" form="rnmc-stage-commit-form" '
+        f'value="{html.escape(value, quote=True)}" placeholder="{placeholder}" '
+        'title="Региональный коэффициент для пересчета price_original в price_zlvl">'
+    )
 
 
 def _render_rnmc_preview_header_table(entries) -> str:
@@ -1375,15 +1522,6 @@ def _render_rnmc_preview_rows_table(entries) -> str:
     rows = []
     for entry in entries:
         if not entry.sample_rows:
-            problem = entry.status != "preview_ok"
-            rows.append(
-                '<tr data-rnmc-row="1" '
-                f'data-status="{_attr(entry.status)}" data-processed="{_flag(entry.status == "skipped_processed")}" '
-                f'data-problem="{_flag(problem)}" data-empty="1">'
-                f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
-                '<td colspan="12" class="muted">Нет строк для показа</td>'
-                '</tr>'
-            )
             continue
         for sample in entry.sample_rows:
             problem = bool(sample.issue)
@@ -1416,6 +1554,10 @@ def _render_rnmc_preview_rows_table(entries) -> str:
                 f'<td colspan="12" class="muted">Показаны первые {DEFAULT_ROW_PREVIEW_LIMIT} строк тела таблицы</td>'
                 '</tr>'
             )
+    if not rows:
+        rows.append(
+            '<tr><td colspan="13" class="muted">Нет строк для показа. Подробные причины смотрите во вкладке «Файлы и статусы».</td></tr>'
+        )
     return header + ''.join(rows) + '</tbody></table></div>'
 
 def _preview_status_class(status: str) -> str:

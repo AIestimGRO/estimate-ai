@@ -48,25 +48,23 @@ Rules:
 Legacy rows receive status `legacy_imported`. Duplicate filenames in the legacy
 log are marked as `duplicate_name` after the first occurrence.
 
-## ZIP upload modes
+## ZIP upload flow
 
-`/admin/imports` supports four RNMC ZIP actions:
+The main `/admin/imports` flow is intentionally compact:
 
-1. **Dry-run** — scans the archive and reports which files will be processed,
-   skipped, or marked duplicate. No database writes.
-2. **Record ZIP in import log** — records new files as `pending`, skipped files
-   as `skipped`, and duplicate names as `duplicate_name`. No catalog rows are
-   imported.
-3. **Row preview** — opens `.xlsx` / `.xlsm` files and shows a readable
-   tabbed result: summary, file statuses, workbook metadata, detected source
-   headers, and preview rows. Final already-processed filenames are skipped
-   before workbook bytes are read. Preview shows at most 30 real body rows per
-   workbook after the detected header row; blank technical rows before the table
-   body do not consume the limit. The real catalog import still validates and
-   imports all rows. No catalog rows are imported.
-4. **Import rows into catalog** — validates and writes accepted rows to
-   `catalog_items`, updates `imported_files`, stores detected workbook metadata,
-   and writes rejected-row details to `import_row_log`.
+1. Upload a ZIP archive and run the row preview.
+2. Review the tabbed result: summary, file statuses, workbook metadata, detected
+   source headers, and preview rows. Final already-processed filenames are
+   skipped before workbook bytes are read. Preview shows at most 30 real body
+   rows per workbook after the detected header row; blank technical rows before
+   the table body do not consume the limit. The real catalog import still
+   validates and imports all rows. No catalog rows are imported during preview.
+3. Confirm the staged import. The confirmed import validates and writes accepted
+   rows to `catalog_items`, updates `imported_files`, stores detected workbook
+   metadata, and writes rejected-row details to `import_row_log`.
+
+Older technical endpoints for dry-run and manual log operations are kept for
+compatibility tests, but they are not part of the regular admin UI.
 
 ## Row preview UI
 
@@ -77,15 +75,17 @@ reviewable:
 - **Files and statuses** shows one row per workbook with status, reason, sheet,
   header row, task number, OK/rejected counts, and preview-limit marker.
 - **Metadata** shows resolved region, regional coefficient, LSR quarter, planned
-  start, and planned finish.
+  start, and planned finish. The regional coefficient is editable before final
+  save; the submitted value is applied to every imported row from that workbook.
 - **Headers** shows the original Excel header texts that were mapped to code,
   work name, unit, quantity, unit price, total price, and labor columns.
 - **Rows** shows up to 30 real body rows per workbook with normalized unit price
   without VAT, total without VAT, labor fields, and preview-only row issues.
 
 Preview tables include client-side filters for search, status, already-processed
-files, problem rows, and empty rows. They also include a local table zoom/density
-control so large RNMC batches can be reviewed without changing browser zoom.
+files, problem rows, and empty rows. They also include local table zoom/density
+controls and draggable column widths. Widths are stored in the browser per
+preview tab and can be reset from the preview toolbar.
 
 ## Region handling
 
@@ -156,10 +156,11 @@ when no manual region override is supplied. `Региональный коэфф
 
 Detected `lsr_quarter`, `planned_start`, and `planned_finish` are stored both on
 `imported_files` and on every imported `catalog_items` row from that workbook.
-Manual editing remains available on the import detail page because real RNMC
-layouts may require further iterations and additional label patterns. When a
-regional coefficient is entered manually for an import file, it is propagated to
-that file's catalog rows and their ZLVL unit price is recalculated.
+Manual editing remains available both in the import preview Metadata tab
+before saving and later on the import detail page because real RNMC layouts may
+require further iterations and additional label patterns. When a regional
+coefficient is entered manually for an import file, it is propagated to that
+file's catalog rows and their ZLVL unit price is recalculated.
 
 ## RNMC value column mapping
 
@@ -309,3 +310,14 @@ Legacy `File_Log.xlsx` migration and low-level log-only endpoints remain availab
 ## Processed-file history during rebuilds
 
 `imported_files` is the durable replacement for legacy `File_Log.xlsx` and is preserved when catalog rows are cleared for a rebuild. ZIP preview uses both final `imported_files.filename_key` values and distinct `catalog_items.source_filename` values as a recovery fallback. This prevents already loaded source files from being parsed again when an older catalog import reconstructed the log incompletely.
+
+## Legacy history recovery
+
+The regular imports page automatically restores missing processed filenames from
+`data/File_Log.xlsx` after a catalog exists. Existing `imported_files` records
+are not overwritten. This keeps ZIP skip detection stable even when a catalog
+rebuild preserved an incomplete legacy history.
+
+Preview tables have visible draggable separators in header cells. Drag a blue
+separator to resize a column; widths are stored in the browser for each preview
+table and can be reset from the preview toolbar.

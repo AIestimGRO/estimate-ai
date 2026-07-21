@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from io import BytesIO
@@ -386,9 +387,11 @@ def import_rnmc_zip_catalog_rows(
     zip_path: str,
     *,
     region_override: str = "",
+    coefficient_overrides: Mapping[str, float] | None = None,
 ) -> RnmcZipCatalogImportResult:
     """Import valid RNMC rows from a zip archive into catalog_items."""
     manual_region = _text(region_override)
+    overrides = coefficient_overrides or {}
     final_filename_keys = final_filename_keys_for_preview(connection)
     entries: list[RnmcZipCatalogImportEntry] = []
     ignored_files = 0
@@ -457,6 +460,7 @@ def import_rnmc_zip_catalog_rows(
                             filename,
                             region,
                             allow_metadata_region=manual_region == "",
+                            coefficient_override=overrides.get(key),
                         )
                     except Exception as exc:  # pragma: no cover - defensive UI boundary
                         entry = _record_non_imported_file(
@@ -484,11 +488,17 @@ def _import_workbook_bytes(
     region_folder: str,
     *,
     allow_metadata_region: bool = True,
+    coefficient_override: float | None = None,
 ) -> RnmcZipCatalogImportEntry:
     workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
         metadata = _extract_workbook_metadata(workbook)
         resolved_region = _resolve_workbook_region(region_folder, metadata, allow_metadata_region)
+        resolved_coefficient = (
+            coefficient_override
+            if coefficient_override is not None
+            else metadata.regional_coefficient
+        )
         task_number = _extract_task_number(workbook)
         for sheet in workbook.worksheets:
             header = _find_header_row(sheet)
@@ -500,7 +510,7 @@ def _import_workbook_bytes(
                 task_number,
                 resolved_region,
                 filename,
-                metadata.regional_coefficient,
+                resolved_coefficient,
                 lsr_quarter=metadata.lsr_quarter,
                 planned_start=metadata.planned_start,
                 planned_finish=metadata.planned_finish,
@@ -519,7 +529,7 @@ def _import_workbook_bytes(
                     lsr_quarter=metadata.lsr_quarter,
                     planned_start=metadata.planned_start,
                     planned_finish=metadata.planned_finish,
-                    regional_coefficient=metadata.regional_coefficient,
+                    regional_coefficient=resolved_coefficient,
                 )
                 replace_import_row_logs(
                     connection,
@@ -541,7 +551,7 @@ def _import_workbook_bytes(
                     lsr_quarter=metadata.lsr_quarter,
                     planned_start=metadata.planned_start,
                     planned_finish=metadata.planned_finish,
-                    regional_coefficient=metadata.regional_coefficient,
+                    regional_coefficient=resolved_coefficient,
                     rows_rejected=rejected,
                 )
 
@@ -571,7 +581,7 @@ def _import_workbook_bytes(
                 lsr_quarter=metadata.lsr_quarter,
                 planned_start=metadata.planned_start,
                 planned_finish=metadata.planned_finish,
-                regional_coefficient=metadata.regional_coefficient,
+                regional_coefficient=resolved_coefficient,
             )
             replace_import_row_logs(
                 connection,
@@ -593,7 +603,7 @@ def _import_workbook_bytes(
                 lsr_quarter=metadata.lsr_quarter,
                 planned_start=metadata.planned_start,
                 planned_finish=metadata.planned_finish,
-                regional_coefficient=metadata.regional_coefficient,
+                regional_coefficient=resolved_coefficient,
                 rows_imported=result.rows_imported,
                 rows_rejected=rejected + result.rows_skipped,
             )
@@ -610,7 +620,7 @@ def _import_workbook_bytes(
             lsr_quarter=metadata.lsr_quarter,
             planned_start=metadata.planned_start,
             planned_finish=metadata.planned_finish,
-            regional_coefficient=metadata.regional_coefficient,
+            regional_coefficient=resolved_coefficient,
         )
         replace_import_row_logs(connection, file_id, [])
         return _import_entry(
@@ -623,7 +633,7 @@ def _import_workbook_bytes(
             lsr_quarter=metadata.lsr_quarter,
             planned_start=metadata.planned_start,
             planned_finish=metadata.planned_finish,
-            regional_coefficient=metadata.regional_coefficient,
+            regional_coefficient=resolved_coefficient,
         )
     finally:
         workbook.close()

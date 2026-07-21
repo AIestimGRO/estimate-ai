@@ -12,10 +12,11 @@ from app.services.rnmc_excel import (
     STATUS_PREVIEW_OK,
     STATUS_SKIPPED_PROCESSED,
     analyze_rnmc_zip_row_preview,
+    import_rnmc_zip_catalog_rows,
 )
 from app.web.app import create_app
 from core.storage import connect, init_database
-from core.storage.catalog import STATUS_PENDING, import_legacy_file_log, record_imported_file
+from core.storage.catalog import RNMC_ZIP_SOURCE_NAME, STATUS_PENDING, import_legacy_file_log, list_catalog_rows, record_imported_file
 
 
 def test_rnmc_zip_row_preview_counts_rows_and_keeps_pending_previewable(tmp_path: Path) -> None:
@@ -192,6 +193,9 @@ def test_admin_can_preview_rnmc_zip_rows(tmp_path: Path, monkeypatch) -> None:
     assert 'data-rnmc-only-problems="rnmc-rows"' in response.text
     assert "data-rnmc-zoom" in response.text
     assert "Масштаб таблиц" in response.text
+    assert "data-rnmc-reset-widths" in response.text
+    assert "rnmc-col-resizer" in response.text
+    assert "estimate-ai:rnmc-preview-widths" in response.text
 
 
 
@@ -228,6 +232,66 @@ def test_admin_can_confirm_staged_rnmc_import(tmp_path: Path, monkeypatch) -> No
         connection.close()
     assert len(rows) == 2
     assert rows[0].region == "Stage Region"
+
+
+def test_zip_import_accepts_manual_coefficient_override(tmp_path: Path) -> None:
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Region/manual.xlsx": _workbook_bytes(task_number="TASK-COEF")})
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = import_rnmc_zip_catalog_rows(
+            connection,
+            str(zip_path),
+            coefficient_overrides={"manual.xlsx": 1.25},
+        )
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+
+    assert result.success_count == 1
+    assert rows[0].regional_coefficient == 1.25
+    assert rows[0].price_original == 100
+    assert rows[0].price_zlvl == 80
+    assert rows[0].price == 80
+
+
+def test_admin_staged_import_sends_metadata_coefficient_override(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(zip_path, {"Region/manual.xlsx": _workbook_bytes(task_number="TASK-ADMIN-COEF")})
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        with zip_path.open("rb") as handle:
+            preview = client.post(
+                "/admin/imports/rnmc-row-preview",
+                files={"rnmc_zip": ("rnmc.zip", handle, "application/zip")},
+            )
+        assert 'name="coefficient_override__manual.xlsx"' in preview.text
+        match = re.search(r'name="stage_token" value="([a-f0-9]+)"', preview.text)
+        assert match is not None
+        committed = client.post(
+            "/admin/imports/rnmc-stage-commit",
+            data={
+                "stage_token": match.group(1),
+                "coefficient_override__manual.xlsx": "1,25",
+            },
+        )
+
+    assert committed.status_code == 200
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+    finally:
+        connection.close()
+
+    assert rows[0].regional_coefficient == 1.25
+    assert rows[0].price_zlvl == 80
+    assert rows[0].price == 80
+
 
 def _value_preview_workbook_bytes() -> bytes:
     from io import BytesIO

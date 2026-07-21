@@ -45,7 +45,9 @@ from core.storage.catalog import (
     get_imported_file,
     import_catalog_from_excel,
     import_legacy_file_log,
+    sync_legacy_file_log_history,
     list_catalog_editor_page,
+    normalize_import_filename,
     list_catalog_items_for_imported_file,
     list_catalog_sources,
     list_import_row_logs,
@@ -128,6 +130,18 @@ class AppState:
     base_dir: Path
     store: dict[str, UploadRecord] = field(default_factory=dict)
     rnmc_stages: dict[str, RnmcImportStage] = field(default_factory=dict)
+
+
+
+def _sync_bundled_file_log(connection) -> int:
+    """Restore missing processed-file names after the legacy catalog exists."""
+    if count_catalog_rows(connection) <= 0:
+        return 0
+    path = Path(__file__).resolve().parents[2] / "data" / "File_Log.xlsx"
+    if not path.is_file():
+        return 0
+    result = sync_legacy_file_log_history(connection, path)
+    return result.rows_imported
 
 
 def create_app(base_dir: str | Path | None = None) -> FastAPI:
@@ -395,6 +409,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 sources = list_catalog_sources(connection)
                 return HTMLResponse(render_admin_sources(sources))
             if section_slug == "imports":
+                _sync_bundled_file_log(connection)
                 imports = list_imported_files(connection, status=status)
                 return HTMLResponse(
                     render_admin_imports(
@@ -587,6 +602,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         connection = connect(default_database_path())
         try:
             init_database(connection)
+            _sync_bundled_file_log(connection)
             imports = list_imported_files(connection)
             try:
                 row_preview_result = analyze_rnmc_zip_row_preview(
@@ -680,6 +696,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             connection = connect(default_database_path())
             try:
                 init_database(connection)
+                _sync_bundled_file_log(connection)
                 imports = list_imported_files(connection)
                 try:
                     row_preview_result = analyze_rnmc_zip_row_preview(
@@ -724,7 +741,23 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
 
 
     @app.post("/admin/imports/rnmc-stage-commit", response_class=HTMLResponse)
-    def admin_imports_rnmc_stage_commit(stage_token: str = Form(...)):
+    async def admin_imports_rnmc_stage_commit(
+        request: Request,
+        stage_token: str = Form(...),
+    ):
+        form = await request.form()
+        coefficient_overrides, coefficient_error = _parse_coefficient_overrides(form)
+        if coefficient_error:
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(imports, error=coefficient_error),
+                    status_code=400,
+                )
+            finally:
+                connection.close()
         stage = app.state.app_state.rnmc_stages.get(stage_token)
         if stage is None or not stage.archive_path.exists():
             connection = connect(default_database_path())
@@ -754,7 +787,10 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     )
                 else:
                     result = import_rnmc_zip_catalog_rows(
-                        connection, str(stage.archive_path), region_override=stage.region_override
+                        connection,
+                        str(stage.archive_path),
+                        region_override=stage.region_override,
+                        coefficient_overrides=coefficient_overrides,
                     )
                     message = (
                         f"{stage.original_name} импортирован: добавлено {result.rows_imported_total}, "
@@ -1292,6 +1328,25 @@ def _name_exclusion_error_message(error: ValueError) -> str:
 def _today_vba_date_serial() -> float:
     return float((date.today() - VBA_DATE_BASE).days)
 
+
+
+def _parse_coefficient_overrides(form) -> tuple[dict[str, float], str]:
+    overrides: dict[str, float] = {}
+    prefix = "coefficient_override__"
+    for key, raw_value in form.items():
+        if not str(key).startswith(prefix):
+            continue
+        filename_key = str(key)[len(prefix):]
+        parsed = _parse_coefficient(str(raw_value))
+        if parsed is _INVALID:
+            return {}, f"Некорректный региональный коэффициент для {filename_key}: {raw_value}"
+        if parsed is None:
+            continue
+        coefficient = float(parsed)
+        if coefficient <= 0:
+            return {}, f"Региональный коэффициент для {filename_key} должен быть больше 0."
+        overrides[normalize_import_filename(filename_key)] = coefficient
+    return overrides, ""
 
 def _parse_coefficient(text: str) -> float | None | object:
     value = (text or "").strip()

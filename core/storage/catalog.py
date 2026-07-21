@@ -752,6 +752,79 @@ def import_legacy_file_log(
         workbook.close()
 
 
+def sync_legacy_file_log_history(
+    connection: sqlite3.Connection,
+    workbook_path: str | Path | BinaryIO,
+    *,
+    source_name: str = LEGACY_FILE_LOG_SOURCE_NAME,
+) -> LegacyFileLogImportResult:
+    """Add missing legacy File_Log names without overwriting current import records."""
+    source_id = _get_or_create_source(
+        connection,
+        source_name,
+        kind=LEGACY_FILE_LOG_SOURCE_KIND,
+    )
+    existing_keys = {
+        _text(row["filename_key"])
+        for row in connection.execute(
+            "SELECT DISTINCT filename_key FROM imported_files WHERE filename_key <> ''"
+        ).fetchall()
+        if _text(row["filename_key"])
+    }
+    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    try:
+        sheet = workbook["FileLog"] if "FileLog" in workbook.sheetnames else workbook.active
+        headers = _legacy_file_log_headers(sheet)
+        seen: set[str] = set()
+        rows_seen = 0
+        rows_imported = 0
+        duplicates = 0
+        empty_rows = 0
+        for values in sheet.iter_rows(min_row=2, values_only=True):
+            row = _legacy_file_log_row(values, headers)
+            if _row_is_empty(row):
+                empty_rows += 1
+                continue
+            filename = _text(row.get("filename"))
+            key = normalize_import_filename(filename)
+            if not filename or not key:
+                empty_rows += 1
+                continue
+            rows_seen += 1
+            if key in seen:
+                duplicates += 1
+                continue
+            seen.add(key)
+            if key in existing_keys:
+                continue
+            region = _region_from_folder_text(row.get("region_folder"))
+            legacy_note = _text(row.get("legacy_note"))
+            _record_imported_file(
+                connection,
+                source_id=source_id,
+                region_folder=region,
+                filename=filename,
+                status=STATUS_LEGACY_IMPORTED,
+                rows_ok=_legacy_rows_ok(legacy_note),
+                rows_rejected=0,
+                legacy_note=legacy_note,
+                lsr_quarter=_text(row.get("lsr_quarter")),
+                planned_start=_text(row.get("planned_start")),
+                planned_finish=_text(row.get("planned_finish")),
+            )
+            existing_keys.add(key)
+            rows_imported += 1
+        connection.commit()
+        return LegacyFileLogImportResult(
+            rows_seen=rows_seen,
+            rows_imported=rows_imported,
+            duplicates=duplicates,
+            empty_rows=empty_rows,
+        )
+    finally:
+        workbook.close()
+
+
 def filename_is_processed(connection: sqlite3.Connection, filename: str) -> bool:
     return _filename_has_status(connection, filename, PROCESSED_FILE_STATUSES)
 

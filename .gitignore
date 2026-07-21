@@ -177,3 +177,15 @@ _admin_ui_maintenance_clear_review/
 # Admin UI history repaired delivery artifacts
 estimate-ai-admin-ui-history-repaired.zip
 _admin_ui_history_repaired_review/
+
+# Admin UI preview fixed v2 delivery artifacts
+estimate-ai-admin-ui-preview-fixed-v2.zip
+_admin_ui_preview_fixed_v2_review/
+
+# Admin UI preview table cleanup delivery artifacts
+estimate-ai-admin-ui-preview-table-cleanup.zip
+_admin_ui_preview_table_cleanup_review/
+
+# Admin UI coefficient preview delivery artifacts
+estimate-ai-admin-ui-coefficient-preview.zip
+_admin_ui_coefficient_preview_review/
