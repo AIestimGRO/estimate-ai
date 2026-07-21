@@ -31,7 +31,16 @@ from typing import Any, Protocol
 
 NBSP = "\u00a0"
 
-DEFAULT_MAX_BLANK_RUN = 5
+# 2026-07 fix: real multi-object estimates commonly have 5+ consecutive rows
+# holding only section/category text ("Раздел N", "Оборудование", "Материал
+# не требующий монтажа", the next object's own title, ...) with no
+# code/unit/price -- i.e. "blank" per the key-columns definition used by
+# data_row_numbers(). The old default of 5 was hit exactly by such a block
+# and silently truncated the read, dropping every real row after it (a whole
+# subsequent object, in one observed production file). 50 comfortably covers
+# any realistic nesting depth while still bailing out of a genuinely huge
+# trailing junk block.
+DEFAULT_MAX_BLANK_RUN = 50
 
 FIELD_WORK_NAME = "work_name"
 FIELD_UNIT = "unit"

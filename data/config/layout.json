@@ -5,7 +5,7 @@
     "min_matched_fields": 2
   },
   "data_scan": {
-    "max_blank_run": 5
+    "max_blank_run": 50
   },
   "field_priority": ["base_price", "unit", "work_name", "section", "code"],
   "fields": {

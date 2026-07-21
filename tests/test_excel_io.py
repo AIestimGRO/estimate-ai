@@ -4,7 +4,7 @@ from pathlib import Path
 from openpyxl import Workbook
 
 from core.catalog import _catalog_date_serial
-from core.excel_io import read_catalog_rows, read_estimate_rows
+from core.excel_io import read_catalog_rows, read_estimate_rows, read_estimate_rows_by_columns
 
 
 CATALOG_SHEET = "\u041a\u0430\u0442\u0430\u043b\u043e\u0433 2026"
@@ -167,3 +167,69 @@ def test_read_catalog_prefers_template_price_column_when_headers_duplicate(
     rows = read_catalog_rows(save_workbook(workbook, fixture_path(tmp_path, "dup-price.xlsx")))
 
     assert rows[0].price == 123.45
+
+
+def test_read_estimate_rows_by_columns_survives_a_run_of_section_headers(
+    tmp_path: Path,
+) -> None:
+    """Regression test for a real production bug (2026-07): a real estimate
+    had 5 consecutive rows holding only a section/object title (no code,
+    unit or price -- e.g. object title, "Раздел N", "Оборудование",
+    "Материал не требующий монтажа", "ЗИП") between two objects. That run
+    exactly matched the old max_blank_run default of 5, so the scan stopped
+    there and every row of the *next* object (700+ real line items in the
+    reported file) was silently dropped -- no error, no warning, nothing in
+    the output.
+    """
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "\u0421\u043c\u0435\u0442\u0430"
+
+    header_row = 1
+    worksheet.cell(row=header_row, column=1).value = CODE_HEADER
+    worksheet.cell(row=header_row, column=2).value = UNIT_HEADER
+    worksheet.cell(row=header_row, column=3).value = WORK_HEADER
+    worksheet.cell(row=header_row, column=4).value = PRICE_HEADER
+
+    def write_item(row: int, code: str, price: float) -> None:
+        worksheet.cell(row=row, column=1).value = code
+        worksheet.cell(row=row, column=2).value = METER
+        worksheet.cell(row=row, column=3).value = f"\u0420\u0430\u0431\u043e\u0442\u0430 {row}"
+        worksheet.cell(row=row, column=4).value = price
+
+    # First object: a couple of real line items.
+    write_item(2, "\u0413\u042d\u0421\u041d01-01-001-01", 100.0)
+    write_item(3, "\u0413\u042d\u0421\u041d01-01-001-02", 200.0)
+
+    # Exactly 5 consecutive "section header only" rows -- the real-world
+    # pattern: object title, раздел, then a couple of category labels.
+    section_titles = [
+        "\u041e\u0431\u044a\u0435\u043a\u0442 2",
+        "\u0420\u0430\u0437\u0434\u0435\u043b 1",
+        "\u041e\u0431\u043e\u0440\u0443\u0434\u043e\u0432\u0430\u043d\u0438\u0435",
+        "\u041c\u0430\u0442\u0435\u0440\u0438\u0430\u043b \u043d\u0435 \u0442\u0440\u0435\u0431\u0443\u044e\u0449\u0438\u0439 \u043c\u043e\u043d\u0442\u0430\u0436\u0430",
+        "\u0417\u0418\u041f",
+    ]
+    for offset, title in enumerate(section_titles):
+        worksheet.cell(row=4 + offset, column=3).value = title
+
+    # Second object: real line items that must NOT be dropped.
+    write_item(9, "\u0413\u042d\u0421\u041d02-01-001-01", 300.0)
+    write_item(10, "\u0413\u042d\u0421\u041d02-01-001-02", 400.0)
+
+    rows = read_estimate_rows_by_columns(
+        worksheet,
+        header_row=header_row,
+        code_column=1,
+        unit_column=2,
+        work_name_column=3,
+        base_price_column=4,
+    )
+
+    codes = [row.code for _, row in rows]
+    assert codes == [
+        "\u0413\u042d\u0421\u041d01-01-001-01",
+        "\u0413\u042d\u0421\u041d01-01-001-02",
+        "\u0413\u042d\u0421\u041d02-01-001-01",
+        "\u0413\u042d\u0421\u041d02-01-001-02",
+    ], "rows after the section-header block were dropped -- the truncation bug is back"
