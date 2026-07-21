@@ -19,6 +19,7 @@ Flow:
   GET  /download?token=        -> download the produced WA workbook
 """
 
+import sys
 import tempfile
 import uuid
 from urllib.parse import parse_qsl, quote, urlencode
@@ -28,6 +29,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
+from starlette.background import BackgroundTask
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.services.catalog_source import CatalogNotAvailableError, database_has_catalog
@@ -310,30 +312,50 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         unit: str = "",
         filename: str = "",
     ):
-        connection = connect(default_database_path())
+        export_path: Path | None = None
         try:
-            init_database(connection)
-            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as handle:
-                export_path = Path(handle.name)
-            row_count = write_catalog_export_xlsx(
-                connection,
-                export_path,
-                filters={
-                    "q": q,
-                    "source": source,
-                    "region": region,
-                    "task_id": task_id,
-                    "code": code,
-                    "unit": unit,
-                    "filename": filename,
-                },
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as handle:
+                    export_path = Path(handle.name)
+                row_count = write_catalog_export_xlsx(
+                    connection,
+                    export_path,
+                    filters={
+                        "q": q,
+                        "source": source,
+                        "region": region,
+                        "task_id": task_id,
+                        "code": code,
+                        "unit": unit,
+                        "filename": filename,
+                    },
+                )
+            finally:
+                connection.close()
+        except Exception as error:  # noqa: BLE001 - surface it instead of a bare 500
+            if export_path is not None and export_path.exists():
+                export_path.unlink(missing_ok=True)
+            print(f"[admin_catalog_export] failed: {error!r}", file=sys.stderr)
+            return HTMLResponse(
+                render_error(
+                    "Экспорт не удался",
+                    "Произошла ошибка при выгрузке каталога в Excel. "
+                    "Смотрите логи сервера для деталей.",
+                    detail=repr(error),
+                ),
+                status_code=500,
             )
-        finally:
-            connection.close()
 
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         download_name = f"catalog_export_{stamp}_{row_count}rows.xlsx"
-        return FileResponse(export_path, media_type=XLSX_MIME, filename=download_name)
+        return FileResponse(
+            export_path,
+            media_type=XLSX_MIME,
+            filename=download_name,
+            background=BackgroundTask(_delete_temp_file, export_path),
+        )
 
     @app.post("/admin/catalog/update-row")
     async def admin_catalog_update_row(request: Request) -> RedirectResponse:
@@ -1464,6 +1486,14 @@ def _parse_coefficient(text: str) -> float | None | object:
         return float(value.replace(",", "."))
     except ValueError:
         return _INVALID
+
+
+def _delete_temp_file(path: Path) -> None:
+    """Best-effort cleanup for the export route's temp .xlsx after it's sent."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _save(directory: Path, name: str, content: bytes) -> Path:

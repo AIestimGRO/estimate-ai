@@ -254,6 +254,46 @@ def test_admin_catalog_export_route_respects_filters(tmp_path, monkeypatch) -> N
     assert "1rows.xlsx" in response.headers["content-disposition"]
 
 
+def test_admin_catalog_export_route_shows_error_page_on_failure(tmp_path, monkeypatch) -> None:
+    """A crash inside the writer must render the app's own error page, not a
+    bare/blank 500 -- this was previously indistinguishable from the button
+    silently doing nothing."""
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_catalog_row(db_path)
+
+    import app.web.app as app_module
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("disk full (simulated)")
+
+    monkeypatch.setattr(app_module, "write_catalog_export_xlsx", _boom)
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.get("/admin/catalog/export")
+
+    assert response.status_code == 500
+    assert "Экспорт не удался" in response.text
+    assert "disk full" in response.text
+
+
+def test_admin_catalog_export_route_cleans_up_temp_file(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_catalog_row(db_path)
+
+    tmp_root = tmp_path / "downloads_tmp"
+    tmp_root.mkdir()
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_root))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.get("/admin/catalog/export")
+
+    assert response.status_code == 200
+    leftover = list(tmp_root.glob("*.xlsx"))
+    assert leftover == [], f"temp export file(s) not cleaned up: {leftover}"
+
+
 def test_cli_export_catalog_writes_file(tmp_path) -> None:
     db_path = tmp_path / "estimate_ai.db"
     _seed_catalog_row(db_path)
