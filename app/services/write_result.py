@@ -27,9 +27,12 @@ from core.storage import (
     connect,
     database_is_available,
     init_database,
+    count_tkp_items,
+    list_tkp_items,
     load_gesn_exceptions,
     persist_flagged_risks,
 )
+from core.tkp_matching import TkpCatalogEntry, build_tkp_catalog_index
 
 WA_SUFFIX = " WA"
 
@@ -49,6 +52,8 @@ class RunAndWriteResult:
     name_exclusion_rule_count: int = 0
     catalog_source: str = ""
     catalog_row_count: int = 0
+    tkp_enabled: bool = False
+    tkp_catalog_row_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -119,6 +124,7 @@ def run_and_write(
     regional_coefficient: float | None = None,
     target_region: str | None = None,
     layout_config: LayoutConfig | None = None,
+    use_tkp_analogs: bool = False,
 ) -> RunAndWriteResult:
     """Run matching over the files and write the result into a `WA` copy."""
     active_settings = Settings() if settings is None else settings
@@ -150,6 +156,7 @@ def run_and_write(
     )
     row_numbers = [row_number for row_number, _ in estimate.positioned_rows]
     estimate_rows = [estimate_row for _, estimate_row in estimate.positioned_rows]
+    tkp_catalog_index = _load_tkp_catalog_index(database_path) if use_tkp_analogs else []
 
     coefficient, coefficient_method, resolved_region = _resolve_coefficient(
         estimate_path,
@@ -167,6 +174,8 @@ def run_and_write(
         demontazh_filter_enabled=demontazh_filter_enabled,
         price_spread_limit=spread_limit,
         regional_coefficient=coefficient,
+        tkp_catalog_index=tkp_catalog_index,
+        use_tkp_analogs=use_tkp_analogs,
     )
 
     _persist_risk_log(
@@ -194,6 +203,7 @@ def run_and_write(
         task_color_entries=task_colors,
         task_highlight_reasons=task_highlight_reasons,
         target_region=effective_region,
+        use_tkp_analogs=use_tkp_analogs,
     )
 
     return RunAndWriteResult(
@@ -208,7 +218,29 @@ def run_and_write(
         name_exclusion_rule_count=len(exclusion_rules),
         catalog_source=catalog.source_label,
         catalog_row_count=catalog.row_count,
+        tkp_enabled=use_tkp_analogs,
+        tkp_catalog_row_count=len(tkp_catalog_index),
     )
+
+
+def _load_tkp_catalog_index(
+    database_path: str | Path | None,
+) -> list[TkpCatalogEntry]:
+    """Load and normalize the full TKP catalog once for one estimate run."""
+    if not database_is_available(database_path):
+        return []
+
+    connection = connect(database_path)
+    try:
+        init_database(connection)
+        item_count = count_tkp_items(connection)
+        if item_count <= 0:
+            return []
+        return build_tkp_catalog_index(
+            list_tkp_items(connection, limit=item_count)
+        )
+    finally:
+        connection.close()
 
 
 def _resolve_macro_settings(

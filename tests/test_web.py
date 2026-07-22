@@ -102,7 +102,7 @@ def _hidden_value(page_text, name):
     return match.group(1)
 
 
-def _confirm(client, page, *, coefficient=None, region=None):
+def _confirm(client, page, *, coefficient=None, region=None, use_tkp=False):
     """POST /confirm using the token/sheet from a rendered confirm page.
 
     Defaults to whatever the confirm screen pre-filled (i.e. "just click
@@ -115,10 +115,10 @@ def _confirm(client, page, *, coefficient=None, region=None):
         coefficient = _hidden_value(page.text, "coefficient")
     if region is None:
         region = _hidden_value(page.text, "region")
-    return client.post(
-        "/confirm",
-        data={"token": token, "sheet": sheet, "coefficient": coefficient, "region": region},
-    )
+    data = {"token": token, "sheet": sheet, "coefficient": coefficient, "region": region}
+    if use_tkp:
+        data["use_tkp_analogs"] = "1"
+    return client.post("/confirm", data=data)
 
 
 def test_index_page_has_upload_form(client):
@@ -137,6 +137,28 @@ def _seed_database(db_path, catalog_bytes):
     try:
         init_database(connection)
         import_catalog_from_excel(connection, catalog_file, source_name="main")
+    finally:
+        connection.close()
+
+
+def _seed_tkp_item(db_path):
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        cursor = connection.execute(
+            "INSERT INTO tkp_sources (file_name, task_no, item_count) VALUES (?, ?, ?)",
+            ("tkp-source.xlsx", "TKP-77", 1),
+        )
+        connection.execute(
+            """
+            INSERT INTO tkp_items (
+                source_id, item_name, unit, winner_unit_price_no_vat,
+                winner_name, task_no
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (cursor.lastrowid, INSTALLATION, METER, 200.0, "winner", "TKP-77"),
+        )
+        connection.commit()
     finally:
         connection.close()
 
@@ -196,6 +218,35 @@ def test_full_run_and_download(client):
     assert download.status_code == 200
     assert download.content[:2] == b"PK"
     assert "estimate%20WA.xlsx" in download.headers["content-disposition"]
+
+
+def test_tkp_toggle_writes_best_candidate_to_download(client, tmp_path, monkeypatch):
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_database(db_path, _catalog_bytes([("t-1", 100)]))
+    _seed_tkp_item(db_path)
+
+    files = {"estimate": ("estimate.xlsx", _template_estimate_bytes(), XLSX_MIME)}
+    page = client.post("/run", files=files)
+    result = _confirm(client, page, use_tkp=True)
+
+    assert result.status_code == 200
+    assert "\u0410\u043d\u0430\u043b\u043e\u0433\u0438 \u0438\u0437 \u0422\u041a\u041f" in result.text
+    match = re.search(r'href="(/download\?token=[0-9a-f]+)"', result.text)
+    assert match is not None
+    download = client.get(match.group(1))
+
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(BytesIO(download.content), data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=7, column=18).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
+        assert sheet.cell(row=9, column=18).value == 200
+        assert sheet.cell(row=9, column=19).value == INSTALLATION
+        assert sheet.cell(row=9, column=20).value == "TKP-77"
+    finally:
+        workbook.close()
 
 
 def test_key_data_not_found_page(client):
@@ -277,6 +328,8 @@ def test_confirm_screen_shows_detected_values_and_lets_user_edit(client):
     # screen must warn about it instead of silently applying it (2026-07 rule)
     assert _hidden_value(page.text, "coefficient") == "1"
     assert "\u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d" in page.text
+    assert 'name="use_tkp_analogs"' in page.text
+    assert 'name="use_tkp_analogs" value="1" checked' not in page.text
 
 
 def test_confirm_screen_warns_when_coefficient_defaulted(client):

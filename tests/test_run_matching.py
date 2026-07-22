@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from openpyxl import Workbook
@@ -25,6 +26,7 @@ from core.risk import (
     build_dem_key,
     build_gesn_exception_key,
 )
+from core.tkp_matching import build_tkp_catalog_index
 
 
 METER = "\u043c"
@@ -108,6 +110,66 @@ def test_regional_coefficient_applies_to_analogs_but_not_base() -> None:
 
     # Base stays 50, analog becomes 100 * 2 = 200 -> AVERAGE(50, 200) = 125.
     assert result.rows[0].recommended_price == 125
+
+
+def test_tkp_best_match_is_separate_from_rnmc_and_included_in_average() -> None:
+    tkp_index = build_tkp_catalog_index(
+        [
+            SimpleNamespace(
+                id=1,
+                item_name=INSTALLATION,
+                unit=METER,
+                winner_unit_price_no_vat=200.0,
+                winner_name="winner",
+                source_file_name="source.xlsx",
+                task_no="tkp-42",
+            )
+        ]
+    )
+
+    result = run_matching(
+        [catalog_row(price=100)],
+        [estimate_row(base_price=50)],
+        regional_coefficient=2.0,
+        tkp_catalog_index=tkp_index,
+        use_tkp_analogs=True,
+    )
+    row = result.rows[0]
+
+    assert [analog.entry.price for analog in row.analogs] == [100]
+    assert row.tkp_match is not None
+    assert row.tkp_match.entry.task_no == "tkp-42"
+    assert result.matched_row_count == 1
+    assert result.tkp_matched_row_count == 1
+    # RNMC is scaled to 200, TKP remains 200: AVERAGE(50, 200, 200) = 150.
+    assert row.recommended_price == 150
+
+
+def test_tkp_catalog_is_ignored_when_toggle_is_off() -> None:
+    tkp_index = build_tkp_catalog_index(
+        [
+            SimpleNamespace(
+                id=1,
+                item_name=INSTALLATION,
+                unit=METER,
+                winner_unit_price_no_vat=200.0,
+                winner_name="winner",
+                source_file_name="source.xlsx",
+                task_no="tkp-42",
+            )
+        ]
+    )
+
+    result = run_matching(
+        [catalog_row(price=100)],
+        [estimate_row(base_price=50)],
+        tkp_catalog_index=tkp_index,
+        use_tkp_analogs=False,
+    )
+
+    assert result.rows[0].tkp_match is None
+    assert result.rows[0].recommended_price == 75
+    assert result.tkp_matched_row_count == 0
 
 
 def test_no_match_row_keeps_base_price_and_gets_plain_code_in_kr() -> None:

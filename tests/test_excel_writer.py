@@ -7,6 +7,7 @@ from app.services.write_result import run_and_write
 from core.excel_writer import PROBLEM_FILL, TASK_FILL
 from core.exclusions import TaskColorEntry, TaskHighlightReason
 from core.risk import REASON_RATIO_EXCEEDED
+from core.storage import connect, init_database
 
 METER = "\u043c"
 CODE = "\u0413\u042d\u0421\u041d01-01-001-01"
@@ -20,6 +21,28 @@ CATALOG_TITLE = "\u041a\u0430\u0442\u0430\u043b\u043e\u0433"
 RED_RGB = "FFFFC7CE"
 GREY_RGB = "FFD9D9D9"
 BLUE_RGB = "FFDDEBF7"
+
+
+def _seed_tkp_database(path: Path) -> None:
+    connection = connect(path)
+    try:
+        init_database(connection)
+        cursor = connection.execute(
+            "INSERT INTO tkp_sources (file_name, task_no, item_count) VALUES (?, ?, ?)",
+            ("tkp-source.xlsx", "TKP-77", 1),
+        )
+        connection.execute(
+            """
+            INSERT INTO tkp_items (
+                source_id, item_name, unit, winner_unit_price_no_vat,
+                winner_name, task_no
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (cursor.lastrowid, INSTALLATION, METER, 200.0, "winner", "TKP-77"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _make_catalog_file(
@@ -96,6 +119,41 @@ def test_writes_analogs_formula_kr_and_section(tmp_path: Path) -> None:
         assert sheet.cell(row=9, column=14).value == CODE
         assert str(sheet.cell(row=9, column=15).value).endswith(KR_END)
         assert sheet.cell(row=9, column=16).value == "01"
+    finally:
+        workbook.close()
+
+
+def test_writes_one_tkp_candidate_block_and_includes_price_in_formula(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    database = tmp_path / "estimate_ai.db"
+    _seed_tkp_database(database)
+    output = tmp_path / "out.xlsx"
+
+    outcome = run_and_write(
+        catalog,
+        estimate,
+        output,
+        database_path=database,
+        use_tkp_analogs=True,
+    )
+
+    assert outcome.result.matched_row_count == 1
+    assert outcome.result.tkp_matched_row_count == 1
+    assert outcome.write_report.tkp_start_column == 18
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=7, column=17).value == "task-1"
+        assert sheet.cell(row=7, column=18).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
+        assert sheet.cell(row=7, column=19).value == "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0438\u0437 \u0422\u041a\u041f"
+        assert sheet.cell(row=7, column=20).value == "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 \u0422\u041a\u041f"
+        assert sheet.cell(row=9, column=18).value == 200
+        assert sheet.cell(row=9, column=19).value == INSTALLATION
+        assert sheet.cell(row=9, column=20).value == "TKP-77"
+        assert sheet.cell(row=9, column=7).value == (
+            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
+        )
     finally:
         workbook.close()
 

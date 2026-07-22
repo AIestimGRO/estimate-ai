@@ -134,6 +134,8 @@ h1 { margin: 0 0 4px; font-size: 24px; }
 h2.section { margin: 0 0 10px; font-size: 16px; color: #334155; }
 .sub { margin: 0 0 24px; color: #64748b; }
 label { display: block; margin-bottom: 16px; font-weight: 600; font-size: 14px; }
+.option-toggle { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.option-toggle input[type=checkbox] { width: 18px; height: 18px; margin: 0; }
 input[type=file], input[type=text], select, textarea {
   display: block; width: 100%; margin-top: 6px; padding: 10px 12px;
   border: 1px solid #cbd5e1; border-radius: 10px; font-size: 14px; font-weight: 400;
@@ -473,6 +475,7 @@ def render_confirm(
     region_method: str | None,
     coefficient_value: float | str,
     coefficient_method: str,
+    use_tkp_analogs: bool = False,
     error: str | None = None,
 ) -> str:
     """Region/coefficient confirmation screen shown before the real run."""
@@ -510,6 +513,7 @@ def render_confirm(
         ),
         coefficient_source=coefficient_source,
         warning=warning,
+        tkp_checked="checked" if use_tkp_analogs else "",
     )
 
 
@@ -586,6 +590,11 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
             writer_build_stamp(),
         ),
     ]
+    if outcome.tkp_enabled:
+        rows.insert(6, (
+            "\u0410\u043d\u0430\u043b\u043e\u0433\u0438 \u0438\u0437 \u0422\u041a\u041f",
+            f"\u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b, \u043d\u0430\u0439\u0434\u0435\u043d\u043e {result.tkp_matched_row_count} \u0438\u0437 {outcome.tkp_catalog_row_count} \u043f\u043e\u0437\u0438\u0446\u0438\u0439 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0430",
+        ))
     if catalog_label:
         rows.insert(1, ("\u0411\u0430\u0437\u0430 \u0430\u043d\u0430\u043b\u043e\u0433\u043e\u0432", catalog_label))
     if exclusion_label:

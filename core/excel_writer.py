@@ -49,6 +49,10 @@ AVG_FONT = Font(bold=True)
 # Header labels for columns inserted when absent (synonyms live in layout.json).
 KR_HEADER_LABEL = "/\u041a\u0420"
 SECTION_HEADER_LABEL = "\u041a\u043e\u0434 \u0440\u0430\u0437\u0434\u0435\u043b\u0430"
+TKP_PRICE_HEADER_LABEL = "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
+TKP_NAME_HEADER_LABEL = "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0438\u0437 \u0422\u041a\u041f"
+TKP_TASK_HEADER_LABEL = "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 \u0422\u041a\u041f"
+TKP_COLUMN_COUNT = 3
 
 
 @dataclass(frozen=True)
@@ -73,6 +77,7 @@ class WriteReport:
     average_column: int
     analog_start_column: int
     analog_column_count: int
+    tkp_start_column: int | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,7 @@ def write_run_result(
     task_color_entries: list[TaskColorEntry] | None = None,
     task_highlight_reasons: list[TaskHighlightReason] | None = None,
     target_region: str | None = None,
+    use_tkp_analogs: bool = False,
 ) -> WriteReport:
     """Write `result` into a copy of the estimate workbook at `output_path`.
 
@@ -153,15 +159,26 @@ def write_run_result(
         analog_plan = _build_global_analog_plan(
             result, output_columns.analog_start, target_region
         )
+        tkp_start_column = (
+            max(analog_plan.last_column + 1, output_columns.analog_start)
+            if use_tkp_analogs
+            else None
+        )
+        last_output_column = (
+            tkp_start_column + TKP_COLUMN_COUNT - 1
+            if tkp_start_column is not None
+            else analog_plan.last_column
+        )
         last_data_row = max(row_numbers) if row_numbers else output_columns.analog_start
-        if analog_plan.columns:
+        if analog_plan.columns or tkp_start_column is not None:
             _clear_analog_block(
                 worksheet,
                 header_row or output_columns.analog_start,
                 last_data_row,
                 output_columns.analog_start,
-                analog_plan.last_column,
+                last_output_column,
             )
+        if analog_plan.columns:
             _write_analog_headers(
                 worksheet,
                 header_row,
@@ -170,6 +187,8 @@ def write_run_result(
                 task_colors,
                 reasons,
             )
+        if tkp_start_column is not None:
+            _write_tkp_headers(worksheet, header_row, tkp_start_column)
 
         written_rows = 0
         for row_number, row in zip(row_numbers, result.rows):
@@ -182,6 +201,7 @@ def write_run_result(
                 regional_coefficient,
                 task_colors,
                 reasons,
+                tkp_start_column,
             ):
                 written_rows += 1
 
@@ -198,6 +218,7 @@ def write_run_result(
         average_column=output_columns.average,
         analog_start_column=output_columns.analog_start,
         analog_column_count=len(analog_plan.columns),
+        tkp_start_column=tkp_start_column,
     )
 
 
@@ -719,6 +740,26 @@ def _write_analog_headers(
                 reason_cell.fill = fill
 
 
+def _write_tkp_headers(
+    worksheet: Worksheet,
+    header_row: int,
+    start_column: int,
+) -> None:
+    if header_row <= 0:
+        return
+
+    labels = (
+        TKP_PRICE_HEADER_LABEL,
+        TKP_NAME_HEADER_LABEL,
+        TKP_TASK_HEADER_LABEL,
+    )
+    for offset, label in enumerate(labels):
+        cell = worksheet.cell(row=header_row, column=start_column + offset)
+        cell.value = label
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+
+
 def _write_row(
     worksheet: Worksheet,
     row_number: int,
@@ -728,21 +769,25 @@ def _write_row(
     coefficient: float,
     task_colors: list[TaskColorEntry],
     reasons: list[TaskHighlightReason],
+    tkp_start_column: int | None,
 ) -> bool:
     if columns.section is not None and row.section_code:
         section_cell = worksheet.cell(row=row_number, column=columns.section)
         section_cell.number_format = "@"
         section_cell.value = row.section_code
 
-    _write_average_formula(worksheet, row_number, columns, plan)
+    _write_average_formula(
+        worksheet,
+        row_number,
+        columns,
+        plan,
+        tkp_start_column,
+    )
 
     if row.kr_code is not None:
         kr_cell = worksheet.cell(row=row_number, column=columns.code_kr)
         kr_cell.number_format = "@"
         kr_cell.value = row.kr_code
-
-    if not row.has_analogs:
-        return False
 
     for analog in row.analogs:
         column = plan.by_key[(analog.task_id, analog.price_position)]
@@ -751,7 +796,15 @@ def _write_row(
         price_cell.number_format = PRICE_NUMBER_FORMAT
         _apply_cell_colour(price_cell, row, analog, task_colors, reasons)
 
-    return True
+    if tkp_start_column is not None and row.tkp_match is not None:
+        entry = row.tkp_match.entry
+        price_cell = worksheet.cell(row=row_number, column=tkp_start_column)
+        price_cell.value = round(float(entry.winner_unit_price_no_vat), 2)
+        price_cell.number_format = PRICE_NUMBER_FORMAT
+        worksheet.cell(row=row_number, column=tkp_start_column + 1).value = entry.item_name
+        worksheet.cell(row=row_number, column=tkp_start_column + 2).value = entry.task_no
+
+    return row.has_analogs or row.has_tkp_analog
 
 
 def _write_average_formula(
@@ -759,13 +812,18 @@ def _write_average_formula(
     row_number: int,
     columns: _OutputColumns,
     plan: GlobalAnalogPlan,
+    tkp_start_column: int | None,
 ) -> None:
     avg_cell = worksheet.cell(row=row_number, column=columns.average)
     avg_cell.value = _average_formula(
         row_number,
         columns.base_price,
         columns.analog_start,
-        plan.last_column,
+        (
+            tkp_start_column
+            if tkp_start_column is not None
+            else plan.last_column
+        ),
     )
     avg_cell.number_format = PRICE_NUMBER_FORMAT
     avg_cell.font = AVG_FONT

@@ -130,6 +130,7 @@ class UploadRecord:
     estimate_name: str
     coefficient: float | None = None
     target_region: str | None = None
+    use_tkp_analogs: bool = False
     use_database_catalog: bool = False
     output_path: Path | None = None
     output_name: str = ""
@@ -1383,6 +1384,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         sheet: str = Form(...),
         region: str = Form(""),
         coefficient: str = Form(""),
+        use_tkp_analogs: str | None = Form(None),
     ) -> HTMLResponse:
         state: AppState = app.state.app_state
         if token not in state.store:
@@ -1404,6 +1406,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     region_method=None,
                     coefficient_value=coefficient,
                     coefficient_method="explicit",
+                    use_tkp_analogs=use_tkp_analogs is not None,
                     error="\u041a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0447\u0438\u0441\u043b\u043e\u043c, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440 1.15.",
                 ),
                 status_code=400,
@@ -1412,6 +1415,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         record = state.store[token]
         record.coefficient = coef  # type: ignore[assignment]
         record.target_region = region.strip() or None
+        record.use_tkp_analogs = use_tkp_analogs is not None
         return _process(state, token, selected_sheet=sheet)
 
     @app.get("/download")
@@ -1545,6 +1549,7 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             target_region=record.target_region,
             task_color_entries=task_color_entries,
             task_highlight_reasons=task_highlight_reasons,
+            use_tkp_analogs=record.use_tkp_analogs,
         )
     except MultipleSheetsError as error:
         return HTMLResponse(render_choice(token, error.candidates))

@@ -37,6 +37,11 @@ from core.risk import (
     build_gesn_exception_key,
 )
 from core.sections import ResolveSectionCode
+from core.tkp_matching import (
+    TkpCatalogEntry,
+    TkpMatch,
+    find_best_tkp_matches,
+)
 
 
 # Cyrillic "/KR" suffix appended to the code column, DOMAIN_RULES.md section 6.
@@ -61,6 +66,7 @@ class EstimateRowResult:
     kr_code: str | None
     exception_key: str
     status: str
+    tkp_match: TkpMatch | None = None
 
     @property
     def analogs(self) -> list[AnalogColumn]:
@@ -69,6 +75,10 @@ class EstimateRowResult:
     @property
     def has_analogs(self) -> bool:
         return self.match_result.has_analogs
+
+    @property
+    def has_tkp_analog(self) -> bool:
+        return self.tkp_match is not None
 
 
 @dataclass(frozen=True)
@@ -79,6 +89,7 @@ class MatchingRunResult:
     catalog_key_count: int = 0
     matched_row_count: int = 0
     flagged_row_count: int = 0
+    tkp_matched_row_count: int = 0
 
 
 def run_matching(
@@ -90,16 +101,20 @@ def run_matching(
     demontazh_filter_enabled: bool = True,
     price_spread_limit: float = DEFAULT_PRICE_SPREAD_LIMIT,
     regional_coefficient: float = 1.0,
+    tkp_catalog_index: list[TkpCatalogEntry] | None = None,
+    use_tkp_analogs: bool = False,
 ) -> MatchingRunResult:
     """Run matching for pre-read structured rows (no Excel I/O here)."""
     rules = [] if name_exclusion_rules is None else name_exclusion_rules
     exceptions = {} if gesn_exceptions is None else gesn_exceptions
 
     catalog: Catalog = BuildCatalog(catalog_rows, rules)
+    tkp_index = _priced_tkp_entries(tkp_catalog_index) if use_tkp_analogs else []
 
     row_results: list[EstimateRowResult] = []
     matched_row_count = 0
     flagged_row_count = 0
+    tkp_matched_row_count = 0
 
     for row_index, estimate_row in enumerate(estimate_rows, start=1):
         row_result = _match_one_row(
@@ -111,6 +126,8 @@ def run_matching(
             demontazh_filter_enabled,
             price_spread_limit,
             regional_coefficient,
+            tkp_index,
+            use_tkp_analogs,
         )
         row_results.append(row_result)
 
@@ -118,12 +135,15 @@ def run_matching(
             matched_row_count += 1
         if row_result.risk_result.is_flagged:
             flagged_row_count += 1
+        if row_result.has_tkp_analog:
+            tkp_matched_row_count += 1
 
     return MatchingRunResult(
         rows=row_results,
         catalog_key_count=len(catalog),
         matched_row_count=matched_row_count,
         flagged_row_count=flagged_row_count,
+        tkp_matched_row_count=tkp_matched_row_count,
     )
 
 
@@ -137,6 +157,8 @@ def run_matching_from_files(
     demontazh_filter_enabled: bool = True,
     price_spread_limit: float = DEFAULT_PRICE_SPREAD_LIMIT,
     regional_coefficient: float = 1.0,
+    tkp_catalog_index: list[TkpCatalogEntry] | None = None,
+    use_tkp_analogs: bool = False,
 ) -> MatchingRunResult:
     """Read catalog/estimate workbooks, then run matching over their rows."""
     catalog_rows = read_catalog_rows(catalog_path, settings)
@@ -150,6 +172,8 @@ def run_matching_from_files(
         demontazh_filter_enabled=demontazh_filter_enabled,
         price_spread_limit=price_spread_limit,
         regional_coefficient=regional_coefficient,
+        tkp_catalog_index=tkp_catalog_index,
+        use_tkp_analogs=use_tkp_analogs,
     )
 
 
@@ -162,6 +186,8 @@ def _match_one_row(
     demontazh_filter_enabled: bool,
     price_spread_limit: float,
     regional_coefficient: float,
+    tkp_catalog_index: list[TkpCatalogEntry],
+    use_tkp_analogs: bool,
 ) -> EstimateRowResult:
     norm_code = NormCode(estimate_row.code)
     norm_unit = NormUnit(estimate_row.unit)
@@ -192,10 +218,22 @@ def _match_one_row(
     if norm_code != "":
         section_code = ResolveSectionCode(estimate_row.code, is_demolition)
 
+    tkp_match: TkpMatch | None = None
+    if use_tkp_analogs and tkp_catalog_index:
+        matches = find_best_tkp_matches(
+            estimate_row.work_name,
+            estimate_row.unit,
+            tkp_catalog_index,
+            limit=1,
+        )
+        if matches:
+            tkp_match = matches[0]
+
     recommended_price = _recommended_price(
         estimate_row.base_price,
         match_result,
         regional_coefficient,
+        tkp_match,
     )
 
     if match_result.has_analogs:
@@ -219,6 +257,7 @@ def _match_one_row(
         kr_code=kr_code,
         exception_key=exception_key,
         status=match_result.reason,
+        tkp_match=tkp_match,
     )
 
 
@@ -226,6 +265,7 @@ def _recommended_price(
     base_price: object,
     match_result: MatchResult,
     regional_coefficient: float,
+    tkp_match: TkpMatch | None = None,
 ) -> float | None:
     """Value port of the average-price formula, DOMAIN_RULES.md section 6.
 
@@ -240,7 +280,27 @@ def _recommended_price(
     analog_prices = [
         analog.entry.price * regional_coefficient for analog in match_result.analogs
     ]
+    if tkp_match is not None:
+        tkp_price = _parse_positive_number(tkp_match.entry.winner_unit_price_no_vat)
+        if tkp_price is not None:
+            # TKP winner prices are already stored at their source price level;
+            # unlike RNMC ZLVL prices, they are not scaled by the estimate's
+            # regional coefficient.
+            analog_prices.append(tkp_price)
     return CalculateAveragePrice(base, analog_prices)
+
+
+def _priced_tkp_entries(
+    index: list[TkpCatalogEntry] | None,
+) -> list[TkpCatalogEntry]:
+    """Keep only candidates that can be written and included in the average."""
+    if not index:
+        return []
+    return [
+        entry
+        for entry in index
+        if _parse_positive_number(entry.winner_unit_price_no_vat) is not None
+    ]
 
 
 def _normalize_code_text(code: object) -> str:

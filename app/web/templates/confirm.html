@@ -25,6 +25,11 @@
       <label>Коэффициент ($coefficient_source)
         <input type="text" name="coefficient" inputmode="decimal" value="$coefficient_value">
       </label>
+      <label class="option-toggle">
+        <input type="checkbox" name="use_tkp_analogs" value="1" $tkp_checked>
+        <span>Использовать аналоги из ТКП</span>
+      </label>
+      <p class="muted">Будет выбран один лучший кандидат ТКП на строку. Он не меняет подбор РНМЦ, но его цена войдёт в расчёт средней.</p>
       <button type="submit">Подтвердить и обработать</button>
     </form>
     <a class="back" href="/">Назад</a>
