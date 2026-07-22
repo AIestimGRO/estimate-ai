@@ -204,3 +204,15 @@ _upd_v3_review/
 # TKP analogs delivery artifacts
 estimate-ai-tkp-analogs.zip
 _tkp_analogs_review/
+
+# TKP important fields delivery artifacts
+estimate-ai-tkp-important-fields-ready.zip
+_tkp_important_fields_review/
+
+# TKP catalog grid delivery artifacts
+estimate-ai-tkp-catalog-grid-ready.zip
+_tkp_catalog_grid_review/
+
+# TKP first column layout delivery artifacts
+estimate-ai-tkp-first-region-ready.zip
+_tkp_first_region_review/

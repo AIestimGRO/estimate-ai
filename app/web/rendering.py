@@ -25,7 +25,7 @@ from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord, normalize_import_filename
 from core.storage.risk_log import PriceRiskLogEntry
-from core.storage.tkp import TkpItemRecord, TkpSourceRecord
+from core.storage.tkp import TkpCatalogPage, TkpItemRecord, TkpSourceRecord
 from core.exclusions import (
     LEGACY_REASON_COLOR,
     NameExclusionRule,
@@ -201,6 +201,47 @@ table.preview td.path {
 }
 .preview-wide { max-height: 560px; overflow: auto; border: 1px solid #e2e8f0;
   border-radius: 10px; margin-bottom: 16px; background: #fff; }
+.tkp-grid-shell { --tkp-scale: 1; }
+.tkp-table { table-layout: fixed; width: max-content; min-width: 100%; font-size: calc(13px * var(--tkp-scale)); }
+.tkp-table tbody tr:nth-child(even) { background: #f8fafc; }
+.tkp-table tbody tr:hover { background: #eef2ff; }
+.tkp-table th { padding-right: 18px; }
+.tkp-table th a { color: #334155; text-decoration: none; }
+.tkp-table th a:hover { color: #4f46e5; }
+.tkp-table td.tkp-name, .tkp-table td.tkp-wrap { white-space: normal; line-height: 1.4; overflow-wrap: anywhere; }
+.tkp-table td.tkp-number { text-align: right; font-variant-numeric: tabular-nums; }
+.tkp-column-hidden { display: none; }
+.tkp-toolbar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 12px;
+  padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;
+}
+.tkp-toolbar button { width: auto; margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+.tkp-toolbar label { width: auto; margin: 0; font-size: 12px; color: #475569; }
+.tkp-toolbar select { width: auto; min-width: 120px; margin: 4px 0 0; padding: 7px 9px; border-radius: 8px; }
+.tkp-columns { position: relative; }
+.tkp-columns summary {
+  list-style: none; padding: 8px 10px; border-radius: 8px; background: #e0e7ff;
+  color: #3730a3; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.tkp-columns summary::-webkit-details-marker { display: none; }
+.tkp-column-menu {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(720px, 88vw);
+  max-height: 360px; overflow: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 7px 12px; padding: 14px; border: 1px solid #cbd5e1; border-radius: 10px;
+  background: #fff; box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
+}
+.tkp-column-menu label { display: flex; gap: 7px; align-items: flex-start; margin: 0; font-weight: 500; }
+.tkp-column-menu input { margin: 2px 0 0; }
+.tkp-col-resizer {
+  position: absolute; top: 0; right: -6px; width: 12px; height: 100%;
+  cursor: col-resize; user-select: none; z-index: 6; touch-action: none;
+}
+.tkp-col-resizer::after {
+  content: ""; position: absolute; top: 5px; bottom: 5px; left: 5px;
+  width: 2px; border-radius: 999px; background: #93c5fd;
+}
+.tkp-col-resizer:hover::after, .tkp-col-resizer.active::after { background: #2563eb; width: 3px; }
+body.tkp-resizing, body.tkp-resizing * { cursor: col-resize !important; user-select: none !important; }
 .rnmc-preview-shell { --rnmc-preview-scale: 1; --rnmc-preview-padding: 7px 10px; }
 .rnmc-preview-shell table.preview { font-size: calc(13px * var(--rnmc-preview-scale)); }
 .rnmc-preview-shell table.preview th, .rnmc-preview-shell table.preview td {
@@ -2069,9 +2110,8 @@ def _split_exception_key(exception_key: str) -> tuple[str, str, str]:
 
 def render_admin_tkp(
     sources: list[TkpSourceRecord],
-    items: list[TkpItemRecord],
+    catalog_page: TkpCatalogPage,
     *,
-    total_items: int = 0,
     error: str = "",
     notice: str = "",
 ) -> str:
@@ -2081,11 +2121,17 @@ def render_admin_tkp(
         '<p>Цены победителей закупок (КЛ 2.0), собранные макросом KL20 CatalogBuilder из отдельных ТКП в один файл. Загружайте сюда тот же файл повторно по мере сбора новых ТКП — уже импортированные файлы (по имени и дате изменения) пропускаются, добавляется только новое или изменившееся.</p>'
         f'{_render_admin_message(error, notice)}'
         f'{_render_tkp_import_form()}'
-        '<h2 class="section">Импортированные файлы</h2>'
-        f'{_render_tkp_sources_table(sources)}'
+        '<details class="maintenance-tools">'
+        f'<summary>Импортированные файлы: {len(sources)}</summary>'
+        f'<div class="maintenance-tools-body">{_render_tkp_sources_table(sources)}</div>'
+        '</details>'
         '<h2 class="section">Позиции каталога</h2>'
-        f'{_render_tkp_items_table(items, total_items)}'
+        f'{_render_tkp_filters(catalog_page)}'
+        f'{_render_tkp_pager(catalog_page)}'
+        f'{_render_tkp_items_table(catalog_page)}'
+        f'{_render_tkp_pager(catalog_page)}'
         '</section>'
+        f'{_render_tkp_grid_script()}'
     )
     return render(
         "admin.html",
@@ -2100,7 +2146,7 @@ def _render_tkp_import_form() -> str:
     return (
         '<form class="admin-form" method="post" action="/admin/tkp/import" enctype="multipart/form-data">'
         '<h2 class="section">Загрузить каталог ТКП (.xlsm)</h2>'
-        '<label>Файл каталога (лист KL20_FileCatalog + KL20_WOR_Catalog)'
+        '<label>Файл каталога (лист KL20_WOR_Catalog; KL20_FileCatalog — необязательно)'
         '<input type="file" name="tkp_catalog" accept=".xlsm,.xlsx" required>'
         '</label>'
         '<button type="submit">Импортировать</button>'
@@ -2143,38 +2189,282 @@ def _render_tkp_sources_table(sources: list[TkpSourceRecord]) -> str:
     return header + ''.join(rows) + '</tbody></table>'
 
 
-def _render_tkp_items_table(items: list[TkpItemRecord], total_items: int) -> str:
-    if not items:
-        return '<p class="muted">Позиций в каталоге ТКП пока нет.</p>'
+TKP_CATALOG_COLUMNS = (
+    ("item_name", "Наименование работы", "item_name", True, 360),
+    ("unit", "Ед.", "unit", True, 80),
+    ("qty", "Количество", "qty", True, 110),
+    ("qty_source_text", "Исходное количество", "", False, 130),
+    ("rnmc_unit_price_no_vat", "Цена РНМЦ за единицу, руб. без НДС", "rnmc_unit_price_no_vat", True, 175),
+    ("rnmc_line_total_no_vat", "Стоимость позиции РНМЦ, руб. без НДС", "", True, 175),
+    ("winner_unit_price_no_vat", "Цена победителя за единицу, руб. без НДС", "winner_unit_price_no_vat", True, 190),
+    ("winner_line_total_no_vat", "Стоимость позиции победителя, руб. без НДС", "winner_line_total_no_vat", True, 190),
+    ("winner_name", "Победитель", "winner_name", True, 220),
+    ("winner_inn", "ИНН победителя", "", False, 150),
+    ("winner_uin", "УИН победителя", "", False, 180),
+    ("winner_group_index", "Группа победителя", "", False, 130),
+    ("winner_start_col", "Начальный столбец", "", False, 140),
+    ("winner_start_col_letter", "Буква начального столбца", "", False, 150),
+    ("winner_unit_header", "Заголовок цены за единицу", "", False, 240),
+    ("winner_total_header", "Заголовок общей стоимости", "", False, 240),
+    ("task_no", "№ задачи ТКП", "task_no", True, 130),
+    ("request_date", "Дата запроса", "request_date", True, 130),
+    ("version", "Версия", "", False, 90),
+    ("customer", "Заказчик", "customer", True, 220),
+    ("general_contractor", "Генподрядчик", "", False, 220),
+    ("procedure_name", "Наименование процедуры", "procedure_name", True, 280),
+    ("winner_method", "Метод определения победителя", "", False, 210),
+    ("winner_block_name", "Победитель в итоговом блоке", "", False, 220),
+    ("winner_block_uin", "УИН итогового блока", "", False, 180),
+    ("winner_block_total_vat", "Итог победителя с НДС", "", False, 170),
+    ("winner_block_reason", "Причина выбора победителя", "", False, 260),
+    ("source_file_name", "Файл-источник", "source_file_name", True, 220),
+)
 
-    note = (
-        f'<p class="muted">Показаны первые {len(items)} из {total_items} позиций.</p>'
-        if total_items > len(items)
-        else ""
+TKP_NUMERIC_COLUMNS = {
+    "qty", "rnmc_unit_price_no_vat", "rnmc_line_total_no_vat",
+    "winner_unit_price_no_vat", "winner_line_total_no_vat",
+    "winner_group_index", "winner_start_col", "winner_block_total_vat",
+}
+
+TKP_WRAP_COLUMNS = {
+    "item_name", "winner_name", "customer", "general_contractor", "procedure_name",
+    "winner_unit_header", "winner_total_header", "winner_method", "winner_block_name",
+    "winner_block_reason", "source_file_name",
+}
+
+
+def _render_tkp_filters(catalog_page: TkpCatalogPage) -> str:
+    def val(name: str) -> str:
+        return html.escape(catalog_page.filters.get(name, ""), quote=True)
+
+    return (
+        '<form class="admin-form" action="/admin/tkp" method="get">'
+        '<h2 class="section">Фильтры</h2>'
+        '<div class="catalog-filter-grid">'
+        f'<label>Общий поиск<input type="text" name="q" value="{val("q")}" placeholder="работа, задача, победитель, ИНН, УИН..."></label>'
+        f'<label>№ задачи<input type="text" name="task_no" value="{val("task_no")}"></label>'
+        f'<label>Ед.<input type="text" name="unit" value="{val("unit")}"></label>'
+        f'<label>Победитель<input type="text" name="winner" value="{val("winner")}"></label>'
+        f'<label>Заказчик<input type="text" name="customer" value="{val("customer")}"></label>'
+        f'<label>Процедура<input type="text" name="procedure" value="{val("procedure")}"></label>'
+        f'<label>Файл<input type="text" name="filename" value="{val("filename")}"></label>'
+        f'<label>Строк на странице<select name="page_size">{_catalog_page_size_options(catalog_page.page_size)}</select></label>'
+        '</div>'
+        f'<input type="hidden" name="sort" value="{html.escape(catalog_page.sort, quote=True)}">'
+        f'<input type="hidden" name="direction" value="{html.escape(catalog_page.direction, quote=True)}">'
+        '<button type="submit">Применить фильтры</button>'
+        '<a class="back" href="/admin/tkp">Очистить фильтры</a>'
+        '</form>'
     )
-    header = (
-        '<table class="preview"><thead><tr>'
-        '<th>Наименование работы</th>'
-        '<th>Ед.</th>'
-        '<th>Кол-во</th>'
-        '<th>Цена победителя, без НДС</th>'
-        '<th>Победитель</th>'
-        '<th>Файл-источник</th>'
-        '</tr></thead><tbody>'
+
+
+def _render_tkp_pager(catalog_page: TkpCatalogPage) -> str:
+    parts = [
+        f'<strong>Всего строк: {catalog_page.total_rows}</strong>',
+        f'<span>Страница {catalog_page.page} из {catalog_page.total_pages}</span>',
+    ]
+    if catalog_page.page > 1:
+        parts.append(f'<a href="{html.escape(_tkp_catalog_url(catalog_page, page=catalog_page.page - 1))}">← Назад</a>')
+    if catalog_page.page < catalog_page.total_pages:
+        parts.append(f'<a href="{html.escape(_tkp_catalog_url(catalog_page, page=catalog_page.page + 1))}">Вперед →</a>')
+    return '<div class="catalog-pager">' + "".join(parts) + '</div>'
+
+
+def _tkp_catalog_url(
+    catalog_page: TkpCatalogPage,
+    *,
+    page: int = 1,
+    sort: str | None = None,
+    direction: str | None = None,
+) -> str:
+    params = {key: value for key, value in catalog_page.filters.items() if value}
+    params.update({
+        "page": str(page),
+        "page_size": str(catalog_page.page_size),
+        "sort": sort or catalog_page.sort,
+        "direction": direction or catalog_page.direction,
+    })
+    return "/admin/tkp?" + urlencode(params)
+
+
+def _render_tkp_items_table(catalog_page: TkpCatalogPage) -> str:
+    if not catalog_page.rows:
+        return '<p class="muted">Позиций в каталоге ТКП по заданным фильтрам не найдено.</p>'
+
+    chooser = "".join(
+        '<label>'
+        f'<input type="checkbox" data-tkp-column-toggle="{key}" data-default-visible="{"1" if default else "0"}">'
+        f'{html.escape(label)}</label>'
+        for key, label, _sort, default, _width in TKP_CATALOG_COLUMNS
     )
-    rows = []
-    for item in items:
-        rows.append(
-            '<tr>'
-            f'<td>{html.escape(item.item_name)}</td>'
-            f'<td>{html.escape(item.unit)}</td>'
-            f'<td>{_fmt_number(item.qty)}</td>'
-            f'<td>{_fmt_number(item.winner_unit_price_no_vat)}</td>'
-            f'<td>{html.escape(item.winner_name)}</td>'
-            f'<td>{html.escape(item.source_file_name)}</td>'
-            '</tr>'
-        )
-    return note + header + ''.join(rows) + '</tbody></table>'
+    toolbar = (
+        '<div class="tkp-toolbar">'
+        '<details class="tkp-columns"><summary>Настроить столбцы</summary>'
+        f'<div class="tkp-column-menu">{chooser}</div></details>'
+        '<button type="button" data-tkp-default-columns>Столбцы по умолчанию</button>'
+        '<button type="button" data-tkp-show-all>Показать все</button>'
+        '<button type="button" data-tkp-reset-widths>Сбросить ширины</button>'
+        '<label>Масштаб<select data-tkp-scale><option value="0.85">85%</option>'
+        '<option value="1" selected>100%</option><option value="1.15">115%</option>'
+        '<option value="1.3">130%</option></select></label>'
+        '<span class="muted">Потяните синюю границу заголовка, чтобы изменить ширину столбца.</span>'
+        '</div>'
+    )
+    colgroup = '<colgroup>' + "".join(
+        f'<col data-tkp-column="{key}" style="width:{width}px">'
+        for key, _label, _sort, _default, width in TKP_CATALOG_COLUMNS
+    ) + '</colgroup>'
+    headers = "".join(
+        _render_tkp_header(catalog_page, key, label, sort_key)
+        for key, label, sort_key, _default, _width in TKP_CATALOG_COLUMNS
+    )
+    rows = "".join(_render_tkp_item_row(item) for item in catalog_page.rows)
+    table = (
+        '<div class="tkp-grid-shell">'
+        f'{toolbar}<div class="preview-wide"><table class="preview tkp-table" data-tkp-grid>'
+        f'{colgroup}<thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table></div></div>'
+    )
+    return table
+
+
+def _render_tkp_header(catalog_page: TkpCatalogPage, key: str, label: str, sort_key: str) -> str:
+    marker = ""
+    title = html.escape(label)
+    if sort_key:
+        next_direction = "desc" if catalog_page.sort == sort_key and catalog_page.direction == "asc" else "asc"
+        if catalog_page.sort == sort_key:
+            marker = " ↑" if catalog_page.direction == "asc" else " ↓"
+        url = _tkp_catalog_url(catalog_page, sort=sort_key, direction=next_direction)
+        title = f'<a href="{html.escape(url)}" title="Сортировать">{title}{marker}</a>'
+    return (
+        f'<th data-tkp-column="{key}">{title}'
+        f'<span class="tkp-col-resizer" data-tkp-resize="{key}" title="Изменить ширину"></span></th>'
+    )
+
+
+def _render_tkp_item_row(item: TkpItemRecord) -> str:
+    cells = []
+    for key, _label, _sort, _default, _width in TKP_CATALOG_COLUMNS:
+        value = getattr(item, key)
+        rendered = _fmt_number(value) if key in TKP_NUMERIC_COLUMNS else html.escape(str(value or ""))
+        classes = []
+        if key == "item_name":
+            classes.append("tkp-name")
+        elif key in TKP_WRAP_COLUMNS:
+            classes.append("tkp-wrap")
+        if key in TKP_NUMERIC_COLUMNS:
+            classes.append("tkp-number")
+        class_attr = f' class="{" ".join(classes)}"' if classes else ""
+        cells.append(f'<td data-tkp-column="{key}"{class_attr}>{rendered or "—"}</td>')
+    return '<tr>' + "".join(cells) + '</tr>'
+
+
+def _render_tkp_grid_script() -> str:
+    return """
+<script>
+(function () {
+  var table = document.querySelector('[data-tkp-grid]');
+  if (!table) return;
+  var visibilityKey = 'estimate-ai:tkp-visible-columns';
+  var widthKey = 'estimate-ai:tkp-column-widths';
+  var toggles = Array.prototype.slice.call(document.querySelectorAll('[data-tkp-column-toggle]'));
+  function storedJson(key, fallback) {
+    try { return JSON.parse(window.localStorage.getItem(key) || '') || fallback; }
+    catch (error) { return fallback; }
+  }
+  function defaultKeys() {
+    return toggles.filter(function (toggle) { return toggle.dataset.defaultVisible === '1'; })
+      .map(function (toggle) { return toggle.dataset.tkpColumnToggle; });
+  }
+  function applyVisibility(keys, save) {
+    if (!keys || !keys.length) keys = defaultKeys();
+    toggles.forEach(function (toggle) {
+      var key = toggle.dataset.tkpColumnToggle;
+      var visible = keys.indexOf(key) !== -1;
+      toggle.checked = visible;
+      table.querySelectorAll('[data-tkp-column="' + key + '"]').forEach(function (cell) {
+        cell.classList.toggle('tkp-column-hidden', !visible);
+      });
+    });
+    if (save) {
+      try { window.localStorage.setItem(visibilityKey, JSON.stringify(keys)); } catch (error) {}
+    }
+    updateTableWidth();
+  }
+  function visibleKeys() {
+    return toggles.filter(function (toggle) { return toggle.checked; })
+      .map(function (toggle) { return toggle.dataset.tkpColumnToggle; });
+  }
+  function updateTableWidth() {
+    var width = 0;
+    table.querySelectorAll('col[data-tkp-column]').forEach(function (col) {
+      if (!col.classList.contains('tkp-column-hidden')) width += parseInt(col.style.width || '0', 10) || 120;
+    });
+    table.style.width = Math.max(width, table.parentElement.clientWidth || 0) + 'px';
+  }
+  function applyWidths(widths) {
+    Object.keys(widths || {}).forEach(function (key) {
+      var col = table.querySelector('col[data-tkp-column="' + key + '"]');
+      var width = parseInt(widths[key] || '0', 10);
+      if (col && width >= 60) col.style.width = width + 'px';
+    });
+    updateTableWidth();
+  }
+  function saveWidths() {
+    var widths = {};
+    table.querySelectorAll('col[data-tkp-column]').forEach(function (col) {
+      widths[col.dataset.tkpColumn] = parseInt(col.style.width || '0', 10) || 120;
+    });
+    try { window.localStorage.setItem(widthKey, JSON.stringify(widths)); } catch (error) {}
+  }
+  toggles.forEach(function (toggle) {
+    toggle.addEventListener('change', function () { applyVisibility(visibleKeys(), true); });
+  });
+  document.querySelector('[data-tkp-default-columns]').addEventListener('click', function () {
+    applyVisibility(defaultKeys(), true);
+  });
+  document.querySelector('[data-tkp-show-all]').addEventListener('click', function () {
+    applyVisibility(toggles.map(function (toggle) { return toggle.dataset.tkpColumnToggle; }), true);
+  });
+  document.querySelector('[data-tkp-reset-widths]').addEventListener('click', function () {
+    try { window.localStorage.removeItem(widthKey); } catch (error) {}
+    window.location.reload();
+  });
+  document.querySelector('[data-tkp-scale]').addEventListener('change', function (event) {
+    table.closest('.tkp-grid-shell').style.setProperty('--tkp-scale', event.target.value || '1');
+  });
+  var resize = null;
+  document.addEventListener('pointerdown', function (event) {
+    var handle = event.target.closest ? event.target.closest('[data-tkp-resize]') : null;
+    if (!handle) return;
+    var key = handle.dataset.tkpResize;
+    var col = table.querySelector('col[data-tkp-column="' + key + '"]');
+    if (!col) return;
+    resize = { col: col, handle: handle, startX: event.clientX,
+      startWidth: parseInt(col.style.width || '0', 10) || 120 };
+    handle.classList.add('active');
+    document.body.classList.add('tkp-resizing');
+    event.preventDefault();
+  });
+  document.addEventListener('pointermove', function (event) {
+    if (!resize) return;
+    resize.col.style.width = Math.max(60, resize.startWidth + event.clientX - resize.startX) + 'px';
+    updateTableWidth();
+    event.preventDefault();
+  });
+  document.addEventListener('pointerup', function () {
+    if (!resize) return;
+    resize.handle.classList.remove('active');
+    document.body.classList.remove('tkp-resizing');
+    resize = null;
+    saveWidths();
+  });
+  applyWidths(storedJson(widthKey, {}));
+  applyVisibility(storedJson(visibilityKey, defaultKeys()), false);
+  window.addEventListener('resize', updateTableWidth);
+})();
+</script>
+"""
 
 
 def _dem_flag_label(dem_flag: str) -> str:

@@ -140,19 +140,21 @@ def test_writes_one_tkp_candidate_block_and_includes_price_in_formula(tmp_path: 
 
     assert outcome.result.matched_row_count == 1
     assert outcome.result.tkp_matched_row_count == 1
-    assert outcome.write_report.tkp_start_column == 18
+    assert outcome.write_report.tkp_start_column == 17
+    assert outcome.write_report.analog_start_column == 20
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=17).value == "task-1"
-        assert sheet.cell(row=7, column=18).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
-        assert sheet.cell(row=7, column=19).value == "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0438\u0437 \u0422\u041a\u041f"
-        assert sheet.cell(row=7, column=20).value == "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 \u0422\u041a\u041f"
-        assert sheet.cell(row=9, column=18).value == 200
-        assert sheet.cell(row=9, column=19).value == INSTALLATION
-        assert sheet.cell(row=9, column=20).value == "TKP-77"
+        assert sheet.cell(row=7, column=17).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
+        assert sheet.cell(row=7, column=18).value == "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0438\u0437 \u0422\u041a\u041f"
+        assert sheet.cell(row=7, column=19).value == "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 \u0422\u041a\u041f"
+        assert sheet.cell(row=7, column=20).value == "task-1"
+        assert sheet.cell(row=9, column=17).value == 200
+        assert sheet.cell(row=9, column=18).value == INSTALLATION
+        assert sheet.cell(row=9, column=19).value == "TKP-77"
+        assert sheet.cell(row=9, column=20).value == 100
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:T9), F9))"
         )
     finally:
         workbook.close()

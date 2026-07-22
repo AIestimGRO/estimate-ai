@@ -53,11 +53,13 @@ from core.storage.rules import (
     upsert_task_highlight_reason,
 )
 from core.storage.tkp import (
+    TkpCatalogPage,
     TkpImportResult,
     TkpItemRecord,
     TkpSourceRecord,
     count_tkp_items,
     import_tkp_catalog_workbook,
+    list_tkp_catalog_page,
     list_tkp_items,
     list_tkp_sources,
 )
@@ -127,10 +129,12 @@ __all__ = [
     "upsert_task_color_entry",
     "upsert_task_highlight_reason",
     "TkpImportResult",
+    "TkpCatalogPage",
     "TkpItemRecord",
     "TkpSourceRecord",
     "count_tkp_items",
     "import_tkp_catalog_workbook",
+    "list_tkp_catalog_page",
     "list_tkp_items",
     "list_tkp_sources",
     "FlaggedRiskSnapshot",

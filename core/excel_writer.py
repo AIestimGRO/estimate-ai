@@ -156,18 +156,26 @@ def write_run_result(
         output_columns = _plan_output_columns(layout_columns, placement, analog_start_base)
 
         header_row = _effective_header_row(layout_columns, row_numbers)
-        analog_plan = _build_global_analog_plan(
-            result, output_columns.analog_start, target_region
-        )
         tkp_start_column = (
-            max(analog_plan.last_column + 1, output_columns.analog_start)
+            output_columns.analog_start
             if use_tkp_analogs
             else None
         )
-        last_output_column = (
-            tkp_start_column + TKP_COLUMN_COUNT - 1
+        analog_start_column = (
+            output_columns.analog_start + TKP_COLUMN_COUNT
             if tkp_start_column is not None
-            else analog_plan.last_column
+            else output_columns.analog_start
+        )
+        analog_plan = _build_global_analog_plan(
+            result, analog_start_column, target_region
+        )
+        last_output_column = max(
+            analog_plan.last_column,
+            (
+                tkp_start_column + TKP_COLUMN_COUNT - 1
+                if tkp_start_column is not None
+                else analog_plan.last_column
+            ),
         )
         last_data_row = max(row_numbers) if row_numbers else output_columns.analog_start
         if analog_plan.columns or tkp_start_column is not None:
@@ -216,7 +224,7 @@ def write_run_result(
         written_rows=written_rows,
         inserted_average_column=placement.needs_insert,
         average_column=output_columns.average,
-        analog_start_column=output_columns.analog_start,
+        analog_start_column=analog_start_column,
         analog_column_count=len(analog_plan.columns),
         tkp_start_column=tkp_start_column,
     )
@@ -815,15 +823,18 @@ def _write_average_formula(
     tkp_start_column: int | None,
 ) -> None:
     avg_cell = worksheet.cell(row=row_number, column=columns.average)
+    last_output_column = plan.last_column
+    if tkp_start_column is not None:
+        last_output_column = max(
+            last_output_column,
+            tkp_start_column + TKP_COLUMN_COUNT - 1,
+        )
+
     avg_cell.value = _average_formula(
         row_number,
         columns.base_price,
         columns.analog_start,
-        (
-            tkp_start_column
-            if tkp_start_column is not None
-            else plan.last_column
-        ),
+        last_output_column,
     )
     avg_cell.number_format = PRICE_NUMBER_FORMAT
     avg_cell.font = AVG_FONT

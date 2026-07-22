@@ -64,9 +64,8 @@ from core.storage.catalog import (
 )
 from core.storage.tkp import (
     TkpImportResult,
-    count_tkp_items,
     import_tkp_catalog_workbook,
-    list_tkp_items,
+    list_tkp_catalog_page,
     list_tkp_sources,
 )
 from core.storage.risk_log import (
@@ -113,7 +112,6 @@ from app.web.rendering import (
 )
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
-TKP_ITEMS_PREVIEW_LIMIT = 200
 LEGACY_ZLVL_CATALOG_FILENAME = "РНМЦ_КА_ЖО_ZLVL_V3.xlsx"
 VBA_DATE_BASE = date(1899, 12, 30)
 _INVALID = object()
@@ -370,6 +368,53 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             background=BackgroundTask(_delete_temp_file, export_path),
         )
 
+    @app.get("/admin/tkp", response_class=HTMLResponse)
+    def admin_tkp(
+        message: str = "",
+        error: str = "",
+        q: str = "",
+        task_no: str = "",
+        unit: str = "",
+        winner: str = "",
+        customer: str = "",
+        procedure: str = "",
+        filename: str = "",
+        sort: str = "id",
+        direction: str = "desc",
+        page: int = 1,
+        page_size: int = 100,
+    ) -> HTMLResponse:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            sources = list_tkp_sources(connection)
+            catalog_page = list_tkp_catalog_page(
+                connection,
+                filters={
+                    "q": q,
+                    "task_no": task_no,
+                    "unit": unit,
+                    "winner": winner,
+                    "customer": customer,
+                    "procedure": procedure,
+                    "filename": filename,
+                },
+                page=page,
+                page_size=page_size,
+                sort=sort,
+                direction=direction,
+            )
+            return HTMLResponse(
+                render_admin_tkp(
+                    sources,
+                    catalog_page,
+                    notice=message,
+                    error=error,
+                )
+            )
+        finally:
+            connection.close()
+
     @app.post("/admin/catalog/update-row")
     async def admin_catalog_update_row(request: Request) -> RedirectResponse:
         form = await request.form()
@@ -502,13 +547,6 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             if section_slug == "gesn-exceptions":
                 exceptions = list_gesn_exceptions(connection)
                 return HTMLResponse(render_admin_gesn_exceptions(exceptions))
-            if section_slug == "tkp":
-                sources = list_tkp_sources(connection)
-                items = list_tkp_items(connection, limit=TKP_ITEMS_PREVIEW_LIMIT)
-                total_items = count_tkp_items(connection)
-                return HTMLResponse(
-                    render_admin_tkp(sources, items, total_items=total_items, notice=message)
-                )
             if section_slug == "approvals":
                 risks = list_price_risks(connection, status="open")
                 return HTMLResponse(render_admin_approvals(risks))
@@ -1025,13 +1063,11 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             try:
                 init_database(connection)
                 sources = list_tkp_sources(connection)
-                items = list_tkp_items(connection, limit=TKP_ITEMS_PREVIEW_LIMIT)
-                total_items = count_tkp_items(connection)
+                catalog_page = list_tkp_catalog_page(connection)
                 return HTMLResponse(
                     render_admin_tkp(
                         sources,
-                        items,
-                        total_items=total_items,
+                        catalog_page,
                         error="Файл каталога ТКП не выбран.",
                     ),
                     status_code=400,
@@ -1053,13 +1089,11 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 result: TkpImportResult = import_tkp_catalog_workbook(connection, saved_path)
             except Exception as exc:
                 sources = list_tkp_sources(connection)
-                items = list_tkp_items(connection, limit=TKP_ITEMS_PREVIEW_LIMIT)
-                total_items = count_tkp_items(connection)
+                catalog_page = list_tkp_catalog_page(connection)
                 return HTMLResponse(
                     render_admin_tkp(
                         sources,
-                        items,
-                        total_items=total_items,
+                        catalog_page,
                         error=f"Не удалось импортировать каталог ТКП: {exc}",
                     ),
                     status_code=400,

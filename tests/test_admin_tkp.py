@@ -116,6 +116,16 @@ def test_admin_tkp_import_uploads_and_stores_catalog(tmp_path, monkeypatch) -> N
     assert FILE_NAME in page.text
     assert ITEM_NAME in page.text
     assert "\u041f\u0440\u0438\u043c\u0435\u0440" in page.text  # WINNER, minus the HTML-escaped quotes
+    assert "\u0426\u0435\u043d\u0430 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f \u0437\u0430 \u0435\u0434\u0438\u043d\u0438\u0446\u0443, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421" in page.text
+    assert "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c \u043f\u043e\u0437\u0438\u0446\u0438\u0438 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f" in page.text
+    assert "\u0418\u0441\u0445\u043e\u0434\u043d\u043e\u0435 \u043a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e" in page.text
+    assert 'name="q"' in page.text
+    assert 'name="task_no"' in page.text
+    assert 'data-tkp-grid' in page.text
+    assert 'data-tkp-column-toggle="winner_inn"' in page.text
+    assert 'data-tkp-column-toggle="winner_block_reason"' in page.text
+    assert 'data-tkp-resize="item_name"' in page.text
+    assert "Настроить столбцы" in page.text
 
     connection = connect(db_path)
     try:
@@ -161,3 +171,37 @@ def test_admin_tkp_import_without_file_field_is_rejected(tmp_path, monkeypatch) 
         response = client.post("/admin/tkp/import")
 
     assert response.status_code == 422
+
+
+def test_admin_tkp_filters_and_sorts_catalog_rows(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    content = _catalog_bytes(
+        [_file_row()],
+        [
+            _wor_row(ItemName="Нужная работа", TaskNo="TASK-1", WinnerUnitPriceNoVat=700.0),
+            _wor_row(ItemName="Другая работа", TaskNo="TASK-2", WinnerUnitPriceNoVat=100.0),
+        ],
+    )
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        client.post(
+            "/admin/tkp/import",
+            files={"tkp_catalog": ("catalog.xlsm", content, XLSM_MIME)},
+        )
+        page = client.get(
+            "/admin/tkp",
+            params={
+                "q": "Нужная",
+                "task_no": "TASK-1",
+                "sort": "winner_unit_price_no_vat",
+                "direction": "asc",
+            },
+        )
+
+    assert page.status_code == 200
+    assert "Нужная работа" in page.text
+    assert "Другая работа" not in page.text
+    assert "TASK-1" in page.text
+    assert "Всего строк: 1" in page.text
+    assert "Цена победителя за единицу, руб. без НДС ↑" in page.text

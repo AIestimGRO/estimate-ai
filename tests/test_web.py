@@ -241,10 +241,11 @@ def test_tkp_toggle_writes_best_candidate_to_download(client, tmp_path, monkeypa
     workbook = load_workbook(BytesIO(download.content), data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=18).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
-        assert sheet.cell(row=9, column=18).value == 200
-        assert sheet.cell(row=9, column=19).value == INSTALLATION
-        assert sheet.cell(row=9, column=20).value == "TKP-77"
+        assert sheet.cell(row=7, column=17).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
+        assert sheet.cell(row=9, column=17).value == 200
+        assert sheet.cell(row=9, column=18).value == INSTALLATION
+        assert sheet.cell(row=9, column=19).value == "TKP-77"
+        assert sheet.cell(row=7, column=20).value == "t-1"
     finally:
         workbook.close()
 

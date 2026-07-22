@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS tkp_sources (
     winner_total_no_vat REAL,
     winner_total_vat REAL,
     rnmc_total_no_vat REAL,
+    details_version INTEGER NOT NULL DEFAULT 0,
     item_count INTEGER NOT NULL DEFAULT 0,
     imported_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(file_name, modified_date)
@@ -147,17 +148,30 @@ CREATE TABLE IF NOT EXISTS tkp_items (
     item_name TEXT NOT NULL,
     unit TEXT NOT NULL DEFAULT '',
     qty REAL,
+    qty_source_text TEXT NOT NULL DEFAULT '',
     rnmc_unit_price_no_vat REAL,
+    rnmc_line_total_no_vat REAL,
     winner_unit_price_no_vat REAL,
     winner_line_total_no_vat REAL,
     winner_name TEXT NOT NULL DEFAULT '',
     winner_inn TEXT NOT NULL DEFAULT '',
     winner_uin TEXT NOT NULL DEFAULT '',
+    winner_group_index INTEGER NOT NULL DEFAULT 0,
+    winner_start_col INTEGER NOT NULL DEFAULT 0,
+    winner_start_col_letter TEXT NOT NULL DEFAULT '',
+    winner_unit_header TEXT NOT NULL DEFAULT '',
+    winner_total_header TEXT NOT NULL DEFAULT '',
     task_no TEXT NOT NULL DEFAULT '',
     request_date TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '',
     customer TEXT NOT NULL DEFAULT '',
     general_contractor TEXT NOT NULL DEFAULT '',
-    procedure_name TEXT NOT NULL DEFAULT ''
+    procedure_name TEXT NOT NULL DEFAULT '',
+    winner_method TEXT NOT NULL DEFAULT '',
+    winner_block_name TEXT NOT NULL DEFAULT '',
+    winner_block_uin TEXT NOT NULL DEFAULT '',
+    winner_block_total_vat REAL,
+    winner_block_reason TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_tkp_items_source_id

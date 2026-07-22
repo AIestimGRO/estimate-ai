@@ -386,19 +386,32 @@ def resolve_regional_coefficient(
     Resolution order (mirrors VBA Instrument cell address, then label rules):
     explicit caller value; configured ``value_cell`` in layout.json; stacked
     Region/Coefficient labels; standalone coefficient label; default 1.0.
+
+    Region is resolved independently first (label in C19, value in D19) so a
+    fixed coefficient cell (D20) does not skip region detection.
     """
+    rows = config.max_rows if max_rows is None else max_rows
+    cols = config.max_cols if max_cols is None else max_cols
+    region = _find_labeled_region(worksheet, config, rows, cols)
+
     if explicit_value is not None:
         value = _parse_number(explicit_value)
         if value is not None and value > 0:
-            return CoefficientResolution(value=value, method=COEF_METHOD_EXPLICIT)
+            return CoefficientResolution(
+                value=value,
+                method=COEF_METHOD_EXPLICIT,
+                region=region,
+            )
 
     if config.coefficient_value_cell:
         from_cell = _read_coefficient_cell(worksheet, config.coefficient_value_cell)
         if from_cell is not None:
-            return from_cell
-
-    rows = config.max_rows if max_rows is None else max_rows
-    cols = config.max_cols if max_cols is None else max_cols
+            return CoefficientResolution(
+                value=from_cell.value,
+                method=from_cell.method,
+                region=region,
+                label_cell=from_cell.label_cell,
+            )
 
     stacked = _find_stacked_coefficient(worksheet, config, rows, cols)
     if stacked is not None:
@@ -406,9 +419,18 @@ def resolve_regional_coefficient(
 
     standalone = _find_standalone_coefficient(worksheet, config, rows, cols)
     if standalone is not None:
-        return standalone
+        return CoefficientResolution(
+            value=standalone.value,
+            method=standalone.method,
+            region=region,
+            label_cell=standalone.label_cell,
+        )
 
-    return CoefficientResolution(value=DEFAULT_COEFFICIENT, method=COEF_METHOD_DEFAULT)
+    return CoefficientResolution(
+        value=DEFAULT_COEFFICIENT,
+        method=COEF_METHOD_DEFAULT,
+        region=region,
+    )
 
 
 def _read_coefficient_cell(
@@ -624,6 +646,33 @@ def _find_stacked_coefficient(
                 region=region_name,
                 label_cell=(row + 1, column),
             )
+
+    return None
+
+
+def _find_labeled_region(
+    worksheet: CellSource,
+    config: LayoutConfig,
+    rows: int,
+    cols: int,
+) -> str | None:
+    """Return the value immediately to the right of a configured region label."""
+    if config.region_label is None:
+        return None
+
+    for row in range(1, rows + 1):
+        for column in range(1, cols + 1):
+            label_text = _normalize_header_text(
+                worksheet.cell(row=row, column=column).value
+            )
+            if not label_text or not _matches(label_text, config.region_label):
+                continue
+
+            region = _trimmed_text(
+                worksheet.cell(row=row, column=column + 1).value
+            )
+            if region is not None:
+                return region
 
     return None
 

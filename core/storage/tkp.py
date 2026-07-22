@@ -18,6 +18,23 @@ from pathlib import Path
 
 from core.tkp_ingest import TkpItem, TkpSourceFile, parse_tkp_catalog_workbook
 
+TKP_DETAILS_VERSION = 1
+
+TKP_SORT_COLUMNS = {
+    "item_name": "tkp_items.item_name",
+    "unit": "tkp_items.unit",
+    "qty": "tkp_items.qty",
+    "rnmc_unit_price_no_vat": "tkp_items.rnmc_unit_price_no_vat",
+    "winner_unit_price_no_vat": "tkp_items.winner_unit_price_no_vat",
+    "winner_line_total_no_vat": "tkp_items.winner_line_total_no_vat",
+    "winner_name": "tkp_items.winner_name",
+    "task_no": "tkp_items.task_no",
+    "request_date": "tkp_items.request_date",
+    "customer": "tkp_items.customer",
+    "procedure_name": "tkp_items.procedure_name",
+    "source_file_name": "tkp_sources.file_name",
+}
+
 
 @dataclass(frozen=True)
 class TkpImportResult:
@@ -60,10 +77,44 @@ class TkpItemRecord:
     item_name: str
     unit: str
     qty: float | None
+    qty_source_text: str
+    rnmc_unit_price_no_vat: float | None
+    rnmc_line_total_no_vat: float | None
     winner_unit_price_no_vat: float | None
+    winner_line_total_no_vat: float | None
     winner_name: str
+    winner_inn: str
+    winner_uin: str
+    winner_group_index: int
+    winner_start_col: int
+    winner_start_col_letter: str
+    winner_unit_header: str
+    winner_total_header: str
     task_no: str
+    request_date: str
+    version: str
+    customer: str
+    general_contractor: str
     procedure_name: str
+    winner_method: str
+    winner_block_name: str
+    winner_block_uin: str
+    winner_block_total_vat: float | None
+    winner_block_reason: str
+
+
+@dataclass(frozen=True)
+class TkpCatalogPage:
+    """One filtered and sorted page of TKP catalog items."""
+
+    rows: list[TkpItemRecord]
+    total_rows: int
+    page: int
+    page_size: int
+    total_pages: int
+    filters: dict[str, str]
+    sort: str
+    direction: str
 
 
 def import_tkp_catalog_workbook(
@@ -118,12 +169,19 @@ def _upsert_source_file(
     """Insert, replace, or skip one source file. Returns imported/updated/skipped."""
     modified_key = _iso(source_file.modified_date)
     existing = connection.execute(
-        "SELECT id, modified_date FROM tkp_sources WHERE file_name = ? AND modified_date = ?",
+        """
+        SELECT id, modified_date, run_id, details_version
+        FROM tkp_sources
+        WHERE file_name = ? AND modified_date = ?
+        """,
         (source_file.file_name, modified_key),
     ).fetchone()
 
     if existing is not None:
-        return "skipped"
+        has_current_details = int(existing["details_version"]) >= TKP_DETAILS_VERSION
+        same_revision = modified_key != "" or str(existing["run_id"]) == source_file.run_id
+        if has_current_details and same_revision:
+            return "skipped"
 
     # A file with the same name but a different (or previously blank)
     # modified_date is treated as an updated version: replace its old rows
@@ -143,8 +201,8 @@ def _upsert_source_file(
             parse_status, parse_message, task_no, request_date, customer,
             general_contractor, procedure_name, winner_name, winner_inn,
             winner_uin, winner_total_no_vat, winner_total_vat,
-            rnmc_total_no_vat, item_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            rnmc_total_no_vat, details_version, item_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             source_file.run_id,
@@ -165,6 +223,7 @@ def _upsert_source_file(
             source_file.winner_total_no_vat,
             source_file.winner_total_vat,
             source_file.rnmc_total_no_vat,
+            TKP_DETAILS_VERSION,
             len(items),
         ),
     )
@@ -176,11 +235,16 @@ def _upsert_source_file(
             INSERT INTO tkp_items (
                 source_id, source_row, section_code, section_name,
                 subsection_name, item_code, item_name, unit, qty,
-                rnmc_unit_price_no_vat, winner_unit_price_no_vat,
+                qty_source_text, rnmc_unit_price_no_vat,
+                rnmc_line_total_no_vat, winner_unit_price_no_vat,
                 winner_line_total_no_vat, winner_name, winner_inn,
-                winner_uin, task_no, request_date, customer,
-                general_contractor, procedure_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                winner_uin, winner_group_index, winner_start_col,
+                winner_start_col_letter, winner_unit_header,
+                winner_total_header, task_no, request_date, version,
+                customer, general_contractor, procedure_name,
+                winner_method, winner_block_name, winner_block_uin,
+                winner_block_total_vat, winner_block_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_id,
@@ -192,17 +256,30 @@ def _upsert_source_file(
                 item.item_name,
                 item.unit,
                 item.qty,
+                item.qty_source_text,
                 item.rnmc_unit_price_no_vat,
+                item.rnmc_line_total_no_vat,
                 item.winner_unit_price_no_vat,
                 item.winner_line_total_no_vat,
                 item.winner_name,
                 item.winner_inn,
                 item.winner_uin,
+                item.winner_group_index,
+                item.winner_start_col,
+                item.winner_start_col_letter,
+                item.winner_unit_header,
+                item.winner_total_header,
                 item.task_no,
                 _iso(item.request_date),
+                item.version,
                 item.customer,
                 item.general_contractor,
                 item.procedure_name,
+                item.winner_method,
+                item.winner_block_name,
+                item.winner_block_uin,
+                item.winner_block_total_vat,
+                item.winner_block_reason,
             ),
         )
 
@@ -244,6 +321,58 @@ def count_tkp_items(connection: sqlite3.Connection) -> int:
     return int(connection.execute("SELECT COUNT(*) AS n FROM tkp_items").fetchone()["n"])
 
 
+def list_tkp_catalog_page(
+    connection: sqlite3.Connection,
+    *,
+    filters: dict[str, str] | None = None,
+    page: int = 1,
+    page_size: int = 100,
+    sort: str = "id",
+    direction: str = "desc",
+) -> TkpCatalogPage:
+    """Return a bounded TKP page for the full admin catalog grid."""
+    normalized_filters = _tkp_catalog_filters(filters or {})
+    safe_page = max(1, int(page))
+    safe_page_size = min(500, max(25, int(page_size)))
+    safe_sort = sort if sort in TKP_SORT_COLUMNS else "id"
+    safe_direction = "asc" if direction.casefold() == "asc" else "desc"
+    sort_sql = TKP_SORT_COLUMNS.get(safe_sort, "tkp_items.id")
+    where_sql, params = _tkp_catalog_where(normalized_filters)
+
+    total_row = connection.execute(
+        f"""
+        SELECT COUNT(*) AS row_count
+        FROM tkp_items
+        JOIN tkp_sources ON tkp_sources.id = tkp_items.source_id
+        {where_sql}
+        """,
+        params,
+    ).fetchone()
+    total_rows = 0 if total_row is None else int(total_row["row_count"])
+    total_pages = max(1, (total_rows + safe_page_size - 1) // safe_page_size)
+    safe_page = min(safe_page, total_pages)
+    offset = (safe_page - 1) * safe_page_size
+    rows = connection.execute(
+        f"""
+        {_tkp_item_select_sql()}
+        {where_sql}
+        ORDER BY {sort_sql} {safe_direction.upper()}, tkp_items.id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (*params, safe_page_size, offset),
+    ).fetchall()
+    return TkpCatalogPage(
+        rows=[_tkp_item_record(row) for row in rows],
+        total_rows=total_rows,
+        page=safe_page,
+        page_size=safe_page_size,
+        total_pages=total_pages,
+        filters=normalized_filters,
+        sort=safe_sort,
+        direction=safe_direction,
+    )
+
+
 def list_tkp_items(
     connection: sqlite3.Connection,
     *,
@@ -251,33 +380,105 @@ def list_tkp_items(
     offset: int = 0,
 ) -> list[TkpItemRecord]:
     rows = connection.execute(
-        """
-        SELECT tkp_items.id, tkp_items.source_id, tkp_sources.file_name AS source_file_name,
-               tkp_items.item_name, tkp_items.unit, tkp_items.qty,
-               tkp_items.winner_unit_price_no_vat, tkp_items.winner_name,
-               tkp_items.task_no, tkp_items.procedure_name
-        FROM tkp_items
-        JOIN tkp_sources ON tkp_sources.id = tkp_items.source_id
+        f"""
+        {_tkp_item_select_sql()}
         ORDER BY tkp_items.id
         LIMIT ? OFFSET ?
         """,
         (limit, offset),
     ).fetchall()
-    return [
-        TkpItemRecord(
-            id=int(row["id"]),
-            source_id=int(row["source_id"]),
-            source_file_name=str(row["source_file_name"]),
-            item_name=str(row["item_name"]),
-            unit=str(row["unit"]),
-            qty=row["qty"],
-            winner_unit_price_no_vat=row["winner_unit_price_no_vat"],
-            winner_name=str(row["winner_name"]),
-            task_no=str(row["task_no"]),
-            procedure_name=str(row["procedure_name"]),
+    return [_tkp_item_record(row) for row in rows]
+
+
+def _tkp_item_select_sql() -> str:
+    return """
+        SELECT tkp_items.id, tkp_items.source_id, tkp_sources.file_name AS source_file_name,
+               tkp_items.item_name, tkp_items.unit, tkp_items.qty,
+               tkp_items.qty_source_text, tkp_items.rnmc_unit_price_no_vat,
+               tkp_items.rnmc_line_total_no_vat,
+               tkp_items.winner_unit_price_no_vat,
+               tkp_items.winner_line_total_no_vat, tkp_items.winner_name,
+               tkp_items.winner_inn, tkp_items.winner_uin,
+               tkp_items.winner_group_index, tkp_items.winner_start_col,
+               tkp_items.winner_start_col_letter, tkp_items.winner_unit_header,
+               tkp_items.winner_total_header, tkp_items.task_no,
+               tkp_items.request_date, tkp_items.version, tkp_items.customer,
+               tkp_items.general_contractor, tkp_items.procedure_name,
+               tkp_items.winner_method, tkp_items.winner_block_name,
+               tkp_items.winner_block_uin, tkp_items.winner_block_total_vat,
+               tkp_items.winner_block_reason
+        FROM tkp_items
+        JOIN tkp_sources ON tkp_sources.id = tkp_items.source_id
+    """
+
+
+def _tkp_catalog_filters(filters: dict[str, str]) -> dict[str, str]:
+    allowed = {"q", "task_no", "unit", "winner", "customer", "procedure", "filename"}
+    return {key: str(filters.get(key) or "").strip() for key in allowed}
+
+
+def _tkp_catalog_where(filters: dict[str, str]) -> tuple[str, tuple[object, ...]]:
+    clauses: list[str] = []
+    params: list[object] = []
+    field_filters = {
+        "task_no": "tkp_items.task_no",
+        "unit": "tkp_items.unit",
+        "winner": "tkp_items.winner_name",
+        "customer": "tkp_items.customer",
+        "procedure": "tkp_items.procedure_name",
+        "filename": "tkp_sources.file_name",
+    }
+    for key, column in field_filters.items():
+        if filters.get(key):
+            clauses.append(f"{column} LIKE ?")
+            params.append(f'%{filters[key]}%')
+    if filters.get("q"):
+        search = f'%{filters["q"]}%'
+        columns = (
+            "tkp_items.item_name", "tkp_items.unit", "tkp_items.task_no",
+            "tkp_items.winner_name", "tkp_items.winner_inn", "tkp_items.winner_uin",
+            "tkp_items.customer", "tkp_items.general_contractor",
+            "tkp_items.procedure_name", "tkp_sources.file_name",
         )
-        for row in rows
-    ]
+        clauses.append("(" + " OR ".join(f"{column} LIKE ?" for column in columns) + ")")
+        params.extend([search] * len(columns))
+    where = "" if not clauses else "WHERE " + " AND ".join(clauses)
+    return where, tuple(params)
+
+
+def _tkp_item_record(row: sqlite3.Row) -> TkpItemRecord:
+    return TkpItemRecord(
+        id=int(row["id"]),
+        source_id=int(row["source_id"]),
+        source_file_name=str(row["source_file_name"]),
+        item_name=str(row["item_name"]),
+        unit=str(row["unit"]),
+        qty=row["qty"],
+        qty_source_text=str(row["qty_source_text"]),
+        rnmc_unit_price_no_vat=row["rnmc_unit_price_no_vat"],
+        rnmc_line_total_no_vat=row["rnmc_line_total_no_vat"],
+        winner_unit_price_no_vat=row["winner_unit_price_no_vat"],
+        winner_line_total_no_vat=row["winner_line_total_no_vat"],
+        winner_name=str(row["winner_name"]),
+        winner_inn=str(row["winner_inn"]),
+        winner_uin=str(row["winner_uin"]),
+        winner_group_index=int(row["winner_group_index"]),
+        winner_start_col=int(row["winner_start_col"]),
+        winner_start_col_letter=str(row["winner_start_col_letter"]),
+        winner_unit_header=str(row["winner_unit_header"]),
+        winner_total_header=str(row["winner_total_header"]),
+        task_no=str(row["task_no"]),
+        request_date=str(row["request_date"]),
+        version=str(row["version"]),
+        customer=str(row["customer"]),
+        general_contractor=str(row["general_contractor"]),
+        procedure_name=str(row["procedure_name"]),
+        winner_method=str(row["winner_method"]),
+        winner_block_name=str(row["winner_block_name"]),
+        winner_block_uin=str(row["winner_block_uin"]),
+        winner_block_total_vat=row["winner_block_total_vat"],
+        winner_block_reason=str(row["winner_block_reason"]),
+    )
 
 
 def _iso(value) -> str:

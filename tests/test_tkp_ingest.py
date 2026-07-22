@@ -126,9 +126,42 @@ def test_parses_file_catalog_and_wor_catalog(tmp_path: Path) -> None:
     assert item.item_name == ITEM_NAME_1
     assert item.unit == "100 \u043c2"
     assert item.qty == 0.39
+    assert item.qty_source_text == "0,39"
     assert item.winner_unit_price_no_vat == 26547.77
     assert item.rnmc_unit_price_no_vat == 270.44
+    assert item.rnmc_line_total_no_vat == 10547.24
+    assert item.winner_line_total_no_vat == 10353.63
+    assert item.winner_group_index == 1
+    assert item.winner_start_col == 11
+    assert item.winner_start_col_letter == "K"
+    assert item.winner_unit_header == "\u0446\u0435\u043d\u0430 \u0437\u0430 \u0435\u0434., \u0431\u0435\u0437 \u041d\u0414\u0421"
+    assert item.winner_total_header == "\u0421\u0442-\u0442\u044c \u0432\u0441\u0435\u0433\u043e, \u0431\u0435\u0437 \u041d\u0414\u0421"
     assert item.task_no == "6224821"
+    assert item.version == "1"
+    assert item.winner_method == "block10_recommended"
+    assert item.winner_block_name == WINNER_1
+    assert item.winner_block_uin == ""
+    assert item.winner_block_total_vat == 14186701.95
+    assert item.winner_block_reason == "\u0426\u0435\u043d\u0430, \u043a\u0430\u0447\u0435\u0441\u0442\u0432\u043e"
+
+
+def test_parses_wor_only_catalog_and_derives_source_file(tmp_path: Path) -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = WOR_CATALOG_SHEET
+    worksheet.append(WOR_CATALOG_HEADERS)
+    worksheet.append(_wor_row())
+    path = tmp_path / "wor-only.xlsx"
+    workbook.save(path)
+    workbook.close()
+
+    result = parse_tkp_catalog_workbook(path)
+
+    assert result.run_ids == (RUN_ID,)
+    assert len(result.files) == 1
+    assert result.files[0].file_name == FILE_NAME_1
+    assert result.files[0].parse_status == "OK"
+    assert len(result.items) == 1
 
 
 def test_rows_without_item_name_are_skipped(tmp_path: Path) -> None:

@@ -92,6 +92,7 @@ class TkpSourceFile:
 class TkpItem:
     """One row from KL20_WOR_Catalog: one priced work item from a winner."""
 
+    run_id: str
     file_path: str
     file_name: str
     sheet_name: str
@@ -103,17 +104,30 @@ class TkpItem:
     item_name: str
     unit: str
     qty: float | None
+    qty_source_text: str
     rnmc_unit_price_no_vat: float | None
+    rnmc_line_total_no_vat: float | None
     winner_unit_price_no_vat: float | None
     winner_line_total_no_vat: float | None
     winner_name: str
     winner_inn: str
     winner_uin: str
+    winner_group_index: int
+    winner_start_col: int
+    winner_start_col_letter: str
+    winner_unit_header: str
+    winner_total_header: str
     task_no: str
     request_date: datetime | None
+    version: str
     customer: str
     general_contractor: str
     procedure_name: str
+    winner_method: str
+    winner_block_name: str
+    winner_block_uin: str
+    winner_block_total_vat: float | None
+    winner_block_reason: str
 
 
 @dataclass(frozen=True)
@@ -130,22 +144,28 @@ class TkpCatalogFormatError(ValueError):
 
 
 def parse_tkp_catalog_workbook(path: str | Path) -> TkpCatalogParseResult:
-    """Read `KL20_FileCatalog` + `KL20_WOR_Catalog` from an aggregate workbook.
+    """Read a KL20 aggregate workbook into source files and priced items.
 
-    Raises `TkpCatalogFormatError` if either sheet is missing or its header
-    row does not match the macro's known column layout (rather than silently
-    misreading columns - same defensive stance as the RNMC ingest fallback).
+    `KL20_WOR_Catalog` is mandatory. `KL20_FileCatalog` is optional because
+    business users may keep only the selected WOR columns; source rows are
+    derived from WOR metadata in that case. Header validation remains strict
+    so a shifted or renamed column is never read silently as another field.
     """
     workbook = load_workbook(path, data_only=True, read_only=True)
     try:
-        if FILE_CATALOG_SHEET not in workbook.sheetnames:
-            raise TkpCatalogFormatError(f"sheet '{FILE_CATALOG_SHEET}' not found")
         if WOR_CATALOG_SHEET not in workbook.sheetnames:
             raise TkpCatalogFormatError(f"sheet '{WOR_CATALOG_SHEET}' not found")
 
-        files = _read_file_catalog(workbook[FILE_CATALOG_SHEET])
         items = _read_wor_catalog(workbook[WOR_CATALOG_SHEET])
-        run_ids = tuple(dict.fromkeys(f.run_id for f in files))
+        files = (
+            _read_file_catalog(workbook[FILE_CATALOG_SHEET])
+            if FILE_CATALOG_SHEET in workbook.sheetnames
+            else []
+        )
+        files = _include_sources_derived_from_items(files, items)
+        run_ids = tuple(dict.fromkeys(
+            [*(source.run_id for source in files), *(item.run_id for item in items)]
+        ))
         return TkpCatalogParseResult(run_ids=run_ids, files=files, items=items)
     finally:
         workbook.close()
@@ -202,6 +222,7 @@ def _read_wor_catalog(worksheet: Worksheet) -> list[TkpItem]:
             continue
         items.append(
             TkpItem(
+                run_id=_text(row[index["RunId"]]),
                 file_path=_text(row[index["FilePath"]]),
                 file_name=_text(row[index["FileName"]]),
                 sheet_name=_text(row[index["SheetName"]]),
@@ -213,20 +234,72 @@ def _read_wor_catalog(worksheet: Worksheet) -> list[TkpItem]:
                 item_name=item_name,
                 unit=_text(row[index["Unit"]]),
                 qty=_as_float(row[index["Qty"]]),
+                qty_source_text=_text(row[index["QtySourceText"]]),
                 rnmc_unit_price_no_vat=_as_float(row[index["RnmcUnitPriceNoVat"]]),
+                rnmc_line_total_no_vat=_as_float(row[index["RnmcLineTotalNoVat"]]),
                 winner_unit_price_no_vat=_as_float(row[index["WinnerUnitPriceNoVat"]]),
                 winner_line_total_no_vat=_as_float(row[index["WinnerLineTotalNoVat"]]),
                 winner_name=_text(row[index["WinnerName"]]),
                 winner_inn=_text(row[index["WinnerINN"]]),
                 winner_uin=_text(row[index["WinnerUIN"]]),
+                winner_group_index=_as_int(row[index["WinnerGroupIndex"]]),
+                winner_start_col=_as_int(row[index["WinnerStartCol"]]),
+                winner_start_col_letter=_text(row[index["WinnerStartColLetter"]]),
+                winner_unit_header=_text(row[index["WinnerUnitHeader"]]),
+                winner_total_header=_text(row[index["WinnerTotalHeader"]]),
                 task_no=_text(row[index["TaskNo"]]),
                 request_date=_as_datetime(row[index["RequestDate"]]),
+                version=_text(row[index["Version"]]),
                 customer=_text(row[index["Customer"]]),
                 general_contractor=_text(row[index["GeneralContractor"]]),
                 procedure_name=_text(row[index["ProcedureName"]]),
+                winner_method=_text(row[index["WinnerMethod"]]),
+                winner_block_name=_text(row[index["WinnerBlockName"]]),
+                winner_block_uin=_text(row[index["WinnerBlockUIN"]]),
+                winner_block_total_vat=_as_float(row[index["WinnerBlockTotalVat"]]),
+                winner_block_reason=_text(row[index["WinnerBlockReason"]]),
             )
         )
     return items
+
+
+def _include_sources_derived_from_items(
+    files: list[TkpSourceFile],
+    items: list[TkpItem],
+) -> list[TkpSourceFile]:
+    """Add source records for WOR rows absent from `KL20_FileCatalog`."""
+    result = list(files)
+    known = {(source.file_path, source.file_name) for source in files}
+    first_items: dict[tuple[str, str], TkpItem] = {}
+    for item in items:
+        first_items.setdefault((item.file_path, item.file_name), item)
+
+    for key, item in first_items.items():
+        if key in known:
+            continue
+        result.append(
+            TkpSourceFile(
+                run_id=item.run_id,
+                file_path=item.file_path,
+                file_name=item.file_name,
+                modified_date=None,
+                sheet_name=item.sheet_name,
+                parse_status=STATUS_OK,
+                parse_message="Derived from KL20_WOR_Catalog.",
+                task_no=item.task_no,
+                request_date=item.request_date,
+                customer=item.customer,
+                general_contractor=item.general_contractor,
+                procedure_name=item.procedure_name,
+                winner_name=item.winner_name,
+                winner_inn=item.winner_inn,
+                winner_uin=item.winner_uin,
+                winner_total_no_vat=None,
+                winner_total_vat=None,
+                rnmc_total_no_vat=None,
+            )
+        )
+    return result
 
 
 def _text(value: object) -> str:

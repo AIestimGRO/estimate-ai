@@ -295,6 +295,28 @@ def test_regional_coefficient_reads_configured_value_cell() -> None:
     assert result.method == COEF_METHOD_CELL
 
 
+def test_configured_coefficient_cell_keeps_adjacent_region() -> None:
+    worksheet = _sheet(19, {3: REGION_LABEL, 4: REGION_NAME})
+    worksheet.cell(row=20, column=3).value = COEFFICIENT_LABEL
+    worksheet["D20"].value = 1.4
+
+    result = resolve_regional_coefficient(worksheet, _config())
+
+    assert result.value == 1.4
+    assert result.method == COEF_METHOD_CELL
+    assert result.region == REGION_NAME
+
+
+def test_region_is_kept_when_coefficient_defaults() -> None:
+    worksheet = _sheet(19, {3: REGION_LABEL, 4: REGION_NAME})
+
+    result = resolve_regional_coefficient(worksheet, _config())
+
+    assert result.value == 1.0
+    assert result.method == COEF_METHOD_DEFAULT
+    assert result.region == REGION_NAME
+
+
 def test_regional_coefficient_skips_placeholder_in_value_cell() -> None:
     worksheet = _sheet(1, {1: COEFFICIENT_LABEL})
     worksheet["D20"].value = "(\u0437\u0430\u043f\u043e\u043b\u043d\u0438\u0442\u044c)"
