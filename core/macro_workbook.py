@@ -128,7 +128,10 @@ def _find_newest_macro_workbook(directories: list[Path]) -> Path | None:
                 candidates.append(path)
     if not candidates:
         return None
-    return max(candidates, key=lambda path: path.stat().st_mtime).resolve()
+    return max(
+        candidates,
+        key=lambda path: (path.stat().st_mtime_ns, path.name.casefold()),
+    ).resolve()
 
 
 def _workbook_has_exclusions_sheet(path: Path) -> bool:

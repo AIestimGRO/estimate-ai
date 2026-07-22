@@ -19,7 +19,13 @@ from app.services.run_matching import EstimateRowResult, MatchingRunResult, run_
 from core.excel_io import Settings
 from core.excel_writer import WriteReport, WriterColumns, resolve_kr_column, write_run_result
 from core.exclusions import NameExclusionRule, TaskColorEntry, TaskHighlightReason
-from core.layout import FIELD_SECTION, LayoutConfig, load_layout_config, resolve_regional_coefficient
+from core.layout import (
+    FIELD_AVERAGE_PRICE,
+    FIELD_SECTION,
+    LayoutConfig,
+    load_layout_config,
+    resolve_regional_coefficient,
+)
 from core.macro_workbook import load_default_macro_settings
 from core.risk import GesnException
 from core.storage import (
@@ -291,6 +297,7 @@ def _writer_columns(
 
     return WriterColumns(
         base_price=base_price,
+        average=estimate.layout.column(FIELD_AVERAGE_PRICE),
         code=code_column,
         code_kr=code_kr,
         section=section,

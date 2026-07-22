@@ -19,7 +19,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import column_index_from_string, get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter, range_boundaries
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.services.run_matching import EstimateRowResult, MatchingRunResult
@@ -32,6 +32,7 @@ from core.exclusions import (
     resolve_task_highlight,
 )
 from core.layout import resolve_average_placement
+from core.ooxml_preservation import preserve_workbook_package_features
 from core.risk import REASON_RATIO_EXCEEDED
 
 # Module4_updated.bas RGB fills
@@ -60,6 +61,7 @@ class WriterColumns:
     """Where the writer should place each output on the worksheet."""
 
     base_price: int
+    average: int | None
     code: int
     code_kr: int
     section: int | None
@@ -137,7 +139,12 @@ def write_run_result(
         else:
             worksheet = find_estimate_sheet(workbook)
 
-        placement = _plan_average_column(worksheet, columns.base_price, row_numbers)
+        placement = _plan_average_column(
+            worksheet,
+            columns.base_price,
+            columns.average,
+            row_numbers,
+        )
         if placement.needs_insert:
             worksheet.insert_cols(placement.column)
             _shift_formulas_after_insert(worksheet, placement.column)
@@ -198,6 +205,8 @@ def write_run_result(
         if tkp_start_column is not None:
             _write_tkp_headers(worksheet, header_row, tkp_start_column)
 
+        _extend_auto_filter(worksheet, last_output_column)
+
         written_rows = 0
         for row_number, row in zip(row_numbers, result.rows):
             if _write_row(
@@ -215,7 +224,13 @@ def write_run_result(
 
         destination = Path(output_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        _request_full_recalculation(workbook)
         workbook.save(destination)
+        preserve_workbook_package_features(
+            source_path,
+            destination,
+            modified_sheet_title=worksheet.title,
+        )
     finally:
         workbook.close()
 
@@ -294,9 +309,13 @@ def _shift_formulas_after_insert(worksheet: Worksheet, insert_at_column: int) ->
 def _plan_average_column(
     worksheet: Worksheet,
     base_price_column: int,
+    detected_average_column: int | None,
     row_numbers: list[int],
 ):
     neighbour = base_price_column + 1
+    if detected_average_column == neighbour:
+        return resolve_average_placement(base_price_column, set())
+
     occupied: set[int] = set()
     for row_number in row_numbers:
         value = worksheet.cell(row=row_number, column=neighbour).value
@@ -398,12 +417,39 @@ def _ensure_kr_and_section_columns(
     analog_start = section_col + 1
     return WriterColumns(
         base_price=columns.base_price,
+        average=columns.average,
         code=code_col,
         code_kr=kr_col,
         section=section_col,
         analog_start=analog_start,
         header_row=columns.header_row,
     )
+
+
+def _extend_auto_filter(worksheet: Worksheet, last_output_column: int) -> None:
+    """Include every generated analog column in an existing table filter."""
+    reference = worksheet.auto_filter.ref
+    if not reference:
+        return
+
+    min_col, min_row, max_col, max_row = range_boundaries(reference)
+    if last_output_column <= max_col:
+        return
+
+    worksheet.auto_filter.ref = (
+        f"{get_column_letter(min_col)}{min_row}:"
+        f"{get_column_letter(last_output_column)}{max_row}"
+    )
+
+
+def _request_full_recalculation(workbook) -> None:
+    """Make Excel recalculate formulas after openpyxl rewrites the package."""
+    calculation = workbook.calculation
+    calculation.calcMode = "auto"
+    calculation.fullCalcOnLoad = True
+    calculation.forceFullCalc = True
+    calculation.calcOnSave = True
+    calculation.calcCompleted = False
 
 
 def _write_output_header(

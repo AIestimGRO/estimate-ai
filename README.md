@@ -23,6 +23,9 @@ Implemented product flows:
 - Upload RNMC ZIP archives, run dry-run checks, use a tabbed 30-row workbook
   preview, import valid rows into `catalog_items`, detect workbook metadata, store
   original and ZLVL unit prices, and inspect per-file import details.
+- Import TKP winner catalogs into SQLite, retain the selected position,
+  winner, procedure, and audit fields, and optionally add one best TKP
+  candidate to the estimate result without changing RNMC matching.
 - Approve price risks into `gesn_exceptions`.
 - Edit task color entries and name exclusion rules from the admin UI.
 
@@ -51,6 +54,8 @@ Main web routes:
 - `/admin/gesn-exceptions` — approved GESN ranges.
 - `/admin/task-colors` — blue-task metadata.
 - `/admin/name-exclusions` — exclusion rules.
+- `/admin/tkp` — TKP winner catalog import and a full grid with filters,
+  sorting, pagination, configurable columns, and resizable widths.
 - `/admin/settings` — database/settings diagnostics.
 
 ## Project docs

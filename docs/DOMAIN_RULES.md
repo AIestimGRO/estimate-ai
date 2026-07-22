@@ -216,10 +216,25 @@ encode business rules that must be preserved:
   right after the base price already holds a formula of this shape (i.e.
   the file was already processed by a prior run), it is recognized and
   overwritten in place rather than treated as "occupied" — this avoids
-  inserting a duplicate average column next to a stale one.
+  inserting a duplicate average column next to a stale one. A column whose
+  header is explicitly recognized as the average-price field is also reused
+  even when some of its body cells contain manual numeric overrides rather
+  than formulas. A genuinely unrelated occupied neighbour still triggers the
+  original insert-and-shift behavior.
+- **Workbook package preservation (2026-07 rule, not a VBA port):** only the
+  selected estimate worksheet is rewritten. Unmodified worksheets retain
+  their original OOXML, and unsupported drawing/media parts (including
+  EMF/WMF), printer settings, and their relationships are restored after the
+  cell write. Original row sizing metadata is retained so print pagination
+  does not change merely because the file passed through openpyxl. The result
+  requests a full automatic Excel recalculation on open because openpyxl does
+  not preserve cached results for rewritten formulas.
 - **Regional coefficient**: read from a single configurable cell address
   on the estimate sheet (e.g. `F12`); defaults to 1 if blank, non-numeric,
-  ≤ 0, or the cell address itself is not configured. Applied as a
+  ≤ 0, or the cell address itself is not configured. The estimate region is
+  detected independently from the configured `Region` label, so reading the
+  coefficient from a fixed cell must not discard an adjacent region value.
+  Applied as a
   multiplier only to the displayed/written analog prices (and to the
   min/max/recommended values logged to `Price_Check_Log`) — catalog prices
   themselves are never modified.
@@ -227,6 +242,46 @@ encode business rules that must be preserved:
   (`problemFill`) = analog is part of a flagged price problem (per §5);
   grey (`dupFill`) = a second-or-later price within the same task
   (visual de-emphasis, not a data quality flag).
+
+### 6.1 Optional TKP output (2026-07 product rule)
+
+- A per-run toggle, off by default, controls whether the TKP winner catalog is
+  searched. It does not change RNMC matching, RNMC analog columns, `/KR`, or
+  RNMC price-risk checks.
+- TKP matching is deterministic lexical scoring over the estimate work name,
+  with unit similarity as supporting context. Only candidates with a positive
+  winner unit price are eligible.
+- Exactly one best candidate is selected per estimate row. If no candidate
+  clears the score threshold, the TKP cells remain blank.
+- The writer places a three-column TKP block before the RNMC analog block:
+  `Аналог из ТКП`, `Наименование из ТКП`, and `Номер задачи ТКП`.
+- The TKP winner unit price is written without applying the estimate regional
+  coefficient. When present, it is included in the average-price formula;
+  blank TKP cells are ignored by Excel `AVERAGE`.
+- A TKP-only match does not make an RNMC row "matched", does not add `/КР`, and
+  does not enter the RNMC price-spread risk calculation.
+
+### 6.2 TKP retained fields (2026-07 product rule)
+
+- The application does not archive every raw TKP workbook cell. It persists the
+  selected position, price, winner, procedure, and audit fields needed to trace
+  a candidate back to the detected winner block.
+- Required position fields are `ItemName`, `Unit`, `Qty`, `QtySourceText`,
+  `RnmcUnitPriceNoVat`, `RnmcLineTotalNoVat`, `WinnerUnitPriceNoVat`, and
+  `WinnerLineTotalNoVat`. `QtySourceText` preserves the source spelling while
+  `Qty` remains numeric.
+- Required winner/audit fields are `WinnerName`, `WinnerINN`, `WinnerUIN`,
+  `WinnerGroupIndex`, `WinnerStartCol`, `WinnerStartColLetter`,
+  `WinnerUnitHeader`, `WinnerTotalHeader`, `WinnerMethod`, `WinnerBlockName`,
+  `WinnerBlockUIN`, `WinnerBlockTotalVat`, and `WinnerBlockReason`.
+- Required procedure fields are `TaskNo`, `RequestDate`, `Version`, `Customer`,
+  `GeneralContractor`, and `ProcedureName`.
+- Empty optional values are valid and are stored as empty/NULL. In particular,
+  a missing `GeneralContractor`, `WinnerBlockUIN`, or RNMC price is not an
+  import error.
+- `KL20_WOR_Catalog` is sufficient for import. When `KL20_FileCatalog` is
+  absent, source records are derived from WOR metadata without inventing
+  missing source totals.
 
 ## 7. Name exclusion rules (Module7)
 
@@ -547,7 +602,8 @@ looser than and separate from `NormUnit`/`NormCode` (see §9.2 for the same
 
 Implemented in `core/layout.py`:
 
-- **Column detection** for `work_name` / `unit` / `code` / `base_price`
+- **Column detection** for `work_name` / `unit` / `code` / `base_price` /
+  `average_price`
   (R6-R9), with a minimal header-row locator, the required-fields hard-stop
   (R20), and a human-readable resolution report (R19).
 - **Regional coefficient by label** (R16, `resolve_regional_coefficient`):
@@ -575,7 +631,10 @@ Implemented in `core/layout.py`:
   `core/excel_writer.py` now re-points every existing formula on the sheet
   right after each `insert_cols` call; `_plan_average_column` also now
   recognizes an existing average-formula cell (see the 2026-07 note above)
-  and reuses it instead of inserting a duplicate.
+  and reuses it instead of inserting a duplicate. If the layout resolver
+  detects an `average_price` header immediately to the right of the base
+  price, that column is reused regardless of whether its populated body cells
+  are formulas or manual numbers.
 - **Sheet selection** (R1, `rank_sheets` / `select_sheets`): every worksheet
   is scored by how well its layout resolves. A single sheet is used
   automatically; when several sheets qualify, the result flags

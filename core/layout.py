@@ -47,6 +47,7 @@ FIELD_UNIT = "unit"
 FIELD_CODE = "code"
 FIELD_SECTION = "section"
 FIELD_BASE_PRICE = "base_price"
+FIELD_AVERAGE_PRICE = "average_price"
 
 CATALOG_FIELD_TASK_ID = "task_id"
 CATALOG_FIELD_PRICE = "price"

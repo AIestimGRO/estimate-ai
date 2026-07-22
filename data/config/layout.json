@@ -7,7 +7,7 @@
   "data_scan": {
     "max_blank_run": 50
   },
-  "field_priority": ["base_price", "unit", "work_name", "section", "code"],
+  "field_priority": ["base_price", "average_price", "unit", "work_name", "section", "code"],
   "fields": {
     "base_price": {
       "mode": "contains",
@@ -21,6 +21,14 @@
         "стоимость за единиц",
         "базовая цена",
         "цена за 1"
+      ]
+    },
+    "average_price": {
+      "mode": "contains",
+      "patterns": [
+        "цена средняя",
+        "средняя цена",
+        "средняя стоимость единицы"
       ]
     },
     "unit": {

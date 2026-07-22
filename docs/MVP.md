@@ -10,7 +10,7 @@ Provide a local web service that lets an estimator:
 
 1. maintain a historical RNMC catalog in SQLite;
 2. upload an estimate/BOQ Excel file;
-3. run deterministic analog matching;
+3. run deterministic RNMC matching and optionally add one TKP candidate;
 4. download a WA Excel result;
 5. review risky price ranges;
 6. approve ranges into `gesn_exceptions`;
@@ -20,7 +20,8 @@ Provide a local web service that lets an estimator:
 ## Non-negotiable boundaries
 
 - Matching/pricing must stay deterministic.
-- No LLM, fuzzy, or semantic matching inside the core matching/pricing path.
+- No LLM or semantic matching inside the RNMC matching/pricing path. Optional
+  TKP lexical scoring stays isolated and deterministic.
 - Region is metadata for display/risk review, not a matching filter.
 - Human approvals are stored and auditable.
 - New domain rules require tests.
@@ -35,7 +36,10 @@ Provide a local web service that lets an estimator:
 - Matching, pricing, risk calculation, approval-range override.
 - Flexible estimate layout detection and multi-sheet choice.
 - WA Excel writer with analogs, average formula, `/KR`, section code, and risk
-  colors.
+  colors, with preservation of EMF/WMF drawings, printer settings, original
+  pagination metadata, and automatic formula recalculation on open.
+- Optional TKP toggle with one best candidate per row, three-column Excel
+  output, and inclusion of the TKP price in the average formula.
 
 ### Database
 
@@ -43,6 +47,7 @@ Provide a local web service that lets an estimator:
 - `imported_files` and `import_row_log`.
 - `name_exclusion_rules` and `task_color_entries`.
 - `price_risk_log` and `gesn_exceptions`.
+- `tkp_sources` and `tkp_items`.
 
 ### Web/admin
 
@@ -51,6 +56,12 @@ Provide a local web service that lets an estimator:
   settings.
 - Approve-risk workflow.
 - Edit workflows for task colors and name exclusions.
+- TKP catalog import and full-grid browsing in `/admin/tkp`, including
+  server-side filters/sorting/pagination and browser-persisted column layout.
+- TKP storage keeps the selected 27 position, winner, procedure, and audit
+  fields, including the original quantity text and both unit/line prices.
+  WOR-only catalog files are accepted; all retained fields are available as
+  configurable columns in the catalog grid.
 
 ### RNMC import
 
@@ -65,7 +76,7 @@ Provide a local web service that lets an estimator:
 
 - Authentication and user roles.
 - Cloud deployment.
-- Semantic/fuzzy matching.
+- Semantic/embedding matching.
 - Automatic region-based price adjustment.
 - Automatic extraction of LSR quarter and planned dates from every RNMC format
   (next milestone).

@@ -21,6 +21,8 @@ CATALOG_TITLE = "\u041a\u0430\u0442\u0430\u043b\u043e\u0433"
 RED_RGB = "FFFFC7CE"
 GREY_RGB = "FFD9D9D9"
 BLUE_RGB = "FFDDEBF7"
+AVERAGE_HEADER = "\u0426\u0435\u043d\u0430 \u0441\u0440\u0435\u0434\u043d\u044f\u044f, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421"
+BASE_PRICE_HEADER = "\u0426\u0435\u043d\u0430 \u0435\u0434\u0438\u043d\u0438\u0446\u044b \u0440\u0430\u0431\u043e\u0442, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421"
 
 
 def _seed_tkp_database(path: Path) -> None:
@@ -273,6 +275,39 @@ def test_average_column_inserted_when_neighbour_occupied(tmp_path: Path) -> None
         assert sheet.cell(row=9, column=15).value == CODE
         assert str(sheet.cell(row=9, column=16).value).endswith(KR_END)
         assert sheet.cell(row=9, column=17).value == "01"
+    finally:
+        workbook.close()
+
+
+def test_detected_average_column_with_manual_number_is_reused(tmp_path: Path) -> None:
+    """A numeric manual override does not make a labelled average column foreign data."""
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx", neighbour_value=365)
+    workbook = load_workbook(estimate)
+    sheet = workbook[ESTIMATE_TITLE]
+    sheet.cell(row=7, column=6).value = BASE_PRICE_HEADER
+    sheet.cell(row=7, column=7).value = AVERAGE_HEADER
+    workbook.save(estimate)
+    workbook.close()
+
+    output = tmp_path / "out.xlsx"
+    outcome = run_and_write(catalog, estimate, output)
+
+    assert outcome.write_report.inserted_average_column is False
+    assert outcome.write_report.average_column == 7
+    assert outcome.write_report.analog_start_column == 17
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=7, column=7).value == AVERAGE_HEADER
+        assert sheet.cell(row=9, column=7).value == (
+            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:Q9), F9))"
+        )
+        assert sheet.cell(row=9, column=8).value is None
+        assert sheet.cell(row=9, column=14).value == CODE
+        assert workbook.calculation.calcMode == "auto"
+        assert workbook.calculation.fullCalcOnLoad is True
+        assert workbook.calculation.forceFullCalc is True
     finally:
         workbook.close()
 

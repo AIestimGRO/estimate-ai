@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -82,6 +83,8 @@ def test_resolve_macro_workbook_path_falls_back_to_newest_xlsm(tmp_path: Path, m
     newer = real_dir / "new.xlsm"
     _write_fixture_workbook(older)
     _write_fixture_workbook(newer)
+    os.utime(older, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+    os.utime(newer, ns=(1_700_000_001_000_000_000, 1_700_000_001_000_000_000))
     config_dir = repo / "data" / "config"
     config_dir.mkdir()
     config_dir.joinpath("macro.json").write_text("{}", encoding="utf-8")

@@ -25,6 +25,9 @@ Core VBA logic has been ported into a tested Python library. The project now has
 SQLite persistence, a FastAPI web UI, an admin UI, and a working RNMC ZIP import
 flow.
 
+The TKP winner catalog and its optional deterministic lexical matching are now
+connected to the main estimate-processing flow.
+
 ### Done — deterministic core
 
 - `core/normalize.py` — code/unit normalization, demolition detection, search key.
@@ -85,6 +88,25 @@ flow.
 
 See `docs/RNMC_IMPORT.md` for the import specification.
 
+### Done — optional TKP analogs
+
+- Import and update the aggregate TKP winner catalog in SQLite.
+- Enable TKP matching per run with the `Use TKP analogs` toggle; it is off by
+  default.
+- Select one best priced TKP candidate per estimate row with deterministic
+  lexical scoring.
+- Write three adjacent columns before the RNMC analog block: TKP price, original
+  TKP work name, and TKP task number.
+- Include the TKP price in the average-price formula while keeping RNMC
+  matching, RNMC matched-row counts, `/KR`, and RNMC price-risk logic unchanged.
+- Persist the selected TKP business/audit columns instead of the whole raw
+  workbook, migrate existing databases additively, and refresh previously
+  imported TKP rows once so the new fields are populated.
+- Accept both the two-sheet CatalogBuilder output and a WOR-only catalog;
+  show an unambiguous winner unit-price label and all retained fields in a
+  full admin grid with filters, sorting, pagination, configurable columns,
+  and resizable widths.
+
 ### Done — validation
 
 - Automated pytest coverage for core, storage, web, admin, and RNMC import flows.
@@ -94,7 +116,9 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 
 - [x] Port core VBA matching/pricing/risk logic to tested Python modules.
 - [x] End-to-end local run: catalog + estimate -> structured result.
-- [x] Excel writer: analogs, average formula, `/KR`, section, colours.
+- [x] Excel writer: analogs, average formula, `/KR`, section, colours, reuse of
+  labelled average columns with manual values, and preservation of unsupported
+  workbook drawings/printer settings.
 - [x] Flexible layout read and multi-sheet choice in web UI.
 - [x] SQLite catalog storage and CLI import.
 - [x] Minimal web UI: upload -> run -> download WA.
@@ -114,6 +138,8 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - [x] Admin catalog editor MVP: filter catalog rows, edit text/numeric values,
   delete rows, and apply grouped text/numeric actions to selected rows with a
   confirmation guard for multi-row operations.
+- [x] TKP catalog import, deterministic best-candidate matching, per-run toggle,
+  Excel output block, and average-price integration.
 
 ## Next milestone — RNMC import quality automation
 
@@ -135,14 +161,14 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - Improve detected-layout Excel output formatting, including full R13 and blue
   task-color tint.
 
-## Future phase — multi-source analogs
+## Future phase — further multi-source analogs
 
-Beyond the historical RNMC catalog, analogs may later be drawn from additional
-sources and shown in leading analog columns. This is explicitly deferred until
-the deterministic exact-match core and RNMC import are proven on real data.
+TKP is the first optional secondary source. Other sources may be added later,
+but must remain isolated from the exact RNMC matching and risk pipeline.
 
-Do not add semantic/AI matching inside matching/pricing. Any future semantic
-source must be isolated behind a separate, cache-backed, reproducible layer.
+Do not add semantic/AI matching inside RNMC matching/pricing. Any future
+semantic source must be isolated behind a separate, cache-backed, reproducible
+layer.
 
 ## Working rules
 
