@@ -5,7 +5,7 @@ from openpyxl import Workbook, load_workbook
 from app.services.run_matching import KR_END
 from app.services.write_result import run_and_write
 from core.excel_writer import PROBLEM_FILL, TASK_FILL
-from core.exclusions import TaskColorEntry
+from core.exclusions import TaskColorEntry, TaskHighlightReason
 from core.risk import REASON_RATIO_EXCEEDED
 
 METER = "\u043c"
@@ -376,6 +376,61 @@ def test_task_color_list_tints_analog_column_blue(tmp_path: Path) -> None:
         sheet = workbook[ESTIMATE_TITLE]
         assert sheet.cell(row=9, column=17).fill.start_color.rgb == BLUE_RGB
         assert sheet.cell(row=9, column=18).fill.start_color.rgb != BLUE_RGB
+    finally:
+        workbook.close()
+
+
+def test_task_reason_colours_analog_column_and_writes_label_above_header(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100), ("task-2", 120)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    output = tmp_path / "out.xlsx"
+    colors = [TaskColorEntry(enabled=True, task_number="task-1", reason="FOT")]
+    reasons = [TaskHighlightReason(key="FOT", label="\u0424\u041e\u0422", color_hex="E2EFDA")]
+
+    run_and_write(
+        catalog,
+        estimate,
+        output,
+        task_color_entries=colors,
+        task_highlight_reasons=reasons,
+    )
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        # header_row is 7 in this fixture -> analog column fill uses the FOT colour
+        assert sheet.cell(row=9, column=17).fill.start_color.rgb == "FFE2EFDA"
+        assert sheet.cell(row=9, column=18).fill.start_color.rgb != "FFE2EFDA"
+        # the label sits directly above the task_id header cell (row 7 - 1 = 6)
+        assert sheet.cell(row=6, column=17).value == "\u0424\u041e\u0422"
+        assert sheet.cell(row=6, column=17).fill.start_color.rgb == "FFE2EFDA"
+        assert sheet.cell(row=6, column=18).value is None
+    finally:
+        workbook.close()
+
+
+def test_marked_task_with_unregistered_reason_falls_back_to_legacy_colour(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    output = tmp_path / "out.xlsx"
+    # "reason" here is legacy free text that does not match any registered key.
+    colors = [TaskColorEntry(enabled=True, task_number="task-1", reason="+1")]
+    reasons = [TaskHighlightReason(key="FOT", label="\u0424\u041e\u0422", color_hex="E2EFDA")]
+
+    run_and_write(
+        catalog,
+        estimate,
+        output,
+        task_color_entries=colors,
+        task_highlight_reasons=reasons,
+    )
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=9, column=17).fill.start_color.rgb == BLUE_RGB
+        # no matching reason -> no label written above the header
+        assert sheet.cell(row=6, column=17).value is None
     finally:
         workbook.close()
 

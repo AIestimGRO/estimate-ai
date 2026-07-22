@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -99,6 +99,15 @@ CREATE TABLE IF NOT EXISTS task_color_entries (
     task_number TEXT NOT NULL,
     reason TEXT NOT NULL DEFAULT '',
     comment TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS task_highlight_reasons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    color_hex TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0
 );
 

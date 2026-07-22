@@ -72,10 +72,13 @@ from core.storage.risk_log import (
 from core.storage.rules import (
     list_name_exclusion_rules,
     list_task_color_entries,
+    list_task_highlight_reasons,
     set_name_exclusion_rule_enabled,
     set_task_color_enabled,
+    set_task_highlight_reason_enabled,
     upsert_name_exclusion_rule,
     upsert_task_color_entry,
+    upsert_task_highlight_reason,
 )
 from core.storage.connection import connect, default_database_path, init_database
 from core.excel_io import read_catalog_rows_with_positions
@@ -494,7 +497,8 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 return HTMLResponse(render_admin_approvals(risks))
             if section_slug == "task-colors":
                 entries = list_task_color_entries(connection)
-                return HTMLResponse(render_admin_task_colors(entries))
+                reasons = list_task_highlight_reasons(connection)
+                return HTMLResponse(render_admin_task_colors(entries, reasons))
             if section_slug == "name-exclusions":
                 rules = list_name_exclusion_rules(connection)
                 return HTMLResponse(render_admin_name_exclusions(rules))
@@ -1130,9 +1134,11 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 )
             except ValueError:
                 entries = list_task_color_entries(connection)
+                reasons = list_task_highlight_reasons(connection)
                 return HTMLResponse(
                     render_admin_task_colors(
                         entries,
+                        reasons,
                         error="Номер задачи обязателен.",
                     ),
                     status_code=400,
@@ -1156,10 +1162,72 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             )
             if not changed:
                 entries = list_task_color_entries(connection)
+                reasons = list_task_highlight_reasons(connection)
                 return HTMLResponse(
                     render_admin_task_colors(
                         entries,
+                        reasons,
                         error="Задача для изменения не найдена.",
+                    ),
+                    status_code=404,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse("/admin/task-colors", status_code=303)
+
+    @app.post("/admin/task-colors/reasons/add", response_class=HTMLResponse)
+    def admin_task_reason_add(
+        key: str = Form(""),
+        label: str = Form(""),
+        color_hex: str = Form(""),
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                upsert_task_highlight_reason(
+                    connection,
+                    key=key,
+                    label=label,
+                    color_hex=color_hex,
+                    enabled=True,
+                )
+            except ValueError as exc:
+                entries = list_task_color_entries(connection)
+                reasons = list_task_highlight_reasons(connection)
+                return HTMLResponse(
+                    render_admin_task_colors(
+                        entries,
+                        reasons,
+                        error=f"Причина не сохранена: {exc}",
+                    ),
+                    status_code=400,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse("/admin/task-colors", status_code=303)
+
+    @app.post("/admin/task-colors/reasons/toggle", response_class=HTMLResponse)
+    def admin_task_reason_toggle(
+        key: str = Form(""),
+        enabled: str = Form("0"),
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            changed = set_task_highlight_reason_enabled(
+                connection,
+                key=key,
+                enabled=enabled == "1",
+            )
+            if not changed:
+                entries = list_task_color_entries(connection)
+                reasons = list_task_highlight_reasons(connection)
+                return HTMLResponse(
+                    render_admin_task_colors(
+                        entries,
+                        reasons,
+                        error="Причина для изменения не найдена.",
                     ),
                     status_code=404,
                 )
@@ -1382,6 +1450,17 @@ def _preview(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
 
 def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLResponse:
     record = state.store[token]
+    connection = connect(default_database_path())
+    try:
+        init_database(connection)
+        db_task_colors = list_task_color_entries(connection)
+        task_highlight_reasons = list_task_highlight_reasons(connection)
+    finally:
+        connection.close()
+    # An empty DB list means "/admin/task-colors" has never been used on this
+    # install -- fall back to the macro workbook (run_and_write's default)
+    # instead of silently switching every task's highlighting off.
+    task_color_entries = db_task_colors or None
     try:
         outcome = run_and_write(
             record.catalog_path,
@@ -1391,6 +1470,8 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             selected_sheet_title=selected_sheet,
             regional_coefficient=record.coefficient,
             target_region=record.target_region,
+            task_color_entries=task_color_entries,
+            task_highlight_reasons=task_highlight_reasons,
         )
     except MultipleSheetsError as error:
         return HTMLResponse(render_choice(token, error.candidates))

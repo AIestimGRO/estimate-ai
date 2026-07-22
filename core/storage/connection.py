@@ -86,6 +86,32 @@ def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
         "UPDATE imported_files SET filename_key = lower(filename) "
         "WHERE filename_key = ''"
     )
+    _seed_default_highlight_reasons(connection)
+
+
+def _seed_default_highlight_reasons(connection: sqlite3.Connection) -> None:
+    """Seed the highlight-reason registry once, if it is still empty.
+
+    The pre-existing "blue task" highlight had no explicit reason key; it
+    gets TKP_PLUS1 with the same colour it always used (DDEBF7), plus the
+    new FOT reason. Runs every init_database call but is a no-op once rows
+    exist, so admin edits are never overwritten.
+    """
+    count_row = connection.execute(
+        "SELECT COUNT(*) AS n FROM task_highlight_reasons"
+    ).fetchone()
+    if int(count_row["n"]) > 0:
+        return
+    connection.executemany(
+        """
+        INSERT INTO task_highlight_reasons (key, label, color_hex, enabled, sort_order)
+        VALUES (?, ?, ?, 1, ?)
+        """,
+        [
+            ("TKP_PLUS1", "\u0422\u041a\u041f +1%", "DDEBF7", 0),
+            ("FOT", "\u0424\u041e\u0422", "E2EFDA", 1),
+        ],
+    )
 
 
 def _ensure_column(

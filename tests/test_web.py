@@ -287,3 +287,45 @@ def test_confirm_screen_warns_when_coefficient_defaulted(client):
     assert page.status_code == 200
     assert "\u26a0" in page.text
     assert "1.0" in page.text
+
+
+def test_full_run_applies_reason_colour_and_label_from_admin(client, monkeypatch, tmp_path):
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    # Register a new reason with its own colour, then mark task "t-1" with it
+    # through the same admin endpoints a real operator would use.
+    client.post(
+        "/admin/task-colors/reasons/add",
+        data={"key": "FOT", "label": "\u0424\u041e\u0422", "color_hex": "#E2EFDA"},
+    )
+    client.post(
+        "/admin/task-colors/add",
+        data={"task_number": "t-1", "reason": "FOT", "comment": ""},
+    )
+
+    files = _files(_catalog_bytes([("t-1", 100), ("t-2", 120)]), _template_estimate_bytes())
+    page = client.post("/run", files=files)
+    assert page.status_code == 200
+
+    result = _confirm(client, page)
+    assert result.status_code == 200
+    match = re.search(r'href="(/download\?token=[0-9a-f]+)"', result.text)
+    assert match is not None
+
+    download = client.get(match.group(1))
+    assert download.status_code == 200
+
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(BytesIO(download.content), data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        # header_row is 7 in the template fixture; t-1's analog column lands
+        # at column 17 (see test_excel_writer.py fixtures for the same layout).
+        assert sheet.cell(row=9, column=17).fill.start_color.rgb == "FFE2EFDA"
+        assert sheet.cell(row=6, column=17).value == "\u0424\u041e\u0422"
+    finally:
+        workbook.close()

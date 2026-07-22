@@ -30,6 +30,63 @@ class TaskColorEntry:
     comment: str = ""
 
 
+@dataclass(frozen=True)
+class TaskHighlightReason:
+    """A configurable highlight reason: key, display label, and fill colour.
+
+    Reasons are admin-configurable (the "Синие задачи" page) so a new
+    highlight category can be added without code changes. `color_hex` is a
+    6-digit RGB hex string (no leading '#' or alpha), e.g. "DDEBF7".
+    """
+
+    key: str
+    label: str
+    color_hex: str
+    enabled: bool = True
+
+
+# Fallback colour for TaskColorEntry rows whose `reason` does not match any
+# registered TaskHighlightReason (legacy free-text reasons, e.g. "+1").
+LEGACY_REASON_COLOR = "DDEBF7"
+
+
+def normalize_reason_key(value: object) -> str:
+    text = "" if value is None else str(value)
+    return text.strip().upper()
+
+
+def resolve_task_highlight(
+    color_entries: list[TaskColorEntry],
+    reasons: list[TaskHighlightReason],
+    task_number: object,
+) -> "TaskHighlightReason | None":
+    """The highlight reason for a task, if marked and the reason is known.
+
+    Returns None both when the task is not marked and when it is marked but
+    its `reason` does not match any entry in `reasons` (legacy data) — the
+    caller distinguishes the two via `is_task_marked` and falls back to
+    LEGACY_REASON_COLOR in the second case, so old records keep highlighting.
+    """
+    task_key = normalize_task_key(task_number)
+    if task_key == "":
+        return None
+
+    reason_key = None
+    for entry in color_entries:
+        if entry.enabled and normalize_task_key(entry.task_number) == task_key:
+            reason_key = normalize_reason_key(entry.reason)
+            break
+
+    if not reason_key:
+        return None
+
+    for reason in reasons:
+        if reason.enabled and normalize_reason_key(reason.key) == reason_key:
+            return reason
+
+    return None
+
+
 def normalize_name_for_rules(value: object) -> str:
     """Port of NormalizeNameForRules from Module7."""
     text = "" if value is None else str(value)

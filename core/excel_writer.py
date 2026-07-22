@@ -24,13 +24,20 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.services.run_matching import EstimateRowResult, MatchingRunResult
 from core.excel_io import find_estimate_sheet
-from core.exclusions import TaskColorEntry, is_task_marked
+from core.exclusions import (
+    LEGACY_REASON_COLOR,
+    TaskColorEntry,
+    TaskHighlightReason,
+    is_task_marked,
+    resolve_task_highlight,
+)
 from core.layout import resolve_average_placement
 from core.risk import REASON_RATIO_EXCEEDED
 
 # Module4_updated.bas RGB fills
 HEADER_FILL = PatternFill(start_color="FFD9E1F2", end_color="FFD9E1F2", fill_type="solid")
 TASK_FILL = PatternFill(start_color="FFDDEBF7", end_color="FFDDEBF7", fill_type="solid")
+REASON_LABEL_FONT = Font(bold=True, size=8, italic=True)
 DUP_FILL = PatternFill(start_color="FFD9D9D9", end_color="FFD9D9D9", fill_type="solid")
 PROBLEM_FILL = PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
 
@@ -97,6 +104,7 @@ def write_run_result(
     regional_coefficient: float = 1.0,
     sheet_title: str | None = None,
     task_color_entries: list[TaskColorEntry] | None = None,
+    task_highlight_reasons: list[TaskHighlightReason] | None = None,
     target_region: str | None = None,
 ) -> WriteReport:
     """Write `result` into a copy of the estimate workbook at `output_path`.
@@ -104,11 +112,17 @@ def write_run_result(
     `target_region` is the estimate file's own declared region (e.g. from
     "Регион:"); when given, analog columns whose region matches it are placed
     first (R.. rule, 2026-07). See `_regions_match` for how matching works.
+
+    `task_highlight_reasons` is the admin-configured reason->colour registry
+    (the "Синие задачи" page). A task_color_entries row whose `reason` does
+    not match any entry here falls back to the legacy blue fill and gets no
+    label written above its column (backward compatibility).
     """
     if len(row_numbers) != len(result.rows):
         raise ValueError("row_numbers length must match result.rows length")
 
     task_colors = [] if task_color_entries is None else task_color_entries
+    reasons = [] if task_highlight_reasons is None else task_highlight_reasons
     workbook = load_workbook(source_path, data_only=False)
 
     try:
@@ -154,6 +168,7 @@ def write_run_result(
                 analog_plan,
                 last_data_row,
                 task_colors,
+                reasons,
             )
 
         written_rows = 0
@@ -166,6 +181,7 @@ def write_run_result(
                 analog_plan,
                 regional_coefficient,
                 task_colors,
+                reasons,
             ):
                 written_rows += 1
 
@@ -635,17 +651,47 @@ def _clear_analog_block(
             cell.fill = PatternFill()
 
 
+def _fill_for_marked_task(
+    task_colors: list[TaskColorEntry],
+    reasons: list[TaskHighlightReason],
+    task_id: str,
+) -> tuple[PatternFill, str | None] | None:
+    """Fill + label for a marked task, or None if the task is not marked.
+
+    Colour comes from the matched TaskHighlightReason; if the task is marked
+    but its stored reason does not match any registered reason (legacy
+    data), falls back to the historical TASK_FILL colour with no label.
+    """
+    if not is_task_marked(task_colors, task_id):
+        return None
+    highlight = resolve_task_highlight(task_colors, reasons, task_id)
+    if highlight is not None:
+        color_hex = highlight.color_hex
+        label = highlight.label
+    else:
+        color_hex = LEGACY_REASON_COLOR
+        label = None
+    fill = PatternFill(start_color=f"FF{color_hex}", end_color=f"FF{color_hex}", fill_type="solid")
+    return fill, label
+
+
 def _write_analog_headers(
     worksheet: Worksheet,
     header_row: int,
     plan: GlobalAnalogPlan,
     last_data_row: int,
     task_colors: list[TaskColorEntry],
+    reasons: list[TaskHighlightReason],
 ) -> None:
     if header_row <= 0 or not plan.columns:
         return
 
     region_row = header_row + 1
+    # Analog columns are always newly placed to the right of the source
+    # table, so the row directly above the header is free to use as a
+    # dedicated reason-label row for marked tasks.
+    reason_row = header_row - 1
+
     for column_def in plan.columns:
         column = column_def.column
         task_cell = worksheet.cell(row=header_row, column=column)
@@ -658,11 +704,19 @@ def _write_analog_headers(
         region_cell.font = REGION_FONT
         region_cell.fill = HEADER_FILL
 
-        if is_task_marked(task_colors, column_def.task_id):
+        highlighted = _fill_for_marked_task(task_colors, reasons, column_def.task_id)
+        if highlighted is not None:
+            fill, label = highlighted
             for row in range(header_row, last_data_row + 1):
-                worksheet.cell(row=row, column=column).fill = TASK_FILL
+                worksheet.cell(row=row, column=column).fill = fill
             task_cell.fill = HEADER_FILL
             region_cell.fill = HEADER_FILL
+
+            if reason_row > 0 and label:
+                reason_cell = worksheet.cell(row=reason_row, column=column)
+                reason_cell.value = label
+                reason_cell.font = REASON_LABEL_FONT
+                reason_cell.fill = fill
 
 
 def _write_row(
@@ -673,6 +727,7 @@ def _write_row(
     plan: GlobalAnalogPlan,
     coefficient: float,
     task_colors: list[TaskColorEntry],
+    reasons: list[TaskHighlightReason],
 ) -> bool:
     if columns.section is not None and row.section_code:
         section_cell = worksheet.cell(row=row_number, column=columns.section)
@@ -694,7 +749,7 @@ def _write_row(
         price_cell = worksheet.cell(row=row_number, column=column)
         price_cell.value = round(analog.entry.price * coefficient, 2)
         price_cell.number_format = PRICE_NUMBER_FORMAT
-        _apply_cell_colour(price_cell, row, analog, task_colors)
+        _apply_cell_colour(price_cell, row, analog, task_colors, reasons)
 
     return True
 
@@ -721,9 +776,11 @@ def _apply_cell_colour(
     row: EstimateRowResult,
     analog,
     task_colors: list[TaskColorEntry],
+    reasons: list[TaskHighlightReason],
 ) -> None:
-    if is_task_marked(task_colors, analog.task_id):
-        cell.fill = TASK_FILL
+    highlighted = _fill_for_marked_task(task_colors, reasons, analog.task_id)
+    if highlighted is not None:
+        cell.fill = highlighted[0]
         return
 
     flagged_ids = {id(entry) for entry in row.risk_result.flagged_entries}

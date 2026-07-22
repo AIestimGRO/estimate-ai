@@ -18,7 +18,7 @@ from app.services.read_estimate import METHOD_TEMPLATE, EstimateData, load_estim
 from app.services.run_matching import EstimateRowResult, MatchingRunResult, run_matching
 from core.excel_io import Settings
 from core.excel_writer import WriteReport, WriterColumns, resolve_kr_column, write_run_result
-from core.exclusions import NameExclusionRule, TaskColorEntry
+from core.exclusions import NameExclusionRule, TaskColorEntry, TaskHighlightReason
 from core.layout import FIELD_SECTION, LayoutConfig, load_layout_config, resolve_regional_coefficient
 from core.macro_workbook import load_default_macro_settings
 from core.risk import GesnException
@@ -112,6 +112,7 @@ def run_and_write(
     selected_sheet_title: str | None = None,
     name_exclusion_rules: list[NameExclusionRule] | None = None,
     task_color_entries: list[TaskColorEntry] | None = None,
+    task_highlight_reasons: list[TaskHighlightReason] | None = None,
     gesn_exceptions: dict[str, GesnException] | None = None,
     demontazh_filter_enabled: bool = True,
     price_spread_limit: float | None = None,
@@ -191,6 +192,7 @@ def run_and_write(
         regional_coefficient=coefficient,
         sheet_title=estimate.sheet_title,
         task_color_entries=task_colors,
+        task_highlight_reasons=task_highlight_reasons,
         target_region=effective_region,
     )
 

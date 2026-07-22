@@ -3,7 +3,12 @@
 from fastapi.testclient import TestClient
 
 from app.web.app import create_app
-from core.storage import connect, init_database, list_task_color_entries
+from core.storage import (
+    connect,
+    init_database,
+    list_task_color_entries,
+    list_task_highlight_reasons,
+)
 
 
 def test_admin_task_colors_shows_empty_state(tmp_path, monkeypatch) -> None:
@@ -159,3 +164,95 @@ def test_admin_task_colors_toggle_disables_entry(tmp_path, monkeypatch) -> None:
 
     assert len(entries) == 1
     assert entries[0].enabled is False
+
+
+def test_admin_task_colors_page_seeds_default_reasons(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.get("/admin/task-colors")
+
+    assert response.status_code == 200
+    assert "\u0422\u041a\u041f +1%" in response.text
+    assert "\u0424\u041e\u0422" in response.text
+    assert 'action="/admin/task-colors/reasons/add"' in response.text
+    assert '<select name="reason" required>' in response.text
+
+
+def test_admin_task_colors_add_reason(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/task-colors/reasons/add",
+            data={"key": "custom", "label": "\u041e\u0441\u043e\u0431\u0430\u044f", "color_hex": "#AABBCC"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/task-colors"
+
+    connection = connect(db_path)
+    try:
+        reasons = list_task_highlight_reasons(connection)
+    finally:
+        connection.close()
+
+    added = [r for r in reasons if r.key == "CUSTOM"]
+    assert len(added) == 1
+    assert added[0].label == "\u041e\u0441\u043e\u0431\u0430\u044f"
+    assert added[0].color_hex == "AABBCC"
+    assert added[0].enabled is True
+
+
+def test_admin_task_colors_add_reason_rejects_bad_color(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/task-colors/reasons/add",
+            data={"key": "bad", "label": "Bad", "color_hex": "not-a-color"},
+        )
+
+    assert response.status_code == 400
+    assert "\u041f\u0440\u0438\u0447\u0438\u043d\u0430 \u043d\u0435 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430" in response.text
+
+
+def test_admin_task_colors_toggle_reason_disables_it(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        client.get("/admin/task-colors")  # triggers init_database + default seeding
+        response = client.post(
+            "/admin/task-colors/reasons/toggle",
+            data={"key": "FOT", "enabled": "0"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+
+    connection = connect(db_path)
+    try:
+        reasons = list_task_highlight_reasons(connection)
+    finally:
+        connection.close()
+
+    fot = next(r for r in reasons if r.key == "FOT")
+    assert fot.enabled is False
+
+
+def test_admin_task_colors_toggle_reason_missing_key_returns_404(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/task-colors/reasons/toggle",
+            data={"key": "DOES-NOT-EXIST", "enabled": "0"},
+        )
+
+    assert response.status_code == 404

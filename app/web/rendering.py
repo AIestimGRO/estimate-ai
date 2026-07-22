@@ -25,7 +25,13 @@ from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord, normalize_import_filename
 from core.storage.risk_log import PriceRiskLogEntry
-from core.exclusions import NameExclusionRule, TaskColorEntry
+from core.exclusions import (
+    LEGACY_REASON_COLOR,
+    NameExclusionRule,
+    TaskColorEntry,
+    TaskHighlightReason,
+    normalize_reason_key,
+)
 
 _WRITER_MODULE = Path(__file__).resolve().parents[2] / "core" / "excel_writer.py"
 
@@ -2263,16 +2269,21 @@ def _render_settings_table(settings_rows: list[tuple[str, str]]) -> str:
 
 def render_admin_task_colors(
     entries: list[TaskColorEntry],
+    reasons: list[TaskHighlightReason],
     error: str = "",
     notice: str = "",
 ) -> str:
     content = (
         '<section class="admin-panel">'
         '<h2 class="section">Синие задачи</h2>'
-        '<p>Задачи из этого списка не блокируют подбор аналогов. Их аналоги остаются в результате, но должны подсвечиваться синим.</p>'
+        '<p>Задачи из этого списка не блокируют подбор аналогов. Их аналоги остаются в результате, но должны подсвечиваться выбранным цветом.</p>'
         f'{_render_admin_message(error, notice)}'
-        f'{_render_task_color_form()}'
-        f'{_render_task_color_table(entries)}'
+        f'{_render_task_color_form(reasons)}'
+        f'{_render_task_color_table(entries, reasons)}'
+        '<h2 class="section">Причины подсветки и цвета</h2>'
+        '<p>Реестр причин: подпись пишется в обработанном файле прямо над номером задачи, цвет заливает столбец её аналогов.</p>'
+        f'{_render_reason_form()}'
+        f'{_render_reason_table(reasons)}'
         '</section>'
     )
     return render(
@@ -2292,7 +2303,14 @@ def _render_admin_message(error: str, notice: str) -> str:
     return ""
 
 
-def _render_task_color_form() -> str:
+def _render_task_color_form(reasons: list[TaskHighlightReason]) -> str:
+    options = "".join(
+        f'<option value="{html.escape(reason.key, quote=True)}">{html.escape(reason.label)}</option>'
+        for reason in reasons
+        if reason.enabled
+    )
+    if not options:
+        options = '<option value="" disabled selected>Сначала добавьте причину ниже</option>'
     return (
         '<form class="admin-form" method="post" action="/admin/task-colors/add">'
         '<h2 class="section">Добавить или включить задачу</h2>'
@@ -2300,7 +2318,7 @@ def _render_task_color_form() -> str:
         '<input type="text" name="task_number" placeholder="Например, TASK-123" required>'
         '</label>'
         '<label>Причина'
-        '<input type="text" name="reason" placeholder="Например, manual_review">'
+        f'<select name="reason" required>{options}</select>'
         '</label>'
         '<label>Комментарий'
         '<textarea name="comment" placeholder="Короткое пояснение для админки"></textarea>'
@@ -2310,26 +2328,42 @@ def _render_task_color_form() -> str:
     )
 
 
-def _render_task_color_table(entries: list[TaskColorEntry]) -> str:
+def _render_task_color_table(
+    entries: list[TaskColorEntry],
+    reasons: list[TaskHighlightReason],
+) -> str:
     if not entries:
         return '<p class="muted">Синие задачи пока не записаны.</p>'
 
+    reason_by_key = {normalize_reason_key(reason.key): reason for reason in reasons}
     header = (
         '<table class="preview"><thead><tr>'
         '<th>Вкл.</th>'
         '<th>Номер задачи</th>'
         '<th>Причина</th>'
+        '<th>Цвет</th>'
         '<th>Комментарий</th>'
         '<th>Действие</th>'
         '</tr></thead><tbody>'
     )
     rows = []
     for entry in entries:
+        reason = reason_by_key.get(normalize_reason_key(entry.reason))
+        if reason is not None:
+            reason_label = reason.label
+            colour_cell = _render_colour_swatch(reason.color_hex)
+        elif entry.reason:
+            reason_label = entry.reason
+            colour_cell = _render_colour_swatch(LEGACY_REASON_COLOR) + ' <span class="muted">(вне реестра)</span>'
+        else:
+            reason_label = "\u2014"
+            colour_cell = ""
         rows.append(
             '<tr>'
             f'<td>{_enabled_label(entry.enabled)}</td>'
             f'<td>{html.escape(entry.task_number)}</td>'
-            f'<td>{html.escape(entry.reason)}</td>'
+            f'<td>{html.escape(reason_label)}</td>'
+            f'<td>{colour_cell}</td>'
             f'<td>{html.escape(entry.comment)}</td>'
             f'<td>{_render_task_color_toggle(entry)}</td>'
             '</tr>'
@@ -2344,6 +2378,72 @@ def _render_task_color_toggle(entry: TaskColorEntry) -> str:
     return (
         '<form class="table-action" method="post" action="/admin/task-colors/toggle">'
         f'<input type="hidden" name="task_number" value="{task_value}">'
+        f'<input type="hidden" name="enabled" value="{next_enabled}">'
+        f'<button type="submit">{button_label}</button>'
+        '</form>'
+    )
+
+
+def _render_colour_swatch(color_hex: str) -> str:
+    safe = html.escape(color_hex, quote=True)
+    return (
+        f'<span style="display:inline-block;width:14px;height:14px;background:#{safe};'
+        'border:1px solid #cbd5e1;border-radius:3px;vertical-align:middle;'
+        f'margin-right:6px;"></span>#{safe}'
+    )
+
+
+def _render_reason_form() -> str:
+    return (
+        '<form class="admin-form" method="post" action="/admin/task-colors/reasons/add">'
+        '<label>Key (латиница, без пробелов)'
+        '<input type="text" name="key" placeholder="Например, FOT" required>'
+        '</label>'
+        '<label>Подпись (пишется в файле над номером задачи)'
+        '<input type="text" name="label" placeholder="Например, ФОТ" required>'
+        '</label>'
+        '<label>Цвет'
+        '<input type="color" name="color_hex" value="#DDEBF7" required>'
+        '</label>'
+        '<button type="submit">Сохранить причину</button>'
+        '</form>'
+    )
+
+
+def _render_reason_table(reasons: list[TaskHighlightReason]) -> str:
+    if not reasons:
+        return '<p class="muted">Причины пока не заданы.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Key</th>'
+        '<th>Подпись</th>'
+        '<th>Цвет</th>'
+        '<th>Статус</th>'
+        '<th>Действие</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for reason in reasons:
+        rows.append(
+            '<tr>'
+            f'<td>{html.escape(reason.key)}</td>'
+            f'<td>{html.escape(reason.label)}</td>'
+            f'<td>{_render_colour_swatch(reason.color_hex)}</td>'
+            f'<td>{_enabled_label(reason.enabled)}</td>'
+            f'<td>{_render_reason_toggle(reason)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
+
+def _render_reason_toggle(reason: TaskHighlightReason) -> str:
+    next_enabled = "0" if reason.enabled else "1"
+    button_label = "Выключить" if reason.enabled else "Включить"
+    key_value = html.escape(reason.key, quote=True)
+    return (
+        '<form class="table-action" method="post" action="/admin/task-colors/reasons/toggle">'
+        f'<input type="hidden" name="key" value="{key_value}">'
         f'<input type="hidden" name="enabled" value="{next_enabled}">'
         f'<button type="submit">{button_label}</button>'
         '</form>'

@@ -8,10 +8,14 @@ from pathlib import Path
 from core.exclusions import (
     NameExclusionRule,
     TaskColorEntry,
+    TaskHighlightReason,
     VALID_MATCH_MODES,
     VALID_SCOPES,
+    normalize_reason_key,
     normalize_task_key,
 )
+
+_HEX_DIGITS = set("0123456789ABCDEF")
 from core.macro_workbook import (
     load_all_rules_from_workbook,
     resolve_macro_workbook_path,
@@ -212,6 +216,82 @@ def set_task_color_enabled(
     return False
 
 
+def list_task_highlight_reasons(connection: sqlite3.Connection) -> list[TaskHighlightReason]:
+    rows = connection.execute(
+        """
+        SELECT key, label, color_hex, enabled
+        FROM task_highlight_reasons
+        ORDER BY sort_order, id
+        """
+    ).fetchall()
+    return [_row_to_highlight_reason(row) for row in rows]
+
+
+def upsert_task_highlight_reason(
+    connection: sqlite3.Connection,
+    key: str,
+    label: str,
+    color_hex: str,
+    enabled: bool = True,
+) -> None:
+    key_value = normalize_reason_key(key)
+    if key_value == "":
+        raise ValueError("key is required")
+
+    label_value = str(label).strip()
+    if label_value == "":
+        raise ValueError("label is required")
+
+    color_value = str(color_hex).strip().lstrip("#").upper()
+    if len(color_value) != 6 or any(char not in _HEX_DIGITS for char in color_value):
+        raise ValueError("color_hex must be a 6-digit hex value")
+
+    row = connection.execute(
+        "SELECT id FROM task_highlight_reasons WHERE key = ?", (key_value,)
+    ).fetchone()
+    if row is not None:
+        connection.execute(
+            """
+            UPDATE task_highlight_reasons
+            SET label = ?, color_hex = ?, enabled = ?
+            WHERE id = ?
+            """,
+            (label_value, color_value, int(enabled), int(row["id"])),
+        )
+        connection.commit()
+        return
+
+    sort_row = connection.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM task_highlight_reasons"
+    ).fetchone()
+    next_sort_order = int(sort_row["next_sort_order"])
+    connection.execute(
+        """
+        INSERT INTO task_highlight_reasons (key, label, color_hex, enabled, sort_order)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (key_value, label_value, color_value, int(enabled), next_sort_order),
+    )
+    connection.commit()
+
+
+def set_task_highlight_reason_enabled(
+    connection: sqlite3.Connection,
+    key: str,
+    enabled: bool,
+) -> bool:
+    key_value = normalize_reason_key(key)
+    if key_value == "":
+        return False
+
+    cursor = connection.execute(
+        "UPDATE task_highlight_reasons SET enabled = ? WHERE key = ?",
+        (int(enabled), key_value),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
 def replace_name_exclusion_rules(
     connection: sqlite3.Connection,
     rules: list[NameExclusionRule],
@@ -297,6 +377,15 @@ def _row_to_task_color(row: sqlite3.Row) -> TaskColorEntry:
         task_number=str(row["task_number"]),
         reason=str(row["reason"]),
         comment=str(row["comment"]),
+    )
+
+
+def _row_to_highlight_reason(row: sqlite3.Row) -> TaskHighlightReason:
+    return TaskHighlightReason(
+        key=str(row["key"]),
+        label=str(row["label"]),
+        color_hex=str(row["color_hex"]),
+        enabled=bool(row["enabled"]),
     )
 
 
