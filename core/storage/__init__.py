@@ -52,6 +52,15 @@ from core.storage.rules import (
     upsert_task_color_entry,
     upsert_task_highlight_reason,
 )
+from core.storage.tkp import (
+    TkpImportResult,
+    TkpItemRecord,
+    TkpSourceRecord,
+    count_tkp_items,
+    import_tkp_catalog_workbook,
+    list_tkp_items,
+    list_tkp_sources,
+)
 from core.storage.risk_log import (
     FlaggedRiskSnapshot,
     PriceRiskLogEntry,
@@ -117,6 +126,13 @@ __all__ = [
     "upsert_name_exclusion_rule",
     "upsert_task_color_entry",
     "upsert_task_highlight_reason",
+    "TkpImportResult",
+    "TkpItemRecord",
+    "TkpSourceRecord",
+    "count_tkp_items",
+    "import_tkp_catalog_workbook",
+    "list_tkp_items",
+    "list_tkp_sources",
     "FlaggedRiskSnapshot",
     "PriceRiskLogEntry",
     "approve_risk",

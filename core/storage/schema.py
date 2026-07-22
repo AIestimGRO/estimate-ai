@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -110,6 +110,60 @@ CREATE TABLE IF NOT EXISTS task_highlight_reasons (
     enabled INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS tkp_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL DEFAULT '',
+    file_path TEXT NOT NULL DEFAULT '',
+    file_name TEXT NOT NULL,
+    modified_date TEXT NOT NULL DEFAULT '',
+    sheet_name TEXT NOT NULL DEFAULT '',
+    parse_status TEXT NOT NULL DEFAULT '',
+    parse_message TEXT NOT NULL DEFAULT '',
+    task_no TEXT NOT NULL DEFAULT '',
+    request_date TEXT NOT NULL DEFAULT '',
+    customer TEXT NOT NULL DEFAULT '',
+    general_contractor TEXT NOT NULL DEFAULT '',
+    procedure_name TEXT NOT NULL DEFAULT '',
+    winner_name TEXT NOT NULL DEFAULT '',
+    winner_inn TEXT NOT NULL DEFAULT '',
+    winner_uin TEXT NOT NULL DEFAULT '',
+    winner_total_no_vat REAL,
+    winner_total_vat REAL,
+    rnmc_total_no_vat REAL,
+    item_count INTEGER NOT NULL DEFAULT 0,
+    imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(file_name, modified_date)
+);
+
+CREATE TABLE IF NOT EXISTS tkp_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL REFERENCES tkp_sources(id) ON DELETE CASCADE,
+    source_row INTEGER NOT NULL DEFAULT 0,
+    section_code TEXT NOT NULL DEFAULT '',
+    section_name TEXT NOT NULL DEFAULT '',
+    subsection_name TEXT NOT NULL DEFAULT '',
+    item_code TEXT NOT NULL DEFAULT '',
+    item_name TEXT NOT NULL,
+    unit TEXT NOT NULL DEFAULT '',
+    qty REAL,
+    rnmc_unit_price_no_vat REAL,
+    winner_unit_price_no_vat REAL,
+    winner_line_total_no_vat REAL,
+    winner_name TEXT NOT NULL DEFAULT '',
+    winner_inn TEXT NOT NULL DEFAULT '',
+    winner_uin TEXT NOT NULL DEFAULT '',
+    task_no TEXT NOT NULL DEFAULT '',
+    request_date TEXT NOT NULL DEFAULT '',
+    customer TEXT NOT NULL DEFAULT '',
+    general_contractor TEXT NOT NULL DEFAULT '',
+    procedure_name TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_tkp_items_source_id
+    ON tkp_items(source_id);
+CREATE INDEX IF NOT EXISTS idx_tkp_items_item_name
+    ON tkp_items(item_name);
 
 CREATE TABLE IF NOT EXISTS gesn_exceptions (
     exception_key TEXT PRIMARY KEY,

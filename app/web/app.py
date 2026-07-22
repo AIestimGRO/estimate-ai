@@ -62,6 +62,13 @@ from core.storage.catalog import (
     update_imported_file_metadata,
     write_catalog_export_xlsx,
 )
+from core.storage.tkp import (
+    TkpImportResult,
+    count_tkp_items,
+    import_tkp_catalog_workbook,
+    list_tkp_items,
+    list_tkp_sources,
+)
 from core.storage.risk_log import (
     STATUS_OPEN,
     approve_risk,
@@ -88,6 +95,7 @@ from app.web.rendering import (
     render_admin_approvals,
     render_admin_catalog,
     render_admin_gesn_exceptions,
+    render_admin_tkp,
     render_admin_import_detail,
     render_admin_imports,
     render_admin_name_exclusions,
@@ -105,6 +113,7 @@ from app.web.rendering import (
 )
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+TKP_ITEMS_PREVIEW_LIMIT = 200
 LEGACY_ZLVL_CATALOG_FILENAME = "РНМЦ_КА_ЖО_ZLVL_V3.xlsx"
 VBA_DATE_BASE = date(1899, 12, 30)
 _INVALID = object()
@@ -492,6 +501,13 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             if section_slug == "gesn-exceptions":
                 exceptions = list_gesn_exceptions(connection)
                 return HTMLResponse(render_admin_gesn_exceptions(exceptions))
+            if section_slug == "tkp":
+                sources = list_tkp_sources(connection)
+                items = list_tkp_items(connection, limit=TKP_ITEMS_PREVIEW_LIMIT)
+                total_items = count_tkp_items(connection)
+                return HTMLResponse(
+                    render_admin_tkp(sources, items, total_items=total_items, notice=message)
+                )
             if section_slug == "approvals":
                 risks = list_price_risks(connection, status="open")
                 return HTMLResponse(render_admin_approvals(risks))
@@ -999,6 +1015,63 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             f"дубликатов имен: {result.duplicates}."
         )
         return RedirectResponse(f"/admin/imports?message={quote(message)}", status_code=303)
+
+    @app.post("/admin/tkp/import", response_class=HTMLResponse)
+    async def admin_tkp_import(tkp_catalog: UploadFile = File(...)):
+        raw_name = tkp_catalog.filename or ""
+        if _safe_name(raw_name) == "":
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                sources = list_tkp_sources(connection)
+                items = list_tkp_items(connection, limit=TKP_ITEMS_PREVIEW_LIMIT)
+                total_items = count_tkp_items(connection)
+                return HTMLResponse(
+                    render_admin_tkp(
+                        sources,
+                        items,
+                        total_items=total_items,
+                        error="Файл каталога ТКП не выбран.",
+                    ),
+                    status_code=400,
+                )
+            finally:
+                connection.close()
+
+        upload_dir = app.state.app_state.base_dir / "admin_tkp"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        saved_path = _save(
+            upload_dir,
+            f"tkp_{uuid.uuid4().hex}{Path(_safe_name(raw_name)).suffix or '.xlsm'}",
+            await tkp_catalog.read(),
+        )
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                result: TkpImportResult = import_tkp_catalog_workbook(connection, saved_path)
+            except Exception as exc:
+                sources = list_tkp_sources(connection)
+                items = list_tkp_items(connection, limit=TKP_ITEMS_PREVIEW_LIMIT)
+                total_items = count_tkp_items(connection)
+                return HTMLResponse(
+                    render_admin_tkp(
+                        sources,
+                        items,
+                        total_items=total_items,
+                        error=f"Не удалось импортировать каталог ТКП: {exc}",
+                    ),
+                    status_code=400,
+                )
+        finally:
+            connection.close()
+        message = (
+            f"Каталог ТКП обработан: файлов увидено {result.files_seen}, "
+            f"новых {result.files_imported}, обновлено {result.files_updated}, "
+            f"без изменений {result.files_skipped}. Всего позиций в базе: "
+            f"{result.items_imported}."
+        )
+        return RedirectResponse(f"/admin/tkp?message={quote(message)}", status_code=303)
 
     @app.post("/admin/approvals/approve", response_class=HTMLResponse)
     def admin_approval_approve(exception_key: str = Form("")):

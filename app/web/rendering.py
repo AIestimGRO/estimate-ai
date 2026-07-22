@@ -25,6 +25,7 @@ from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord, normalize_import_filename
 from core.storage.risk_log import PriceRiskLogEntry
+from core.storage.tkp import TkpItemRecord, TkpSourceRecord
 from core.exclusions import (
     LEGACY_REASON_COLOR,
     NameExclusionRule,
@@ -99,6 +100,12 @@ ADMIN_SECTIONS = [
         "title": "GESN exceptions",
         "description": "\u041e\u0434\u043e\u0431\u0440\u0435\u043d\u043d\u044b\u0435 \u0434\u0438\u0430\u043f\u0430\u0437\u043e\u043d\u044b \u0446\u0435\u043d \u043f\u043e \u0441\u0432\u044f\u0437\u043a\u0435 \u043a\u043e\u0434 + \u0435\u0434\u0438\u043d\u0438\u0446\u0430 + \u043f\u0440\u0438\u0437\u043d\u0430\u043a \u0434\u0435\u043c\u043e\u043d\u0442\u0430\u0436\u0430.",
         "status": "Одобренные диапазоны из gesn_exceptions показываются в read-only режиме.",
+    },
+    {
+        "slug": "tkp",
+        "title": "Каталог ТКП",
+        "description": "Каталог цен победителей закупок (КЛ 2.0), собранный из отдельных ТКП в единый файл макросом KL20 CatalogBuilder.",
+        "status": "Загрузка каталога из xlsm и просмотр импортированных позиций подключены.",
     },
     {
         "slug": "settings",
@@ -2049,6 +2056,116 @@ def _split_exception_key(exception_key: str) -> tuple[str, str, str]:
     if len(parts) != 3:
         return "", "", ""
     return parts[0], parts[1], parts[2]
+
+
+def render_admin_tkp(
+    sources: list[TkpSourceRecord],
+    items: list[TkpItemRecord],
+    *,
+    total_items: int = 0,
+    error: str = "",
+    notice: str = "",
+) -> str:
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">Каталог ТКП</h2>'
+        '<p>Цены победителей закупок (КЛ 2.0), собранные макросом KL20 CatalogBuilder из отдельных ТКП в один файл. Загружайте сюда тот же файл повторно по мере сбора новых ТКП — уже импортированные файлы (по имени и дате изменения) пропускаются, добавляется только новое или изменившееся.</p>'
+        f'{_render_admin_message(error, notice)}'
+        f'{_render_tkp_import_form()}'
+        '<h2 class="section">Импортированные файлы</h2>'
+        f'{_render_tkp_sources_table(sources)}'
+        '<h2 class="section">Позиции каталога</h2>'
+        f'{_render_tkp_items_table(items, total_items)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="Каталог ТКП",
+        subtitle="Раздел администрирования автоподборщика.",
+        admin_nav=_render_admin_nav(active_slug="tkp"),
+        content=content,
+    )
+
+
+def _render_tkp_import_form() -> str:
+    return (
+        '<form class="admin-form" method="post" action="/admin/tkp/import" enctype="multipart/form-data">'
+        '<h2 class="section">Загрузить каталог ТКП (.xlsm)</h2>'
+        '<label>Файл каталога (лист KL20_FileCatalog + KL20_WOR_Catalog)'
+        '<input type="file" name="tkp_catalog" accept=".xlsm,.xlsx" required>'
+        '</label>'
+        '<button type="submit">Импортировать</button>'
+        '</form>'
+    )
+
+
+def _render_tkp_sources_table(sources: list[TkpSourceRecord]) -> str:
+    if not sources:
+        return '<p class="muted">Файлы ТКП пока не импортированы.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Файл</th>'
+        '<th>Статус</th>'
+        '<th>Победитель</th>'
+        '<th>Заказчик</th>'
+        '<th>№ задачи</th>'
+        '<th>Позиций</th>'
+        '<th>Импортирован</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for source in sources:
+        status_class = "notice-ok" if source.parse_status == "OK" else "muted"
+        status_cell = f'<span class="{status_class}">{html.escape(source.parse_status)}</span>'
+        if source.parse_message and source.parse_status != "OK":
+            status_cell += f'<br><span class="muted">{html.escape(source.parse_message)}</span>'
+        rows.append(
+            '<tr>'
+            f'<td>{html.escape(source.file_name)}</td>'
+            f'<td>{status_cell}</td>'
+            f'<td>{html.escape(source.winner_name)}</td>'
+            f'<td>{html.escape(source.customer)}</td>'
+            f'<td>{html.escape(source.task_no)}</td>'
+            f'<td>{source.item_count}</td>'
+            f'<td>{html.escape(source.imported_at)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
+
+def _render_tkp_items_table(items: list[TkpItemRecord], total_items: int) -> str:
+    if not items:
+        return '<p class="muted">Позиций в каталоге ТКП пока нет.</p>'
+
+    note = (
+        f'<p class="muted">Показаны первые {len(items)} из {total_items} позиций.</p>'
+        if total_items > len(items)
+        else ""
+    )
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Наименование работы</th>'
+        '<th>Ед.</th>'
+        '<th>Кол-во</th>'
+        '<th>Цена победителя, без НДС</th>'
+        '<th>Победитель</th>'
+        '<th>Файл-источник</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for item in items:
+        rows.append(
+            '<tr>'
+            f'<td>{html.escape(item.item_name)}</td>'
+            f'<td>{html.escape(item.unit)}</td>'
+            f'<td>{_fmt_number(item.qty)}</td>'
+            f'<td>{_fmt_number(item.winner_unit_price_no_vat)}</td>'
+            f'<td>{html.escape(item.winner_name)}</td>'
+            f'<td>{html.escape(item.source_file_name)}</td>'
+            '</tr>'
+        )
+    return note + header + ''.join(rows) + '</tbody></table>'
 
 
 def _dem_flag_label(dem_flag: str) -> str:
