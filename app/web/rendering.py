@@ -351,6 +351,7 @@ body.tkp-resizing, body.tkp-resizing * { cursor: col-resize !important; user-sel
 .correction-event { padding: 5px 0; border-bottom: 1px solid #f1f5f9; white-space: normal; }
 .correction-review-form { min-width: 260px; }
 .correction-review-form input { margin: 0 0 5px; min-width: 240px; }
+.correction-review-form .review-comment-help { display: block; margin: 0 0 5px; color: #64748b; font-size: 12px; }
 .correction-review-form button { width: auto; display: inline-block; margin: 2px; padding: 6px 9px; }
 .correction-review-form button.reject { background: #dc2626; }
 .muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
@@ -848,16 +849,26 @@ def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: st
     if not catalog_page.rows:
         return '<p class="muted">Строки каталога по заданным фильтрам не найдены.</p>'
 
+    escaped_return_url = html.escape(return_url, quote=True)
+    row_forms = "".join(
+        (
+            f'<form id="catalog-row-form-{row.id}" method="post">'
+            f'<input type="hidden" name="return_url" value="{escaped_return_url}">'
+            '</form>'
+        )
+        for row in catalog_page.rows
+    )
     header = (
-        '<form class="catalog-editor-form" method="post">'
-        f'<input type="hidden" name="return_url" value="{html.escape(return_url, quote=True)}">'
+        f'{row_forms}'
+        '<form id="catalog-bulk-form" class="catalog-editor-form" method="post">'
+        f'<input type="hidden" name="return_url" value="{escaped_return_url}">'
         '<div class="catalog-actions">'
         '<label><input type="checkbox" onclick="document.querySelectorAll(\'.catalog-row-check\').forEach(cb => cb.checked = this.checked)"> Выделить все на странице</label>'
         '<label>Действие<select name="bulk_action"><option value="update">Изменить поле</option><option value="delete">Удалить выделенные</option></select></label>'
         f'<label>Поле<select name="bulk_field">{_catalog_bulk_field_options()}</select></label>'
         '<label>Операция<select name="bulk_operation"><option value="set">Заменить</option><option value="add">Прибавить</option><option value="multiply">Умножить</option></select></label>'
         '<label>Значение<input type="text" name="bulk_value" placeholder="например 1,2"></label>'
-        '<label>Обоснование<input type="text" name="bulk_reason" placeholder="почему нужна правка"></label>'
+        '<label>Обоснование<input type="text" name="bulk_reason" placeholder="обязательное обоснование" required></label>'
         '<button type="submit" formaction="/admin/catalog/bulk" onclick="return prepareCatalogBulkAction(this.form)">Отправить на согласование</button>'
         '</div>'
         f'{_render_catalog_bulk_confirm_script()}'
@@ -941,36 +952,37 @@ def _catalog_bulk_field_options() -> str:
 
 def _render_catalog_editor_row(row: CatalogEditorRow) -> str:
     item_id = row.id
+    row_form_id = f"catalog-row-form-{item_id}"
     return (
         '<tr>'
         f'<td><input class="catalog-row-check" type="checkbox" name="selected_ids" value="{item_id}"></td>'
         f'<td>{item_id}</td>'
         f'<td title="{html.escape(row.source_kind)}">{html.escape(row.source_name)}</td>'
-        f'<td class="short-cell">{_catalog_text_input("region", item_id, row.region)}</td>'
-        f'<td class="short-cell">{_catalog_text_input("task_id", item_id, row.task_id)}</td>'
-        f'<td class="short-cell">{_catalog_text_input("code", item_id, row.code)}</td>'
-        f'<td class="short-cell">{_catalog_text_input("unit", item_id, row.unit)}</td>'
-        f'<td class="number-cell">{_catalog_text_input("quantity", item_id, _format_optional_number(row.quantity))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("price", item_id, _format_optional_number(row.price))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("price_original", item_id, _format_optional_number(row.price_original))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("price_zlvl", item_id, _format_optional_number(row.price_zlvl))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("total_price", item_id, _format_optional_number(row.total_price))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("labor_unit", item_id, _format_optional_number(row.labor_unit))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("labor_total", item_id, _format_optional_number(row.labor_total))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("machine_labor_unit", item_id, _format_optional_number(row.machine_labor_unit))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("machine_labor_total", item_id, _format_optional_number(row.machine_labor_total))}</td>'
-        f'<td class="number-cell">{_catalog_text_input("regional_coefficient", item_id, _format_optional_number(row.regional_coefficient))}</td>'
-        f'<td class="short-cell">{_catalog_text_input("lsr_quarter", item_id, row.lsr_quarter)}</td>'
-        f'<td class="short-cell">{_catalog_text_input("planned_start", item_id, row.planned_start)}</td>'
-        f'<td class="short-cell">{_catalog_text_input("planned_finish", item_id, row.planned_finish)}</td>'
-        f'<td class="work-cell"><textarea name="work_name_{item_id}">{html.escape(row.work_name)}</textarea></td>'
-        f'<td class="file-cell">{_catalog_text_input("source_region_folder", item_id, row.source_region_folder)}</td>'
-        f'<td class="file-cell">{_catalog_text_input("source_filename", item_id, row.source_filename)}</td>'
-        f'<td class="number-cell">{_catalog_text_input("source_row_number", item_id, str(row.source_row_number))}</td>'
-        f'<td class="file-cell"><input type="text" name="correction_reason_{item_id}" placeholder="причина правки"></td>'
+        f'<td class="short-cell">{_catalog_text_input("region", item_id, row.region, row_form_id)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("task_id", item_id, row.task_id, row_form_id)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("code", item_id, row.code, row_form_id)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("unit", item_id, row.unit, row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("quantity", item_id, _format_optional_number(row.quantity), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("price", item_id, _format_optional_number(row.price), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("price_original", item_id, _format_optional_number(row.price_original), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("price_zlvl", item_id, _format_optional_number(row.price_zlvl), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("total_price", item_id, _format_optional_number(row.total_price), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("labor_unit", item_id, _format_optional_number(row.labor_unit), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("labor_total", item_id, _format_optional_number(row.labor_total), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("machine_labor_unit", item_id, _format_optional_number(row.machine_labor_unit), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("machine_labor_total", item_id, _format_optional_number(row.machine_labor_total), row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("regional_coefficient", item_id, _format_optional_number(row.regional_coefficient), row_form_id)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("lsr_quarter", item_id, row.lsr_quarter, row_form_id)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("planned_start", item_id, row.planned_start, row_form_id)}</td>'
+        f'<td class="short-cell">{_catalog_text_input("planned_finish", item_id, row.planned_finish, row_form_id)}</td>'
+        f'<td class="work-cell"><textarea name="work_name_{item_id}" form="{row_form_id}">{html.escape(row.work_name)}</textarea></td>'
+        f'<td class="file-cell">{_catalog_text_input("source_region_folder", item_id, row.source_region_folder, row_form_id)}</td>'
+        f'<td class="file-cell">{_catalog_text_input("source_filename", item_id, row.source_filename, row_form_id)}</td>'
+        f'<td class="number-cell">{_catalog_text_input("source_row_number", item_id, str(row.source_row_number), row_form_id)}</td>'
+        f'<td class="file-cell"><input type="text" name="correction_reason_{item_id}" placeholder="обязательное обоснование" required form="{row_form_id}"></td>'
         '<td>'
-        f'<button type="submit" name="row_id" value="{item_id}" formaction="/admin/catalog/update-row">На согласование</button>'
-        f'<button class="danger" type="submit" name="row_id" value="{item_id}" formaction="/admin/catalog/delete-row" onclick="return confirm(\'Отправить удаление строки на согласование?\')">Запросить удаление</button>'
+        f'<button type="submit" name="row_id" value="{item_id}" form="{row_form_id}" formaction="/admin/catalog/update-row">На согласование</button>'
+        f'<button class="danger" type="submit" name="row_id" value="{item_id}" form="{row_form_id}" formaction="/admin/catalog/delete-row" onclick="return confirm(\'Отправить удаление строки на согласование?\')">Запросить удаление</button>'
         '</td>'
         '</tr>'
     )
@@ -1083,8 +1095,12 @@ def _render_correction_row(row: CatalogCorrectionRecord) -> str:
         decision = (
             '<form class="correction-review-form" method="post">'
             f'<input type="hidden" name="correction_id" value="{row.id}">'
-            '<input type="text" name="comment" placeholder="комментарий проверяющего">'
-            '<button type="submit" formaction="/admin/corrections/approve">Согласовать и применить</button>'
+            '<input type="text" name="comment" required '
+            'placeholder="комментарий при отклонении" '
+            'title="Для отклонения укажите причину">'
+            '<small class="review-comment-help">Комментарий обязателен при отклонении.</small>'
+            '<button type="submit" formnovalidate '
+            'formaction="/admin/corrections/approve">Согласовать и применить</button>'
             '<button class="reject" type="submit" formaction="/admin/corrections/reject">Отклонить</button>'
             '</form>'
         )
@@ -1156,8 +1172,17 @@ def _correction_event_label(event_type: str) -> str:
     }.get(event_type, event_type)
 
 
-def _catalog_text_input(name: str, item_id: int, value: object) -> str:
-    return f'<input type="text" name="{html.escape(name)}_{item_id}" value="{html.escape(str(value), quote=True)}">'
+def _catalog_text_input(
+    name: str,
+    item_id: int,
+    value: object,
+    form_id: str,
+) -> str:
+    return (
+        f'<input type="text" name="{html.escape(name)}_{item_id}" '
+        f'value="{html.escape(str(value), quote=True)}" '
+        f'form="{html.escape(form_id, quote=True)}">'
+    )
 
 
 def _format_optional_number(value: float | None) -> str:

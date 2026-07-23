@@ -160,14 +160,16 @@ def create_bulk_catalog_corrections(
             target = _catalog_target(connection, item_id)
             if target is None:
                 continue
-            values = {
-                field: _bulk_result_value(
-                    field,
-                    operation,
-                    value,
-                    target[field] if field in target.keys() else None,
-                )
-            }
+            current_value = target[field] if field in target.keys() else None
+            new_value = _bulk_result_value(
+                field,
+                operation,
+                value,
+                current_value,
+            )
+            if _values_equal(current_value, new_value):
+                continue
+            values = {field: new_value}
         try:
             create_catalog_correction(
                 connection,

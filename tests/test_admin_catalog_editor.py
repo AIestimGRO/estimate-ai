@@ -1,10 +1,14 @@
 """Tests for the editable admin catalog page."""
 
+from urllib.parse import unquote_plus
+
 from fastapi.testclient import TestClient
 
 from app.web.app import create_app
 from core.storage import (
+    ACTION_DELETE,
     STATUS_PENDING,
+    STATUS_REJECTED,
     connect,
     init_database,
     list_catalog_corrections,
@@ -15,11 +19,16 @@ def _seed_catalog_row(db_path, *, price: float = 100.0, quantity: float = 2.0) -
     connection = connect(db_path)
     try:
         init_database(connection)
-        cursor = connection.execute(
-            "INSERT INTO catalog_sources(name, kind) VALUES (?, ?)",
+        connection.execute(
+            "INSERT OR IGNORE INTO catalog_sources(name, kind) VALUES (?, ?)",
             ("rnmc_zip_upload", "rnmc_zip"),
         )
-        source_id = int(cursor.lastrowid)
+        source_id = int(
+            connection.execute(
+                "SELECT id FROM catalog_sources WHERE name = ?",
+                ("rnmc_zip_upload",),
+            ).fetchone()["id"]
+        )
         cursor = connection.execute(
             """
             INSERT INTO catalog_items (
@@ -250,6 +259,94 @@ def test_admin_catalog_bulk_multiply_and_delete(tmp_path, monkeypatch) -> None:
     assert count_after == 0
 
 
+def test_admin_catalog_bulk_skips_unchanged_zlvl_rows(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    unchanged_id = _seed_catalog_row(db_path)
+    changed_id = _seed_catalog_row(db_path)
+    connection = connect(db_path)
+    try:
+        connection.execute(
+            "UPDATE catalog_items SET price_zlvl = ? WHERE id = ?",
+            (100.0, unchanged_id),
+        )
+        connection.execute(
+            "UPDATE catalog_items SET price_zlvl = ? WHERE id = ?",
+            (200.0, changed_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/catalog/bulk",
+            data={
+                "return_url": "/admin/catalog",
+                "selected_ids": [str(unchanged_id), str(changed_id)],
+                "bulk_action": "update",
+                "bulk_field": "price_zlvl",
+                "bulk_operation": "set",
+                "bulk_value": "100",
+                "bulk_reason": "ZLVL expert correction",
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert "error=" not in response.headers["location"]
+    connection = connect(db_path)
+    try:
+        pending = list_catalog_corrections(connection, status=STATUS_PENDING)
+    finally:
+        connection.close()
+    assert len(pending) == 1
+    assert pending[0].target_item_id == changed_id
+    assert [
+        (change.field_name, change.old_value, change.new_value)
+        for change in pending[0].changes
+    ] == [("price_zlvl", 200.0, 100.0)]
+
+
+def test_admin_catalog_bulk_all_unchanged_rows_returns_clear_message(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    row_id = _seed_catalog_row(db_path)
+    connection = connect(db_path)
+    try:
+        connection.execute(
+            "UPDATE catalog_items SET price_zlvl = ? WHERE id = ?",
+            (100.0, row_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/catalog/bulk",
+            data={
+                "return_url": "/admin/catalog",
+                "selected_ids": str(row_id),
+                "bulk_action": "update",
+                "bulk_field": "price_zlvl",
+                "bulk_operation": "set",
+                "bulk_value": "100",
+                "bulk_reason": "ZLVL expert correction",
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert "error=" not in response.headers["location"]
+    assert "Новых корректировок не создано" in unquote_plus(
+        response.headers["location"]
+    )
+
+
 def test_admin_catalog_bulk_action_has_confirmation_guard(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "estimate_ai.db"
     monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
@@ -263,6 +360,159 @@ def test_admin_catalog_bulk_action_has_confirmation_guard(tmp_path, monkeypatch)
     assert 'onclick="return prepareCatalogBulkAction(this.form)"' in response.text
     assert "Вы уверены, что хотите" in response.text
     assert "изменения попадут в журнал" in response.text
+
+
+def test_admin_catalog_row_actions_use_small_independent_forms(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    row_ids = [_seed_catalog_row(db_path, price=100.0 + index) for index in range(50)]
+    target_id = row_ids[0]
+    target_form_id = f"catalog-row-form-{target_id}"
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.get("/admin/catalog?page_size=50")
+
+    assert response.status_code == 200
+    assert f'<form id="{target_form_id}" method="post">' in response.text
+    assert (
+        f'name="price_{target_id}" value="100" form="{target_form_id}"'
+        in response.text
+    )
+    assert (
+        f'name="correction_reason_{target_id}" '
+        f'placeholder="обязательное обоснование" required form="{target_form_id}"'
+        in response.text
+    )
+    assert (
+        f'name="row_id" value="{target_id}" form="{target_form_id}" '
+        'formaction="/admin/catalog/delete-row"'
+        in response.text
+    )
+    assert response.text.count(f'form="{target_form_id}"') < 30
+
+
+def test_admin_catalog_delete_can_be_rejected_then_approved(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    row_id = _seed_catalog_row(db_path)
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        blank_reason = client.post(
+            "/admin/catalog/delete-row",
+            data={
+                "return_url": "/admin/catalog",
+                "row_id": str(row_id),
+                f"correction_reason_{row_id}": "",
+            },
+            follow_redirects=False,
+        )
+        submitted = client.post(
+            "/admin/catalog/delete-row",
+            data={
+                "return_url": "/admin/catalog",
+                "row_id": str(row_id),
+                f"correction_reason_{row_id}": "Invalid source row",
+            },
+            follow_redirects=False,
+        )
+
+    assert "Укажите обязательное обоснование удаления" in unquote_plus(
+        blank_reason.headers["location"]
+    )
+    assert submitted.status_code == 303
+    connection = connect(db_path)
+    try:
+        pending = list_catalog_corrections(connection, status=STATUS_PENDING)
+        row_before = connection.execute(
+            "SELECT id FROM catalog_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row_before is not None
+    assert len(pending) == 1
+    assert pending[0].action == ACTION_DELETE
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        journal = client.get("/admin/corrections")
+        empty_rejection = client.post(
+            "/admin/corrections/reject",
+            data={"correction_id": str(pending[0].id), "comment": ""},
+            follow_redirects=False,
+        )
+        rejected = client.post(
+            "/admin/corrections/reject",
+            data={
+                "correction_id": str(pending[0].id),
+                "comment": "The row is valid",
+            },
+            follow_redirects=False,
+        )
+
+    assert 'name="comment" required' in journal.text
+    assert "Комментарий обязателен при отклонении." in journal.text
+    assert "Для отклонения корректировки укажите комментарий" in unquote_plus(
+        empty_rejection.headers["location"]
+    )
+    assert rejected.status_code == 303
+
+    connection = connect(db_path)
+    try:
+        row_after_rejection = connection.execute(
+            "SELECT id FROM catalog_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        rejected_rows = list_catalog_corrections(
+            connection,
+            status=STATUS_REJECTED,
+        )
+    finally:
+        connection.close()
+    assert row_after_rejection is not None
+    assert len(rejected_rows) == 1
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        resubmitted = client.post(
+            "/admin/catalog/delete-row",
+            data={
+                "return_url": "/admin/catalog",
+                "row_id": str(row_id),
+                f"correction_reason_{row_id}": "Confirmed invalid source row",
+            },
+            follow_redirects=False,
+        )
+
+    assert resubmitted.status_code == 303
+    connection = connect(db_path)
+    try:
+        pending = list_catalog_corrections(connection, status=STATUS_PENDING)
+    finally:
+        connection.close()
+    assert len(pending) == 1
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        approved = client.post(
+            "/admin/corrections/approve",
+            data={"correction_id": str(pending[0].id), "comment": "Approved"},
+            follow_redirects=False,
+        )
+
+    assert approved.status_code == 303
+    connection = connect(db_path)
+    try:
+        row_after_approval = connection.execute(
+            "SELECT id FROM catalog_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row_after_approval is None
 
 
 def test_admin_catalog_clear_removes_catalog_and_import_log(tmp_path, monkeypatch) -> None:

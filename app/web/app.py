@@ -450,11 +450,14 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     actor_role=ROLE_SPECIALIST,
                 )
             except Exception as exc:
+                error_text = str(exc)
+                if error_text == "Correction reason is required":
+                    error_text = "Укажите обязательное обоснование корректировки"
                 return RedirectResponse(
                     _append_message(
                         return_url,
                         "error",
-                        f"Не удалось отправить корректировку: {exc}",
+                        f"Не удалось отправить корректировку: {error_text}",
                     ),
                     status_code=303,
                 )
@@ -489,11 +492,14 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     action=ACTION_DELETE,
                 )
             except Exception as exc:
+                error_text = str(exc)
+                if error_text == "Correction reason is required":
+                    error_text = "Укажите обязательное обоснование удаления"
                 return RedirectResponse(
                     _append_message(
                         return_url,
                         "error",
-                        f"Не удалось отправить удаление на согласование: {exc}",
+                        f"Не удалось отправить удаление на согласование: {error_text}",
                     ),
                     status_code=303,
                 )
@@ -572,18 +578,31 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                         operation=str(form.get("bulk_operation") or ""),
                         value=str(form.get("bulk_value") or ""),
                     )
-                    message = (
-                        f"На согласование отправлено групповых корректировок: {changed}. "
-                        "Данные пока не изменены."
-                    )
+                    if changed:
+                        message = (
+                            f"На согласование отправлено групповых корректировок: {changed}. "
+                            "Данные пока не изменены."
+                        )
+                    else:
+                        message = (
+                            "Новых корректировок не создано: выбранные значения уже "
+                            "совпадают с каталогом или по строкам уже есть заявки."
+                        )
                 else:
                     return RedirectResponse(
                         _append_message(return_url, "error", "Неизвестное групповое действие."),
                         status_code=303,
                     )
             except Exception as exc:
+                error_text = str(exc)
+                if error_text == "Correction reason is required":
+                    error_text = "Укажите обязательное обоснование группового действия"
                 return RedirectResponse(
-                    _append_message(return_url, "error", f"Не удалось выполнить групповое действие: {exc}"),
+                    _append_message(
+                        return_url,
+                        "error",
+                        f"Не удалось выполнить групповое действие: {error_text}",
+                    ),
                     status_code=303,
                 )
         finally:
@@ -658,9 +677,12 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     comment=comment,
                 )
             except Exception as exc:
+                error_text = str(exc)
+                if error_text == "Rejection comment is required":
+                    error_text = "Для отклонения корректировки укажите комментарий"
                 return RedirectResponse(
                     "/admin/corrections?error="
-                    + quote(f"Не удалось отклонить корректировку: {exc}"),
+                    + quote(f"Не удалось отклонить корректировку: {error_text}"),
                     status_code=303,
                 )
         finally:
