@@ -16,7 +16,12 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.tkp_ingest import TkpItem, TkpSourceFile, parse_tkp_catalog_workbook
+from core.tkp_ingest import (
+    TkpCatalogParseResult,
+    TkpItem,
+    TkpSourceFile,
+    parse_tkp_catalog_workbook,
+)
 
 TKP_DETAILS_VERSION = 1
 
@@ -123,7 +128,14 @@ def import_tkp_catalog_workbook(
 ) -> TkpImportResult:
     """Parse `workbook_path` and insert any source files not yet imported."""
     result = parse_tkp_catalog_workbook(workbook_path)
+    return import_tkp_parse_result(connection, result)
 
+
+def import_tkp_parse_result(
+    connection: sqlite3.Connection,
+    result: TkpCatalogParseResult,
+) -> TkpImportResult:
+    """Insert a parsed aggregate workbook or direct folder-upload result."""
     items_by_file_path: dict[str, list[TkpItem]] = {}
     for item in result.items:
         items_by_file_path.setdefault(item.file_path, []).append(item)

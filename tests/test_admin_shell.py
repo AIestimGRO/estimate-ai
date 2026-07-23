@@ -12,6 +12,7 @@ def test_admin_index_shows_navigation(tmp_path) -> None:
     assert "/admin/sources" in response.text
     assert "/admin/imports" in response.text
     assert "/admin/risks" in response.text
+    assert "/admin/corrections" in response.text
     assert "/admin/task-colors" in response.text
 
 

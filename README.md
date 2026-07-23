@@ -17,15 +17,18 @@ Implemented product flows:
 
 - Upload an estimate file and produce a WA Excel result.
 - Use a catalog from SQLite or from an uploaded Excel file.
-- Review and edit catalog rows, including original/ZLVL unit prices, catalog sources, import history, risks, approvals, rules, and settings
-  in `/admin`.
+- Review catalog rows and submit logged corrections for original/ZLVL unit
+  prices and other fields. A correction changes the database only after senior
+  approval in `/admin/corrections`.
 - Import legacy `File_Log.xlsx` records into `imported_files`.
 - Upload RNMC ZIP archives, run dry-run checks, use a tabbed 30-row workbook
   preview, import valid rows into `catalog_items`, detect workbook metadata, store
   original and ZLVL unit prices, and inspect per-file import details.
-- Import TKP winner catalogs into SQLite, retain the selected position,
-  winner, procedure, and audit fields, and optionally add one best TKP
-  candidate to the estimate result without changing RNMC matching.
+- Select a folder of original KL 2.0 workbooks in the TKP admin page, detect
+  each winner, import the winner's priced WOR rows into SQLite, retain the
+  procedure/audit fields, and optionally add one best TKP candidate to the
+  estimate result without changing RNMC matching. Importing a prebuilt
+  CatalogBuilder workbook remains available as a fallback.
 - Approve price risks into `gesn_exceptions`.
 - Edit task color entries and name exclusion rules from the admin UI.
 
@@ -48,14 +51,17 @@ Main web routes:
 - `/admin` — admin dashboard.
 - `/admin/imports` — RNMC import dashboard and control center.
 - `/admin/catalog` — searchable editable catalog table.
+- `/admin/corrections` — correction journal, approval/rejection, and audit
+  history.
 - `/admin/sources` — catalog sources.
 - `/admin/risks` — price risk log.
 - `/admin/approvals` — approve open price risks.
 - `/admin/gesn-exceptions` — approved GESN ranges.
 - `/admin/task-colors` — blue-task metadata.
 - `/admin/name-exclusions` — exclusion rules.
-- `/admin/tkp` — TKP winner catalog import and a full grid with filters,
-  sorting, pagination, configurable columns, and resizable widths.
+- `/admin/tkp` — direct original-KL folder import, fallback aggregate-catalog
+  import, and a full grid with filters, sorting, pagination, configurable
+  columns, and resizable widths.
 - `/admin/settings` — database/settings diagnostics.
 
 ## Project docs

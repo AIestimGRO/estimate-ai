@@ -37,22 +37,29 @@
 6. **Rejected-row export.** Rejected rows are stored in `import_row_log` and shown
    on the detail page. A download/export path would make manual cleanup easier.
 
+## TKP folder import — follow-ups
+
+7. **Legacy `.xls` / `.xlsb` source workbooks.** Direct folder import currently
+   supports `.xlsx` and `.xlsm`, which cover the supplied real KL sample set.
+   Add an isolated conversion/reader path only if incoming folders still
+   contain required legacy files.
+
 ## From excel_io.py
 
-7. **Silent empty result when estimate header row is not found.**
+8. **Silent empty result when estimate header row is not found.**
    `read_estimate_rows` returns `[]` with no error/warning if the header row
    detection fails. Higher layers should surface this as a clear message.
 
-8. **Formula cells are read as formula text, not computed values. — RESOLVED
+9. **Formula cells are read as formula text, not computed values. — RESOLVED
    (2026-07).** Reading now uses `data_only=True` where needed. Caveat:
    `data_only=True` depends on Excel-cached values being present.
 
 ## From catalog.py (lower priority)
 
-9. `_parse_iso_date` only accepts strict ISO format (`YYYY-MM-DD`) for string
+10. `_parse_iso_date` only accepts strict ISO format (`YYYY-MM-DD`) for string
    dates. Revisit if source files provide dates as non-ISO plain text.
 
-10. Dedup within a single task_id in `BuildCatalog` is O(n^2). Fine for current
+11. Dedup within a single task_id in `BuildCatalog` is O(n^2). Fine for current
    catalog sizes; revisit only if groups grow large.
 
 ## Flexible layout resolution — deferred rules

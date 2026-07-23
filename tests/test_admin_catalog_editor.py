@@ -3,7 +3,12 @@
 from fastapi.testclient import TestClient
 
 from app.web.app import create_app
-from core.storage import connect, init_database
+from core.storage import (
+    STATUS_PENDING,
+    connect,
+    init_database,
+    list_catalog_corrections,
+)
 
 
 def _seed_catalog_row(db_path, *, price: float = 100.0, quantity: float = 2.0) -> int:
@@ -91,12 +96,44 @@ def test_admin_catalog_updates_row_values(tmp_path, monkeypatch) -> None:
         f"source_region_folder_{row_id}": "SPb",
         f"source_filename_{row_id}": "updated.xlsx",
         f"source_row_number_{row_id}": "55",
+        f"correction_reason_{row_id}": "Checked against source workbook",
     }
 
     with TestClient(create_app(base_dir=tmp_path / "work")) as client:
         response = client.post("/admin/catalog/update-row", data=data, follow_redirects=False)
 
     assert response.status_code == 303
+
+    connection = connect(db_path)
+    try:
+        row_before = connection.execute(
+            """
+            SELECT task_id, region, code, unit, quantity, work_name, price,
+                   total_price, regional_coefficient, source_filename, source_row_number
+            FROM catalog_items WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+        pending = list_catalog_corrections(connection, status=STATUS_PENDING)
+    finally:
+        connection.close()
+
+    assert row_before["task_id"] == "TASK-1"
+    assert row_before["price"] == 100.0
+    assert len(pending) == 1
+    assert pending[0].reason == "Checked against source workbook"
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        journal = client.get("/admin/corrections")
+        approve = client.post(
+            "/admin/corrections/approve",
+            data={"correction_id": str(pending[0].id), "comment": "Approved"},
+            follow_redirects=False,
+        )
+
+    assert journal.status_code == 200
+    assert "Checked against source workbook" in journal.text
+    assert approve.status_code == 303
 
     connection = connect(db_path)
     try:
@@ -139,6 +176,7 @@ def test_admin_catalog_bulk_multiply_and_delete(tmp_path, monkeypatch) -> None:
                 "bulk_field": "price",
                 "bulk_operation": "multiply",
                 "bulk_value": "1,2",
+                "bulk_reason": "Index correction",
             },
             follow_redirects=False,
         )
@@ -146,13 +184,31 @@ def test_admin_catalog_bulk_multiply_and_delete(tmp_path, monkeypatch) -> None:
     assert response.status_code == 303
     connection = connect(db_path)
     try:
-        price = connection.execute(
+        price_before = connection.execute(
+            "SELECT price FROM catalog_items WHERE id = ?",
+            (row_id,),
+        ).fetchone()["price"]
+        pending = list_catalog_corrections(connection, status=STATUS_PENDING)
+    finally:
+        connection.close()
+    assert price_before == 100.0
+    assert len(pending) == 1
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        client.post(
+            "/admin/corrections/approve",
+            data={"correction_id": str(pending[0].id), "comment": "Approved"},
+        )
+
+    connection = connect(db_path)
+    try:
+        price_after = connection.execute(
             "SELECT price FROM catalog_items WHERE id = ?",
             (row_id,),
         ).fetchone()["price"]
     finally:
         connection.close()
-    assert price == 120.0
+    assert price_after == 120.0
 
     with TestClient(create_app(base_dir=tmp_path / "work")) as client:
         response = client.post(
@@ -161,6 +217,7 @@ def test_admin_catalog_bulk_multiply_and_delete(tmp_path, monkeypatch) -> None:
                 "return_url": "/admin/catalog",
                 "selected_ids": str(row_id),
                 "bulk_action": "delete",
+                "bulk_reason": "Invalid catalog row",
             },
             follow_redirects=False,
         )
@@ -168,10 +225,29 @@ def test_admin_catalog_bulk_multiply_and_delete(tmp_path, monkeypatch) -> None:
     assert response.status_code == 303
     connection = connect(db_path)
     try:
-        count = connection.execute("SELECT COUNT(*) AS c FROM catalog_items").fetchone()["c"]
+        count_before = connection.execute(
+            "SELECT COUNT(*) AS c FROM catalog_items"
+        ).fetchone()["c"]
+        pending = list_catalog_corrections(connection, status=STATUS_PENDING)
     finally:
         connection.close()
-    assert count == 0
+    assert count_before == 1
+    assert len(pending) == 1
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        client.post(
+            "/admin/corrections/approve",
+            data={"correction_id": str(pending[0].id), "comment": "Approved"},
+        )
+
+    connection = connect(db_path)
+    try:
+        count_after = connection.execute(
+            "SELECT COUNT(*) AS c FROM catalog_items"
+        ).fetchone()["c"]
+    finally:
+        connection.close()
+    assert count_after == 0
 
 
 def test_admin_catalog_bulk_action_has_confirmation_guard(tmp_path, monkeypatch) -> None:
@@ -186,7 +262,7 @@ def test_admin_catalog_bulk_action_has_confirmation_guard(tmp_path, monkeypatch)
     assert "confirmCatalogBulkAction" in response.text
     assert 'onclick="return prepareCatalogBulkAction(this.form)"' in response.text
     assert "Вы уверены, что хотите" in response.text
-    assert "Действие нельзя отменить автоматически" in response.text
+    assert "изменения попадут в журнал" in response.text
 
 
 def test_admin_catalog_clear_removes_catalog_and_import_log(tmp_path, monkeypatch) -> None:

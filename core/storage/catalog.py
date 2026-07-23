@@ -1436,6 +1436,9 @@ def replace_catalog_rows_for_file(
             payload[offset : offset + BATCH_SIZE],
         )
 
+    from core.storage.corrections import synchronize_catalog_corrections
+
+    synchronize_catalog_corrections(connection)
     return CatalogFileRowsImportResult(
         source_name=source_name,
         source_id=source_id,
@@ -1536,6 +1539,9 @@ def import_catalog_from_excel(
         rows_ok=len(payload),
         rows_rejected=skipped,
     )
+    from core.storage.corrections import synchronize_catalog_corrections
+
+    synchronize_catalog_corrections(connection)
     connection.commit()
 
     return CatalogImportResult(

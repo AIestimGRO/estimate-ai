@@ -26,6 +26,13 @@ from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord, normalize_import_filename
 from core.storage.risk_log import PriceRiskLogEntry
 from core.storage.tkp import TkpCatalogPage, TkpItemRecord, TkpSourceRecord
+from core.storage.corrections import (
+    ACTION_DELETE,
+    STATUS_APPROVED,
+    STATUS_PENDING,
+    STATUS_REJECTED,
+    CatalogCorrectionRecord,
+)
 from core.exclusions import (
     LEGACY_REASON_COLOR,
     NameExclusionRule,
@@ -69,7 +76,13 @@ ADMIN_SECTIONS = [
         "slug": "catalog",
         "title": "Каталог аналогов",
         "description": "Просмотр, фильтрация и ручная корректировка строк catalog_items после загрузки РНМЦ и других источников.",
-        "status": "Подключен редактор строк каталога с фильтрами, удалением и групповыми действиями.",
+        "status": "Правки создают заявки и применяются только после согласования.",
+    },
+    {
+        "slug": "corrections",
+        "title": "Журнал корректировок",
+        "description": "Заявки специалистов, согласование старшим специалистом и полная история действий.",
+        "status": "Все изменения каталога логируются; одобренные правки повторно накладываются после пересборки.",
     },
     {
         "slug": "risks",
@@ -104,8 +117,8 @@ ADMIN_SECTIONS = [
     {
         "slug": "tkp",
         "title": "Каталог ТКП",
-        "description": "Каталог цен победителей закупок (КЛ 2.0), собранный из отдельных ТКП в единый файл макросом KL20 CatalogBuilder.",
-        "status": "Загрузка каталога из xlsm и просмотр импортированных позиций подключены.",
+        "description": "Каталог цен победителей закупок (КЛ 2.0), который приложение собирает напрямую из выбранной папки с исходными КЛ.",
+        "status": "Выбор папки, обновление каталога и просмотр импортированных позиций подключены.",
     },
     {
         "slug": "settings",
@@ -326,6 +339,20 @@ body.tkp-resizing, body.tkp-resizing * { cursor: col-resize !important; user-sel
 .catalog-pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; color: #475569; }
 .catalog-pager a { padding: 7px 10px; border-radius: 8px; background: #eef2ff; color: #3730a3; text-decoration: none; font-weight: 600; }
 .catalog-warning { padding: 10px; margin: 10px 0; background: #fffbeb; color: #92400e; border-radius: 10px; }
+.correction-status { display: inline-block; padding: 4px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; white-space: nowrap; }
+.correction-status.pending { background: #fff7ed; color: #c2410c; }
+.correction-status.approved { background: #ecfdf5; color: #047857; }
+.correction-status.rejected { background: #fef2f2; color: #b91c1c; }
+.correction-change { margin: 0 0 5px; line-height: 1.35; }
+.correction-change strong { color: #334155; }
+.correction-events { min-width: 260px; }
+.correction-events summary { cursor: pointer; color: #4f46e5; font-weight: 600; }
+.correction-event { padding: 5px 0; border-bottom: 1px solid #f1f5f9; white-space: normal; }
+.correction-review-form { min-width: 260px; }
+.correction-review-form input { margin: 0 0 5px; min-width: 240px; }
+.correction-review-form button { width: auto; display: inline-block; margin: 2px; padding: 6px 9px; }
+.correction-review-form button.reject { background: #dc2626; }
 .muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
 .maintenance-tools { margin-top: 18px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
 .maintenance-tools summary { cursor: pointer; color: #64748b; font-size: 13px; font-weight: 600; }
@@ -723,8 +750,9 @@ def render_admin_catalog(
     content = (
         '<section class="admin-panel">'
         '<h2 class="section">Каталог аналогов</h2>'
-        '<p>Здесь можно смотреть актуальные строки catalog_items, фильтровать их, править значения, удалять строки и применять групповые действия к выделенным строкам.</p>'
-        '<p class="catalog-warning">Перед массовыми изменениями сделайте backup базы. Matching/pricing использует эти строки как источник аналогов.</p>'
+        '<p>Здесь можно смотреть строки каталога и готовить экспертные корректировки.</p>'
+        '<p class="catalog-warning">Сохранение, групповое изменение и удаление создают заявку в журнале. '
+        'До согласования старшим специалистом данные базы не меняются.</p>'
         f'{notice_html}'
         f'{error_html}'
         f'{_render_catalog_editor_filters(catalog_page)}'
@@ -829,7 +857,8 @@ def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: st
         f'<label>Поле<select name="bulk_field">{_catalog_bulk_field_options()}</select></label>'
         '<label>Операция<select name="bulk_operation"><option value="set">Заменить</option><option value="add">Прибавить</option><option value="multiply">Умножить</option></select></label>'
         '<label>Значение<input type="text" name="bulk_value" placeholder="например 1,2"></label>'
-        '<button type="submit" formaction="/admin/catalog/bulk" onclick="return prepareCatalogBulkAction(this.form)">Применить к выделенным</button>'
+        '<label>Обоснование<input type="text" name="bulk_reason" placeholder="почему нужна правка"></label>'
+        '<button type="submit" formaction="/admin/catalog/bulk" onclick="return prepareCatalogBulkAction(this.form)">Отправить на согласование</button>'
         '</div>'
         f'{_render_catalog_bulk_confirm_script()}'
         '<div class="preview-wide">'
@@ -837,7 +866,7 @@ def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: st
         '<th></th><th>ID</th><th>Источник</th><th>Регион</th><th>Задача</th><th>Код</th><th>Ед.</th>'
         '<th>Кол-во</th><th>Цена раб.</th><th>Цена ориг.</th><th>Цена ZLVL</th><th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
         '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th>ЛСР</th><th>Начало</th><th>Окончание</th><th class="wrap">Работа</th>'
-        '<th>Папка</th><th>Файл</th><th>Excel row</th><th>Действия</th>'
+        '<th>Папка</th><th>Файл</th><th>Excel row</th><th>Обоснование</th><th>Действия</th>'
         '</tr></thead><tbody>'
     )
     rows = "".join(_render_catalog_editor_row(row) for row in catalog_page.rows)
@@ -880,7 +909,7 @@ function confirmCatalogBulkAction(form) {
   if (action !== 'delete') {
     message += '\nПоле: ' + fieldText + '\nОперация: ' + operationText + '\nЗначение: ' + valueText;
   }
-  message += '\n\nДействие нельзя отменить автоматически. Перед массовыми изменениями желательно иметь backup базы.';
+  message += '\n\nПосле подтверждения изменения попадут в журнал и будут ждать согласования.';
   return confirm(message);
 }
 </script>
@@ -938,12 +967,193 @@ def _render_catalog_editor_row(row: CatalogEditorRow) -> str:
         f'<td class="file-cell">{_catalog_text_input("source_region_folder", item_id, row.source_region_folder)}</td>'
         f'<td class="file-cell">{_catalog_text_input("source_filename", item_id, row.source_filename)}</td>'
         f'<td class="number-cell">{_catalog_text_input("source_row_number", item_id, str(row.source_row_number))}</td>'
+        f'<td class="file-cell"><input type="text" name="correction_reason_{item_id}" placeholder="причина правки"></td>'
         '<td>'
-        f'<button type="submit" name="row_id" value="{item_id}" formaction="/admin/catalog/update-row">Сохранить</button>'
-        f'<button class="danger" type="submit" name="row_id" value="{item_id}" formaction="/admin/catalog/delete-row" onclick="return confirm(\'Удалить строку каталога?\')">Удалить</button>'
+        f'<button type="submit" name="row_id" value="{item_id}" formaction="/admin/catalog/update-row">На согласование</button>'
+        f'<button class="danger" type="submit" name="row_id" value="{item_id}" formaction="/admin/catalog/delete-row" onclick="return confirm(\'Отправить удаление строки на согласование?\')">Запросить удаление</button>'
         '</td>'
         '</tr>'
     )
+
+
+def render_admin_corrections(
+    corrections: list[CatalogCorrectionRecord],
+    *,
+    status_filter: str = "",
+    notice: str = "",
+    error: str = "",
+) -> str:
+    notice_html = f'<p class="notice-ok">{html.escape(notice)}</p>' if notice else ""
+    error_html = f'<p class="notice">{html.escape(error)}</p>' if error else ""
+    counts = {
+        STATUS_PENDING: sum(row.status == STATUS_PENDING for row in corrections),
+        STATUS_APPROVED: sum(row.status == STATUS_APPROVED for row in corrections),
+        STATUS_REJECTED: sum(row.status == STATUS_REJECTED for row in corrections),
+    }
+    content = (
+        '<section class="admin-panel">'
+        '<h2 class="section">Журнал экспертных корректировок</h2>'
+        '<p>Специалист создаёт заявку, старший специалист проверяет её. '
+        'Только согласованная корректировка накладывается на каталог и сохраняется для повторного применения после пересборки.</p>'
+        '<p class="catalog-warning">Авторизация будет подключена следующим этапом. '
+        'Сейчас заявки записываются от local.specialist, решения — от local.senior.</p>'
+        f'{notice_html}{error_html}'
+        f'<div class="stats"><div><dt>Ожидают согласования</dt><dd>{counts[STATUS_PENDING]}</dd></div>'
+        f'<div><dt>Согласованы</dt><dd>{counts[STATUS_APPROVED]}</dd></div>'
+        f'<div><dt>Отклонены</dt><dd>{counts[STATUS_REJECTED]}</dd></div></div>'
+        f'{_render_correction_filter(status_filter)}'
+        f'{_render_correction_table(corrections)}'
+        '</section>'
+    )
+    return render(
+        "admin.html",
+        title="Журнал корректировок",
+        subtitle="Согласование и история ручных изменений каталога.",
+        admin_nav=_render_admin_nav(active_slug="corrections"),
+        content=content,
+    )
+
+
+def _render_correction_filter(status_filter: str) -> str:
+    options = [
+        ("", "Все статусы"),
+        (STATUS_PENDING, "Ожидают"),
+        (STATUS_APPROVED, "Согласованы"),
+        (STATUS_REJECTED, "Отклонены"),
+    ]
+    rendered = []
+    for value, label in options:
+        selected = " selected" if value == status_filter else ""
+        rendered.append(
+            f'<option value="{html.escape(value)}"{selected}>{html.escape(label)}</option>'
+        )
+    return (
+        '<form class="admin-form" method="get" action="/admin/corrections">'
+        '<label>Статус<select name="status">'
+        + "".join(rendered)
+        + '</select></label><button type="submit">Показать</button></form>'
+    )
+
+
+def _render_correction_table(
+    corrections: list[CatalogCorrectionRecord],
+) -> str:
+    if not corrections:
+        return '<p class="muted">Записей с выбранным статусом нет.</p>'
+    rows = "".join(_render_correction_row(row) for row in corrections)
+    return (
+        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        '<th>ID / статус</th><th>Целевая строка</th><th>Изменения</th>'
+        '<th>Причина и автор</th><th>Решение</th><th>История</th>'
+        '</tr></thead><tbody>'
+        + rows
+        + '</tbody></table></div>'
+    )
+
+
+def _render_correction_row(row: CatalogCorrectionRecord) -> str:
+    status_label = {
+        STATUS_PENDING: "Ожидает",
+        STATUS_APPROVED: "Согласована",
+        STATUS_REJECTED: "Отклонена",
+    }.get(row.status, row.status)
+    action_label = "Удаление строки" if row.action == ACTION_DELETE else "Изменение строки"
+    target = (
+        f'<strong>{html.escape(row.target_code)}</strong><br>'
+        f'{html.escape(row.target_task_id)} · {html.escape(row.target_unit)}<br>'
+        f'{html.escape(row.target_source_filename)} · Excel row {row.target_source_row_number}<br>'
+        f'<span class="muted">{html.escape(row.target_work_name)}</span>'
+    )
+    if row.action == ACTION_DELETE:
+        changes = '<span class="err">Строка будет удалена после согласования.</span>'
+    else:
+        changes = "".join(
+            '<div class="correction-change">'
+            f'<strong>{html.escape(_correction_field_label(change.field_name))}</strong>: '
+            f'{html.escape(_correction_value(change.old_value))} → '
+            f'{html.escape(_correction_value(change.new_value))}</div>'
+            for change in row.changes
+        )
+    submitted = (
+        f'<strong>{html.escape(row.reason)}</strong><br>'
+        f'{html.escape(row.submitted_by)} ({html.escape(row.submitted_role)})<br>'
+        f'{html.escape(row.submitted_at)}'
+    )
+    if row.status == STATUS_PENDING:
+        decision = (
+            '<form class="correction-review-form" method="post">'
+            f'<input type="hidden" name="correction_id" value="{row.id}">'
+            '<input type="text" name="comment" placeholder="комментарий проверяющего">'
+            '<button type="submit" formaction="/admin/corrections/approve">Согласовать и применить</button>'
+            '<button class="reject" type="submit" formaction="/admin/corrections/reject">Отклонить</button>'
+            '</form>'
+        )
+    else:
+        decision = (
+            f'{html.escape(row.reviewed_by)} ({html.escape(row.reviewed_role)})<br>'
+            f'{html.escape(row.reviewed_at)}<br>{html.escape(row.review_comment)}'
+        )
+    events = (
+        '<details class="correction-events"><summary>Показать события</summary>'
+        + "".join(
+            '<div class="correction-event">'
+            f'<strong>{html.escape(_correction_event_label(event.event_type))}</strong> · '
+            f'{html.escape(event.created_at)}<br>'
+            f'{html.escape(event.actor)} ({html.escape(event.actor_role)})'
+            + (f'<br>{html.escape(event.details)}' if event.details else "")
+            + '</div>'
+            for event in row.events
+        )
+        + '</details>'
+    )
+    return (
+        '<tr>'
+        f'<td><strong>#{row.id}</strong><br><span class="correction-status {html.escape(row.status)}">'
+        f'{html.escape(status_label)}</span><br>{html.escape(action_label)}</td>'
+        f'<td class="wrap">{target}</td><td class="wrap">{changes}</td>'
+        f'<td class="wrap">{submitted}</td><td class="wrap">{decision}</td>'
+        f'<td>{events}</td></tr>'
+    )
+
+
+def _correction_field_label(field_name: str) -> str:
+    return {
+        "task_id": "Задача",
+        "region": "Регион",
+        "code": "Код",
+        "unit": "Единица",
+        "quantity": "Количество",
+        "work_name": "Наименование",
+        "price": "Рабочая цена",
+        "price_original": "Цена оригинал",
+        "price_zlvl": "Цена ZLVL",
+        "total_price": "Итого",
+        "labor_unit": "ТЗ на единицу",
+        "labor_total": "ТЗ всего",
+        "machine_labor_unit": "ТЗм на единицу",
+        "machine_labor_total": "ТЗм всего",
+        "regional_coefficient": "Региональный коэффициент",
+        "source_filename": "Исходный файл",
+        "source_row_number": "Строка источника",
+    }.get(field_name, field_name)
+
+
+def _correction_value(value: object) -> str:
+    if value is None:
+        return "пусто"
+    if isinstance(value, float):
+        return _format_optional_number(value)
+    return str(value)
+
+
+def _correction_event_label(event_type: str) -> str:
+    return {
+        "submitted": "Создана заявка",
+        "approved": "Согласована",
+        "rejected": "Отклонена",
+        "applied": "Применена",
+        "reapplied": "Повторно применена после пересборки",
+    }.get(event_type, event_type)
 
 
 def _catalog_text_input(name: str, item_id: int, value: object) -> str:
@@ -2118,7 +2328,7 @@ def render_admin_tkp(
     content = (
         '<section class="admin-panel">'
         '<h2 class="section">Каталог ТКП</h2>'
-        '<p>Цены победителей закупок (КЛ 2.0), собранные макросом KL20 CatalogBuilder из отдельных ТКП в один файл. Загружайте сюда тот же файл повторно по мере сбора новых ТКП — уже импортированные файлы (по имени и дате изменения) пропускаются, добавляется только новое или изменившееся.</p>'
+        '<p>Загрузите папку с исходными КЛ: приложение само найдет книги КЛ 2.0, определит победителя, соберет его цены и обновит каталог. Неизмененные файлы повторно не добавляются.</p>'
         f'{_render_admin_message(error, notice)}'
         f'{_render_tkp_import_form()}'
         '<details class="maintenance-tools">'
@@ -2144,13 +2354,25 @@ def render_admin_tkp(
 
 def _render_tkp_import_form() -> str:
     return (
+        '<form class="admin-form" method="post" action="/admin/tkp/import-folder" enctype="multipart/form-data">'
+        '<h2 class="section">Загрузить новые ТКП</h2>'
+        '<p class="muted">Выберите папку с исходными файлами КЛ. Вложенные папки также будут обработаны.</p>'
+        '<label>Папка с ТКП (.xlsx или .xlsm)'
+        '<input type="file" name="tkp_files" accept=".xlsx,.xlsm" webkitdirectory directory multiple required>'
+        '</label>'
+        '<button type="submit">Выбрать папку и обновить каталог</button>'
+        '</form>'
+        '<details class="maintenance-tools">'
+        '<summary>Резервный импорт готового каталога</summary>'
+        '<div class="maintenance-tools-body">'
         '<form class="admin-form" method="post" action="/admin/tkp/import" enctype="multipart/form-data">'
-        '<h2 class="section">Загрузить каталог ТКП (.xlsm)</h2>'
-        '<label>Файл каталога (лист KL20_WOR_Catalog; KL20_FileCatalog — необязательно)'
+        '<label>Файл KL20 CatalogBuilder (лист KL20_WOR_Catalog)'
         '<input type="file" name="tkp_catalog" accept=".xlsm,.xlsx" required>'
         '</label>'
-        '<button type="submit">Импортировать</button>'
+        '<button type="submit">Импортировать готовый каталог</button>'
         '</form>'
+        '</div>'
+        '</details>'
     )
 
 

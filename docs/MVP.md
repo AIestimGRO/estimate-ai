@@ -48,6 +48,8 @@ Provide a local web service that lets an estimator:
 - `name_exclusion_rules` and `task_color_entries`.
 - `price_risk_log` and `gesn_exceptions`.
 - `tkp_sources` and `tkp_items`.
+- `catalog_correction_requests`, `catalog_correction_changes`, and
+  `catalog_correction_events`.
 
 ### Web/admin
 
@@ -56,8 +58,13 @@ Provide a local web service that lets an estimator:
   settings.
 - Approve-risk workflow.
 - Edit workflows for task colors and name exclusions.
-- TKP catalog import and full-grid browsing in `/admin/tkp`, including
-  server-side filters/sorting/pagination and browser-persisted column layout.
+- Catalog changes are submitted as pending requests, then approved/rejected in
+  `/admin/corrections`; approved changes are reapplied after catalog rebuilds.
+- Explicit layer-count mismatches (for example, two versus four layers) are
+  filtered during RNMC matching.
+- Direct original-KL folder import plus fallback CatalogBuilder import and
+  full-grid browsing in `/admin/tkp`, including server-side
+  filters/sorting/pagination and browser-persisted column layout.
 - TKP storage keeps the selected 27 position, winner, procedure, and audit
   fields, including the original quantity text and both unit/line prices.
   WOR-only catalog files are accepted; all retained fields are available as
@@ -74,7 +81,8 @@ Provide a local web service that lets an estimator:
 
 ## Explicitly out of scope for the current MVP
 
-- Authentication and user roles.
+- Login/password authentication and real user accounts. The correction journal
+  already stores actor and role fields using local placeholder identities.
 - Cloud deployment.
 - Semantic/embedding matching.
 - Automatic region-based price adjustment.

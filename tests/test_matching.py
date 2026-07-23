@@ -171,6 +171,40 @@ def test_demolition_filter_can_be_disabled() -> None:
     assert prices(result) == [100, 200]
 
 
+def test_layer_count_filters_two_layer_estimate_from_four_layer_analog() -> None:
+    two_layers = "\u0433\u0438\u0434\u0440\u043e\u0438\u0437\u043e\u043b\u044f\u0446\u0438\u044f \u0432 2 \u0441\u043b\u043e\u044f"
+    four_layers = "\u0433\u0438\u0434\u0440\u043e\u0438\u0437\u043e\u043b\u044f\u0446\u0438\u044f \u0432 4 \u0441\u043b\u043e\u044f"
+    catalog = BuildCatalog(
+        [
+            catalog_row(
+                task_id="task-2",
+                price=200,
+                code="gesn08-01-003-07",
+                unit="m2",
+                work_name=two_layers,
+            ),
+            catalog_row(
+                task_id="task-4",
+                price=400,
+                code="gesn08-01-003-07",
+                unit="m2",
+                work_name=four_layers,
+            ),
+        ]
+    )
+
+    result = MatchEstimateRow(
+        estimate_row(
+            code="gesn08-01-003-07",
+            unit="m2",
+            work_name=two_layers,
+        ),
+        catalog,
+    )
+
+    assert [analog.task_id for analog in result.analogs] == ["task-2"]
+
+
 def test_filtered_out_by_demolition_returns_reason() -> None:
     catalog = BuildCatalog([catalog_row(price=200, work_name=DEMOLITION)])
 

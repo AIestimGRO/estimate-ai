@@ -5,6 +5,7 @@ from numbers import Real
 
 from core.catalog import Catalog, CatalogEntry
 from core.exclusions import NameExclusionRule, is_name_excluded
+from core.multiplicity import multiplicity_is_compatible
 from core.normalize import AnalogSearchKey, HasDemontazh, NormCode, NormUnit
 
 
@@ -14,6 +15,7 @@ REASON_EXCLUDED_BY_NAME = "excluded_by_name"
 REASON_INVALID_INPUT = "invalid_input"
 REASON_NO_MATCH = "no_match"
 REASON_FILTERED_BY_DEMOLITION = "filtered_by_demolition"
+REASON_FILTERED_BY_MULTIPLICITY = "filtered_by_multiplicity"
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ def MatchEstimateRow(
     catalog: Catalog,
     name_exclusion_rules: list[NameExclusionRule] | None = None,
     demontazh_filter_enabled: bool = True,
+    multiplicity_filter_enabled: bool = True,
 ) -> MatchResult:
     """Match one estimate row to catalog analogs.
 
@@ -79,10 +82,24 @@ def MatchEstimateRow(
         task_groups,
         row_is_demolition,
         demontazh_filter_enabled,
+        estimate_row.work_name,
+        multiplicity_filter_enabled,
     )
 
     if not analogs:
-        return _zero(REASON_FILTERED_BY_DEMOLITION)
+        demolition_matches = _build_analog_columns(
+            task_groups,
+            row_is_demolition,
+            demontazh_filter_enabled,
+            estimate_row.work_name,
+            False,
+        )
+        reason = (
+            REASON_FILTERED_BY_MULTIPLICITY
+            if demolition_matches
+            else REASON_FILTERED_BY_DEMOLITION
+        )
+        return _zero(reason)
 
     return MatchResult(
         analogs=analogs,
@@ -124,6 +141,8 @@ def _build_analog_columns(
     task_groups: dict[str, list[CatalogEntry]],
     row_is_demolition: bool,
     demontazh_filter_enabled: bool,
+    estimate_work_name: object,
+    multiplicity_filter_enabled: bool,
 ) -> list[AnalogColumn]:
     analogs: list[AnalogColumn] = []
 
@@ -132,6 +151,11 @@ def _build_analog_columns(
             entry
             for entry in entries
             if not demontazh_filter_enabled or entry.is_demolition == row_is_demolition
+            if not multiplicity_filter_enabled
+            or multiplicity_is_compatible(
+                estimate_work_name,
+                entry.original_row.work_name,
+            )
         ]
 
         for price_position, entry in enumerate(filtered_entries, start=1):

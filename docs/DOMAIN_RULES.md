@@ -283,6 +283,35 @@ encode business rules that must be preserved:
   absent, source records are derived from WOR metadata without inventing
   missing source totals.
 
+### 6.3 Direct KL folder import (2026-07 product rule)
+
+- `/admin/tkp` provides the primary `Upload new TKP` action as a browser folder
+  picker. All selected `.xlsx` and `.xlsm` files, including files in nested
+  folders, are inspected directly; the VBA CatalogBuilder is not required and
+  workbook macros are never executed.
+- The preferred worksheet names normalize to `KL20` or `KL2`. If the title is
+  nonstandard (a real file uses `KL 4`), the worksheet is accepted only when
+  its structure contains the participant-name row, `WOR and Price` block, and
+  the expected price header pair.
+- Participant groups start at column K, use four columns, and repeat every four
+  columns. A group must have a participant name or both a valid price-header
+  pair and priced WOR data. Notes to the right of the participant blocks must
+  never create phantom participants.
+- Winner priority matches the CatalogBuilder business rule: final recommended
+  winner (`10.1`), preliminary recommended winner (`8.1`), single participant,
+  minimum no-VAT offer total, then minimum sum of WOR line totals.
+- Only the selected winner's unit and line prices are stored. Section context,
+  source row, quantity source text, RNMC comparison values, winner identity,
+  and procedure metadata remain auditable.
+- Direct uploads use a deterministic content fingerprint plus the parser
+  version. Re-uploading identical bytes is skipped; changed bytes under the
+  same filename replace that file's old source and item rows.
+- Duplicate base filenames inside one selected folder are rejected rather than
+  silently overwriting one another. Unsupported files are ignored and
+  recognized workbooks with an unresolved winner are stored as `Needs review`.
+- Importing the legacy two-sheet/WOR-only CatalogBuilder result remains
+  available under the fallback import control.
+
 ## 7. Name exclusion rules (Module7)
 
 A configurable rule table on sheet `Name_Exclusions`, columns:
@@ -654,3 +683,45 @@ richer header detection incl. merged-cell/sub-header handling (R2-R4),
 total/summary-row skipping (rest of R5), section/quantity detection
 (R10-R11), analog-column placement in the first free column (R13), and
 tolerant number/code parsing at detection time (R17-R18).
+
+## 11. Expert catalog corrections and explicit layer multiplicity
+
+These are post-VBA product rules explicitly approved in 2026-07. They change
+the former direct admin-edit behavior and therefore are implemented separately
+from the original macro ports.
+
+### 11.1 Correction approval and audit
+
+- A row update, row deletion, or bulk catalog action creates a `pending`
+  correction request. It does not mutate `catalog_items`.
+- Every request stores the stable source identity (catalog source, source
+  filename, and source row), the old and proposed values, reason, submitting
+  actor/role, and submission time.
+- Only the `senior` or `admin` role may approve or reject a request.
+- Approval and application occur in one database transaction. Rejection never
+  changes the catalog.
+- Submission, approval/rejection, application, and later reapplication are
+  appended to `catalog_correction_events`.
+- Approved corrections are durable overlays. After a catalog row is rebuilt
+  with a new database ID, the approved update or deletion is found by its
+  stable source identity and applied again.
+- The eight corrections from expert review `6444312` are stored as approved
+  seeded requests, not as silent hard-coded updates.
+
+Login/password authentication is not part of this rule yet. The current local
+UI passes placeholder specialist/senior identities into the same workflow that
+future authenticated sessions will use.
+
+### 11.2 Explicit layer-count compatibility
+
+The original VBA matching key remains normalized unit + normalized code, with
+the demolition rule unchanged. A new deterministic post-filter applies when
+both work names explicitly state a layer count:
+
+- equal layer counts are compatible;
+- different explicit counts are incompatible;
+- if either side does not state a count, matching remains allowed.
+
+Layer wording is configured in `data/config/multiplicity.json`. This prevents a
+four-layer waterproofing analog from being assigned to an explicitly
+two-layer estimate without introducing semantic or LLM matching.

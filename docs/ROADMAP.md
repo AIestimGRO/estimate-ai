@@ -34,6 +34,8 @@ connected to the main estimate-processing flow.
 - `core/exclusions.py` — name exclusion rules and task color metadata.
 - `core/catalog.py` — catalog construction and demolition-aware 4% dedup.
 - `core/matching.py` — estimate row to catalog matching with reason codes.
+- `core/multiplicity.py` — configured extraction and comparison of explicit
+  work-layer counts.
 - `core/risk.py` — ratio risk and approved-range override.
 - `core/approval.py` — create/widen `GesnException` ranges.
 - `core/sections.py` — GESN prefix extraction and section code resolution.
@@ -47,7 +49,7 @@ connected to the main estimate-processing flow.
 
 - SQLite schema for `catalog_items`, `catalog_sources`, `imported_files`,
   `import_row_log`, `name_exclusion_rules`, `task_color_entries`,
-  `gesn_exceptions`, and `price_risk_log`.
+  `gesn_exceptions`, `price_risk_log`, and the catalog correction journal.
 - CLI commands for database initialization, catalog import, rule import, and
   status checks.
 - Risk approval storage: open risks are kept in `price_risk_log`; approved
@@ -58,7 +60,10 @@ connected to the main estimate-processing flow.
 - Main web flow: upload estimate/catalog, run matching, choose sheet when needed,
   download WA workbook.
 - `/admin/sources` — catalog source overview.
-- `/admin/catalog` — editable catalog table with filters, row updates, deletes, and bulk actions.
+- `/admin/catalog` — catalog table whose row, delete, and bulk actions create
+  pending correction requests instead of changing the database immediately.
+- `/admin/corrections` — correction review, approve/reject actions, and the
+  complete per-request event history.
 - `/admin/imports` — RNMC import dashboard and control center.
 - `/admin/risks` — price risk log.
 - `/admin/approvals` — approve open price risks into `gesn_exceptions`.
@@ -91,6 +96,13 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 ### Done — optional TKP analogs
 
 - Import and update the aggregate TKP winner catalog in SQLite.
+- Select a folder of original `.xlsx`/`.xlsm` KL workbooks directly in
+  `/admin/tkp`; recursively inspect the folder, detect structurally named
+  variants such as `KL 4`, select the winner, and import only the winner's WOR
+  prices without running VBA.
+- Deduplicate direct imports by deterministic content revision, update changed
+  files with the same name, reject duplicate names within one folder, and keep
+  the aggregate CatalogBuilder import as a fallback.
 - Enable TKP matching per run with the `Use TKP analogs` toggle; it is off by
   default.
 - Select one best priced TKP candidate per estimate row with deterministic
@@ -102,10 +114,10 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - Persist the selected TKP business/audit columns instead of the whole raw
   workbook, migrate existing databases additively, and refresh previously
   imported TKP rows once so the new fields are populated.
-- Accept both the two-sheet CatalogBuilder output and a WOR-only catalog;
-  show an unambiguous winner unit-price label and all retained fields in a
-  full admin grid with filters, sorting, pagination, configurable columns,
-  and resizable widths.
+- Accept original KL folders, the two-sheet CatalogBuilder output, and a
+  WOR-only catalog; show an unambiguous winner unit-price label and all
+  retained fields in a full admin grid with filters, sorting, pagination,
+  configurable columns, and resizable widths.
 
 ### Done — validation
 
@@ -136,8 +148,15 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   unlabeled code columns before `Код раздела` are supported, section rows are
   skipped, and metadata parsing is stricter.
 - [x] Admin catalog editor MVP: filter catalog rows, edit text/numeric values,
-  delete rows, and apply grouped text/numeric actions to selected rows with a
-  confirmation guard for multi-row operations.
+  request deletes, and prepare grouped text/numeric changes with a confirmation
+  guard for multi-row operations.
+- [x] Durable expert-correction workflow: pending requests, senior approval or
+  rejection, actor/role/time/comment audit events, and automatic reapplication
+  of approved changes after catalog rebuilds.
+- [x] Apply the eight approved corrections from expert review 6444312, including
+  the three decimal-shift fixes and the four-layer waterproofing correction.
+- [x] Filter RNMC analogs when both the estimate and catalog name explicitly
+  state different layer counts.
 - [x] TKP catalog import, deterministic best-candidate matching, per-run toggle,
   Excel output block, and average-price integration.
 
@@ -156,7 +175,8 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 
 - Refactor upload/run into proper run resources (`POST /runs`, `GET /runs/{id}`).
 - Store run history and allow downloading previous WA results.
-- Add authentication and roles when explicitly approved.
+- Bind authenticated user accounts and password login to the existing
+  specialist/senior correction roles.
 - Add watched-folder or scheduled import only after manual ZIP import is stable.
 - Improve detected-layout Excel output formatting, including full R13 and blue
   task-color tint.

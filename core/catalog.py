@@ -12,6 +12,7 @@ from datetime import date, datetime
 from numbers import Real
 
 from core.exclusions import NameExclusionRule, is_name_excluded
+from core.multiplicity import extract_layer_count
 from core.normalize import AnalogSearchKey, HasDemontazh, NormCode, NormUnit
 
 
@@ -59,6 +60,7 @@ class CatalogEntry:
     norm_code: str
     norm_unit: str
     added_date_serial: float
+    layer_count: int | None = None
 
 
 Catalog = dict[str, dict[str, list[CatalogEntry]]]
@@ -109,6 +111,7 @@ def BuildCatalog(
             norm_code=norm_code,
             norm_unit=norm_unit,
             added_date_serial=_catalog_date_serial(row.added_date),
+            layer_count=extract_layer_count(row.work_name),
         )
 
         catalog.setdefault(matching_key, {}).setdefault(task_id, []).append(entry)
@@ -182,6 +185,12 @@ def _deduplicate_catalog(catalog: Catalog) -> Catalog:
 
                 for kept_entry in kept_entries:
                     if entry.is_demolition != kept_entry.is_demolition:
+                        continue
+                    if (
+                        entry.layer_count is not None
+                        and kept_entry.layer_count is not None
+                        and entry.layer_count != kept_entry.layer_count
+                    ):
                         continue
 
                     price_delta = abs(entry.price - kept_entry.price) / kept_entry.price

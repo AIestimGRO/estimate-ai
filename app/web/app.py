@@ -30,6 +30,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.services.catalog_source import CatalogNotAvailableError, database_has_catalog
@@ -43,11 +44,8 @@ from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_impo
 from app.services.rnmc_excel import analyze_rnmc_zip_row_preview, import_rnmc_zip_catalog_rows
 from core.storage.catalog import (
     allow_import_retry,
-    bulk_delete_catalog_items,
     clear_catalog_for_rebuild,
-    bulk_update_catalog_items,
     count_catalog_rows,
-    delete_catalog_item,
     get_imported_file,
     import_catalog_from_excel,
     import_legacy_file_log,
@@ -58,15 +56,31 @@ from core.storage.catalog import (
     list_catalog_sources,
     list_import_row_logs,
     list_imported_files,
-    update_catalog_item,
     update_imported_file_metadata,
     write_catalog_export_xlsx,
+)
+from core.storage.corrections import (
+    ACTION_DELETE,
+    ACTION_UPDATE,
+    ROLE_SENIOR,
+    ROLE_SPECIALIST,
+    approve_catalog_correction,
+    create_bulk_catalog_corrections,
+    create_catalog_correction,
+    list_catalog_corrections,
+    reject_catalog_correction,
 )
 from core.storage.tkp import (
     TkpImportResult,
     import_tkp_catalog_workbook,
+    import_tkp_parse_result,
     list_tkp_catalog_page,
     list_tkp_sources,
+)
+from core.tkp_folder_ingest import (
+    SUPPORTED_SOURCE_SUFFIXES,
+    TkpSourceInput,
+    parse_tkp_source_workbooks,
 )
 from core.storage.risk_log import (
     STATUS_OPEN,
@@ -93,6 +107,7 @@ from app.web.rendering import (
     XLSX_MIME,
     render_admin_approvals,
     render_admin_catalog,
+    render_admin_corrections,
     render_admin_gesn_exceptions,
     render_admin_tkp,
     render_admin_import_detail,
@@ -420,35 +435,78 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         form = await request.form()
         item_id = int(str(form.get("row_id") or "0"))
         values = _catalog_row_form_values(form, item_id)
+        reason = str(form.get(f"correction_reason_{item_id}") or "")
         return_url = _safe_admin_catalog_return_url(str(form.get("return_url") or ""))
         connection = connect(default_database_path())
         try:
             init_database(connection)
             try:
-                changed = update_catalog_item(connection, item_id, values=values)
+                create_catalog_correction(
+                    connection,
+                    item_id,
+                    values=values,
+                    reason=reason,
+                    actor="local.specialist",
+                    actor_role=ROLE_SPECIALIST,
+                )
             except Exception as exc:
                 return RedirectResponse(
-                    _append_message(return_url, "error", f"Не удалось сохранить строку: {exc}"),
+                    _append_message(
+                        return_url,
+                        "error",
+                        f"Не удалось отправить корректировку: {exc}",
+                    ),
                     status_code=303,
                 )
         finally:
             connection.close()
-        message = "Строка каталога обновлена." if changed else "Строка каталога не найдена."
-        return RedirectResponse(_append_message(return_url, "message", message), status_code=303)
+        return RedirectResponse(
+            _append_message(
+                return_url,
+                "message",
+                "Корректировка отправлена на согласование и пока не применена.",
+            ),
+            status_code=303,
+        )
 
     @app.post("/admin/catalog/delete-row")
     async def admin_catalog_delete_row(request: Request) -> RedirectResponse:
         form = await request.form()
         item_id = int(str(form.get("row_id") or "0"))
+        reason = str(form.get(f"correction_reason_{item_id}") or "")
         return_url = _safe_admin_catalog_return_url(str(form.get("return_url") or ""))
         connection = connect(default_database_path())
         try:
             init_database(connection)
-            deleted = delete_catalog_item(connection, item_id)
+            try:
+                create_catalog_correction(
+                    connection,
+                    item_id,
+                    values={},
+                    reason=reason,
+                    actor="local.specialist",
+                    actor_role=ROLE_SPECIALIST,
+                    action=ACTION_DELETE,
+                )
+            except Exception as exc:
+                return RedirectResponse(
+                    _append_message(
+                        return_url,
+                        "error",
+                        f"Не удалось отправить удаление на согласование: {exc}",
+                    ),
+                    status_code=303,
+                )
         finally:
             connection.close()
-        message = "Строка каталога удалена." if deleted else "Строка каталога не найдена."
-        return RedirectResponse(_append_message(return_url, "message", message), status_code=303)
+        return RedirectResponse(
+            _append_message(
+                return_url,
+                "message",
+                "Удаление отправлено на согласование. Строка пока сохранена.",
+            ),
+            status_code=303,
+        )
 
     @app.post("/admin/catalog/clear")
     async def admin_catalog_clear(request: Request) -> RedirectResponse:
@@ -479,6 +537,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         return_url = _safe_admin_catalog_return_url(str(form.get("return_url") or ""))
         selected_ids = [int(value) for value in form.getlist("selected_ids") if str(value).isdigit()]
         action = str(form.get("bulk_action") or "")
+        reason = str(form.get("bulk_reason") or "")
         if not selected_ids:
             return RedirectResponse(
                 _append_message(return_url, "error", "Сначала выделите строки каталога."),
@@ -489,17 +548,34 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             init_database(connection)
             try:
                 if action == "delete":
-                    changed = bulk_delete_catalog_items(connection, selected_ids)
-                    message = f"Удалено строк: {changed}."
-                elif action == "update":
-                    changed = bulk_update_catalog_items(
+                    changed = create_bulk_catalog_corrections(
                         connection,
                         selected_ids,
+                        action=ACTION_DELETE,
+                        reason=reason,
+                        actor="local.specialist",
+                        actor_role=ROLE_SPECIALIST,
+                    )
+                    message = (
+                        f"На согласование отправлено удалений: {changed}. "
+                        "Строки пока сохранены."
+                    )
+                elif action == "update":
+                    changed = create_bulk_catalog_corrections(
+                        connection,
+                        selected_ids,
+                        action=ACTION_UPDATE,
+                        reason=reason,
+                        actor="local.specialist",
+                        actor_role=ROLE_SPECIALIST,
                         field=str(form.get("bulk_field") or ""),
                         operation=str(form.get("bulk_operation") or ""),
                         value=str(form.get("bulk_value") or ""),
                     )
-                    message = f"Групповое действие применено к строкам: {changed}."
+                    message = (
+                        f"На согласование отправлено групповых корректировок: {changed}. "
+                        "Данные пока не изменены."
+                    )
                 else:
                     return RedirectResponse(
                         _append_message(return_url, "error", "Неизвестное групповое действие."),
@@ -513,6 +589,86 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         finally:
             connection.close()
         return RedirectResponse(_append_message(return_url, "message", message), status_code=303)
+
+    @app.get("/admin/corrections", response_class=HTMLResponse)
+    def admin_corrections(
+        message: str = "",
+        error: str = "",
+        status: str = "",
+    ) -> HTMLResponse:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            corrections = list_catalog_corrections(connection, status=status)
+            return HTMLResponse(
+                render_admin_corrections(
+                    corrections,
+                    status_filter=status,
+                    notice=message,
+                    error=error,
+                )
+            )
+        finally:
+            connection.close()
+
+    @app.post("/admin/corrections/approve")
+    def admin_correction_approve(
+        correction_id: int = Form(...),
+        comment: str = Form(""),
+    ) -> RedirectResponse:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                approve_catalog_correction(
+                    connection,
+                    correction_id,
+                    actor="local.senior",
+                    actor_role=ROLE_SENIOR,
+                    comment=comment,
+                )
+            except Exception as exc:
+                return RedirectResponse(
+                    "/admin/corrections?error="
+                    + quote(f"Не удалось согласовать корректировку: {exc}"),
+                    status_code=303,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse(
+            "/admin/corrections?message="
+            + quote("Корректировка согласована и применена к базе."),
+            status_code=303,
+        )
+
+    @app.post("/admin/corrections/reject")
+    def admin_correction_reject(
+        correction_id: int = Form(...),
+        comment: str = Form(""),
+    ) -> RedirectResponse:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                reject_catalog_correction(
+                    connection,
+                    correction_id,
+                    actor="local.senior",
+                    actor_role=ROLE_SENIOR,
+                    comment=comment,
+                )
+            except Exception as exc:
+                return RedirectResponse(
+                    "/admin/corrections?error="
+                    + quote(f"Не удалось отклонить корректировку: {exc}"),
+                    status_code=303,
+                )
+        finally:
+            connection.close()
+        return RedirectResponse(
+            "/admin/corrections?message=" + quote("Корректировка отклонена."),
+            status_code=303,
+        )
 
     @app.get("/admin/{section_slug}", response_class=HTMLResponse)
     def admin_section(section_slug: str, message: str = "", status: str = "") -> HTMLResponse:
@@ -1104,6 +1260,104 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             f"Каталог ТКП обработан: файлов увидено {result.files_seen}, "
             f"новых {result.files_imported}, обновлено {result.files_updated}, "
             f"без изменений {result.files_skipped}. Всего позиций в базе: "
+            f"{result.items_imported}."
+        )
+        return RedirectResponse(f"/admin/tkp?message={quote(message)}", status_code=303)
+
+    @app.post("/admin/tkp/import-folder", response_class=HTMLResponse)
+    async def admin_tkp_import_folder(
+        tkp_files: list[UploadFile] | None = File(None),
+    ):
+        uploads = list(tkp_files or [])
+        if not uploads:
+            return RedirectResponse(
+                f"/admin/tkp?error={quote('Папка с ТКП не выбрана.')}",
+                status_code=303,
+            )
+
+        upload_dir = app.state.app_state.base_dir / "admin_tkp"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        source_inputs: list[TkpSourceInput] = []
+        ignored_files = 0
+        file_names: set[str] = set()
+        duplicates: set[str] = set()
+
+        with tempfile.TemporaryDirectory(
+            prefix="tkp_folder_",
+            dir=upload_dir,
+        ) as temporary_dir:
+            temporary_path = Path(temporary_dir)
+            for index, upload in enumerate(uploads):
+                raw_name = (upload.filename or "").replace("\\", "/")
+                file_name = _safe_name(raw_name)
+                suffix = Path(file_name).suffix.casefold()
+                if (
+                    file_name == ""
+                    or file_name.startswith("~$")
+                    or suffix not in SUPPORTED_SOURCE_SUFFIXES
+                ):
+                    ignored_files += 1
+                    continue
+                normalized_name = file_name.casefold()
+                if normalized_name in file_names:
+                    duplicates.add(file_name)
+                    continue
+                file_names.add(normalized_name)
+                content = await upload.read()
+                if len(content) > MAX_UPLOAD_BYTES:
+                    return RedirectResponse(
+                        f"/admin/tkp?error={quote(f'Файл {file_name} превышает лимит 64 МБ.')}",
+                        status_code=303,
+                    )
+                saved_path = _save(
+                    temporary_path,
+                    f"{index:05d}_{uuid.uuid4().hex}_{file_name}",
+                    content,
+                )
+                source_inputs.append(
+                    TkpSourceInput(
+                        path=saved_path,
+                        display_path=raw_name or file_name,
+                    )
+                )
+
+            if duplicates:
+                duplicate_list = ", ".join(sorted(duplicates))
+                return RedirectResponse(
+                    f"/admin/tkp?error={quote('В выбранной папке повторяются имена файлов: ' + duplicate_list)}",
+                    status_code=303,
+                )
+            if not source_inputs:
+                return RedirectResponse(
+                    f"/admin/tkp?error={quote('В папке нет поддерживаемых файлов .xlsx или .xlsm.')}",
+                    status_code=303,
+                )
+
+            parsed = await run_in_threadpool(
+                parse_tkp_source_workbooks,
+                source_inputs,
+            )
+            needs_review = sum(
+                source.parse_status == "Needs review"
+                for source in parsed.files
+            )
+            not_kl = sum(
+                source.parse_status == "Skipped"
+                for source in parsed.files
+            )
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                result = import_tkp_parse_result(connection, parsed)
+            finally:
+                connection.close()
+
+        message = (
+            f"Папка ТКП обработана: файлов {result.files_seen}, "
+            f"новых {result.files_imported}, обновлено {result.files_updated}, "
+            f"без изменений {result.files_skipped}, требуют проверки "
+            f"{needs_review}, не распознаны как КЛ {not_kl}, "
+            f"проигнорировано {ignored_files}. Всего позиций в базе: "
             f"{result.items_imported}."
         )
         return RedirectResponse(f"/admin/tkp?message={quote(message)}", status_code=303)

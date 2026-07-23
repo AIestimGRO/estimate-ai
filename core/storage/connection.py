@@ -45,15 +45,18 @@ def connect(database_path: str | Path | None = None) -> sqlite3.Connection:
 
 
 def init_database(connection: sqlite3.Connection) -> None:
-    if _schema_is_current(connection):
-        return
+    if not _schema_is_current(connection):
+        connection.executescript(DDL)
+        _apply_additive_migrations(connection)
+        connection.execute(
+            "INSERT OR REPLACE INTO schema_migrations(version) VALUES (?)",
+            (SCHEMA_VERSION,),
+        )
+        connection.commit()
 
-    connection.executescript(DDL)
-    _apply_additive_migrations(connection)
-    connection.execute(
-        "INSERT OR REPLACE INTO schema_migrations(version) VALUES (?)",
-        (SCHEMA_VERSION,),
-    )
+    from core.storage.corrections import synchronize_catalog_corrections
+
+    synchronize_catalog_corrections(connection)
     connection.commit()
 
 

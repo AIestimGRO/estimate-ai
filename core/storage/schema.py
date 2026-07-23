@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -204,4 +204,65 @@ CREATE TABLE IF NOT EXISTS price_risk_log (
 
 CREATE INDEX IF NOT EXISTS idx_price_risk_log_status
     ON price_risk_log(status);
+
+CREATE TABLE IF NOT EXISTS catalog_correction_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seed_key TEXT UNIQUE,
+    action TEXT NOT NULL DEFAULT 'update',
+    status TEXT NOT NULL DEFAULT 'pending',
+    target_item_id INTEGER,
+    target_source_name TEXT NOT NULL DEFAULT '',
+    target_source_filename TEXT NOT NULL DEFAULT '',
+    target_source_row_number INTEGER NOT NULL DEFAULT 0,
+    target_task_id TEXT NOT NULL DEFAULT '',
+    target_code TEXT NOT NULL DEFAULT '',
+    target_unit TEXT NOT NULL DEFAULT '',
+    target_work_name TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL,
+    submitted_by TEXT NOT NULL,
+    submitted_role TEXT NOT NULL,
+    submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_by TEXT NOT NULL DEFAULT '',
+    reviewed_role TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT,
+    review_comment TEXT NOT NULL DEFAULT '',
+    applied_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_correction_requests_status
+    ON catalog_correction_requests(status);
+CREATE INDEX IF NOT EXISTS idx_catalog_correction_requests_target
+    ON catalog_correction_requests(
+        target_source_name,
+        target_source_filename,
+        target_source_row_number
+    );
+
+CREATE TABLE IF NOT EXISTS catalog_correction_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    correction_id INTEGER NOT NULL
+        REFERENCES catalog_correction_requests(id) ON DELETE CASCADE,
+    field_name TEXT NOT NULL,
+    value_type TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    UNIQUE(correction_id, field_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_correction_changes_request
+    ON catalog_correction_changes(correction_id);
+
+CREATE TABLE IF NOT EXISTS catalog_correction_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    correction_id INTEGER NOT NULL
+        REFERENCES catalog_correction_requests(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    actor_role TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_correction_events_request
+    ON catalog_correction_events(correction_id, id);
 """
