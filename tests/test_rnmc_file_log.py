@@ -130,7 +130,7 @@ def test_schema_migration_adds_import_log_columns(tmp_path: Path) -> None:
             for row in connection.execute("PRAGMA table_info(imported_files)")
         }
         record = connection.execute(
-            "SELECT filename_key FROM imported_files WHERE filename = ?",
+            "SELECT filename_key, rows_excluded FROM imported_files WHERE filename = ?",
             ("RNMC.xlsx",),
         ).fetchone()
     finally:
@@ -139,8 +139,10 @@ def test_schema_migration_adds_import_log_columns(tmp_path: Path) -> None:
     assert "filename_key" in columns
     assert "legacy_note" in columns
     assert "lsr_quarter" in columns
+    assert "rows_excluded" in columns
     assert record is not None
     assert record["filename_key"] == "rnmc.xlsx"
+    assert record["rows_excluded"] == 0
 
 
 def _write_file_log(path: Path, rows: list[list[object]]) -> None:

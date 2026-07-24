@@ -42,6 +42,12 @@ from app.services.read_estimate import (
 from app.services.write_result import preview_estimate_context, run_and_write
 from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_import_log
 from app.services.rnmc_excel import analyze_rnmc_zip_row_preview, import_rnmc_zip_catalog_rows
+from app.services.tkp_shadow import (
+    ShadowComparison,
+    build_shadow_comparison,
+    discover_local_semantic_backends,
+)
+from core.tkp_matching import build_tkp_catalog_index
 from core.storage.catalog import (
     allow_import_retry,
     clear_catalog_for_rebuild,
@@ -75,6 +81,7 @@ from core.storage.tkp import (
     import_tkp_catalog_workbook,
     import_tkp_parse_result,
     list_tkp_catalog_page,
+    list_tkp_items,
     list_tkp_sources,
 )
 from core.tkp_folder_ingest import (
@@ -429,6 +436,61 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             )
         finally:
             connection.close()
+
+    @app.post("/admin/tkp/shadow", response_class=HTMLResponse)
+    def admin_tkp_shadow(
+        work_name: str = Form(""),
+        unit: str = Form(""),
+    ) -> HTMLResponse:
+        query_name = work_name.strip()
+        query_unit = unit.strip()
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            sources = list_tkp_sources(connection)
+            catalog_page = list_tkp_catalog_page(connection)
+            if not query_name or not query_unit:
+                return HTMLResponse(
+                    render_admin_tkp(
+                        sources,
+                        catalog_page,
+                        error="Для теневого подбора укажите наименование и единицу.",
+                        shadow_query_name=query_name,
+                        shadow_query_unit=query_unit,
+                    ),
+                    status_code=400,
+                )
+            items = list_tkp_items(connection, limit=100_000)
+        finally:
+            connection.close()
+
+        index = build_tkp_catalog_index(items)
+        models_dir = Path(__file__).resolve().parents[2] / "data" / "models"
+        backends, unavailable_models = discover_local_semantic_backends(models_dir)
+        comparison = build_shadow_comparison(
+            query_name,
+            query_unit,
+            index,
+            semantic_backends=backends,
+        )
+        comparison = ShadowComparison(
+            live_candidates=comparison.live_candidates,
+            strict_candidates=comparison.strict_candidates,
+            rejected_candidates=comparison.rejected_candidates,
+            semantic_models=[
+                *comparison.semantic_models,
+                *unavailable_models,
+            ],
+        )
+        return HTMLResponse(
+            render_admin_tkp(
+                sources,
+                catalog_page,
+                shadow_result=comparison,
+                shadow_query_name=query_name,
+                shadow_query_unit=query_unit,
+            )
+        )
 
     @app.post("/admin/catalog/update-row")
     async def admin_catalog_update_row(request: Request) -> RedirectResponse:
@@ -1060,6 +1122,20 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 )
             finally:
                 connection.close()
+        excluded_file_keys, excluded_rows_by_file, exclusion_error = (
+            _parse_import_exclusions(form)
+        )
+        if exclusion_error:
+            connection = connect(default_database_path())
+            try:
+                init_database(connection)
+                imports = list_imported_files(connection)
+                return HTMLResponse(
+                    render_admin_imports(imports, error=exclusion_error),
+                    status_code=400,
+                )
+            finally:
+                connection.close()
         stage = app.state.app_state.rnmc_stages.get(stage_token)
         if stage is None or not stage.archive_path.exists():
             connection = connect(default_database_path())
@@ -1093,9 +1169,12 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                         str(stage.archive_path),
                         region_override=stage.region_override,
                         coefficient_overrides=coefficient_overrides,
+                        excluded_file_keys=excluded_file_keys,
+                        excluded_rows_by_file=excluded_rows_by_file,
                     )
                     message = (
                         f"{stage.original_name} импортирован: добавлено {result.rows_imported_total}, "
+                        f"исключено пользователем {result.rows_excluded_total}, "
                         f"отклонено {result.rows_rejected_total}, пропущено {result.skipped_count}, "
                         f"дубликатов {result.duplicate_name_count}, ошибок {result.failed_count}."
                     )
@@ -1946,6 +2025,88 @@ def _parse_coefficient_overrides(form) -> tuple[dict[str, float], str]:
             return {}, f"Региональный коэффициент для {filename_key} должен быть больше 0."
         overrides[normalize_import_filename(filename_key)] = coefficient
     return overrides, ""
+
+
+def _parse_import_exclusions(
+    form,
+) -> tuple[set[str], dict[str, set[int]], str]:
+    excluded_files = {
+        normalize_import_filename(str(value))
+        for value in form.getlist("exclude_file")
+        if normalize_import_filename(str(value))
+    }
+    rows_by_file: dict[str, set[int]] = {}
+    checkbox_prefix = "exclude_row__"
+    manual_prefix = "exclude_rows__"
+
+    for key, raw_value in form.multi_items():
+        field_name = str(key)
+        if field_name.startswith(checkbox_prefix):
+            filename_key = normalize_import_filename(
+                field_name[len(checkbox_prefix):]
+            )
+            if not filename_key:
+                continue
+            row_number = _parse_positive_row_number(raw_value)
+            if row_number is None:
+                return set(), {}, (
+                    f"Некорректный номер исключаемой строки для {filename_key}: "
+                    f"{raw_value}"
+                )
+            rows_by_file.setdefault(filename_key, set()).add(row_number)
+
+    for key, raw_value in form.items():
+        field_name = str(key)
+        if not field_name.startswith(manual_prefix):
+            continue
+        filename_key = normalize_import_filename(field_name[len(manual_prefix):])
+        if not filename_key:
+            continue
+        parsed_rows, error = _parse_row_number_ranges(str(raw_value))
+        if error:
+            return set(), {}, f"{error} Файл: {filename_key}."
+        rows_by_file.setdefault(filename_key, set()).update(parsed_rows)
+
+    if sum(len(rows) for rows in rows_by_file.values()) > 10_000:
+        return set(), {}, "За один импорт можно исключить не более 10 000 строк."
+    return excluded_files, rows_by_file, ""
+
+
+def _parse_positive_row_number(value: object) -> int | None:
+    try:
+        row_number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if row_number <= 0 or row_number > 1_048_576:
+        return None
+    return row_number
+
+
+def _parse_row_number_ranges(text: str) -> tuple[set[int], str]:
+    value = (text or "").strip()
+    if not value:
+        return set(), ""
+    rows: set[int] = set()
+    for part in value.replace(";", ",").split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if "-" not in token:
+            row_number = _parse_positive_row_number(token)
+            if row_number is None:
+                return set(), "Укажите номера строк как 4, 7, 10-15."
+            rows.add(row_number)
+            continue
+        bounds = [piece.strip() for piece in token.split("-", 1)]
+        start = _parse_positive_row_number(bounds[0])
+        finish = _parse_positive_row_number(bounds[1])
+        if start is None or finish is None or finish < start:
+            return set(), "Укажите диапазоны строк как 10-15, от меньшего к большему."
+        if finish - start > 10_000:
+            return set(), "Один диапазон не может содержать более 10 001 строки."
+        rows.update(range(start, finish + 1))
+    return rows, ""
+
 
 def _parse_coefficient(text: str) -> float | None | object:
     value = (text or "").strip()

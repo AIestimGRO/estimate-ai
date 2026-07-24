@@ -44,22 +44,28 @@
    Add an isolated conversion/reader path only if incoming folders still
    contain required legacy files.
 
+8. **Benchmark and reranker gate for semantic TKP.** The current admin-only
+   shadow panel supports strict filters plus local Qwen3/BGE-M3 embedding
+   adapters. Build a reviewed real-data benchmark, measure top-3/top-10 and
+   no-match precision, then compare the Qwen3/BGE rerankers before allowing any
+   semantic result into the live estimate path.
+
 ## From excel_io.py
 
-8. **Silent empty result when estimate header row is not found.**
+9. **Silent empty result when estimate header row is not found.**
    `read_estimate_rows` returns `[]` with no error/warning if the header row
    detection fails. Higher layers should surface this as a clear message.
 
-9. **Formula cells are read as formula text, not computed values. — RESOLVED
+10. **Formula cells are read as formula text, not computed values. — RESOLVED
    (2026-07).** Reading now uses `data_only=True` where needed. Caveat:
    `data_only=True` depends on Excel-cached values being present.
 
 ## From catalog.py (lower priority)
 
-10. `_parse_iso_date` only accepts strict ISO format (`YYYY-MM-DD`) for string
+11. `_parse_iso_date` only accepts strict ISO format (`YYYY-MM-DD`) for string
    dates. Revisit if source files provide dates as non-ISO plain text.
 
-11. Dedup within a single task_id in `BuildCatalog` is O(n^2). Fine for current
+12. Dedup within a single task_id in `BuildCatalog` is O(n^2). Fine for current
    catalog sizes; revisit only if groups grow large.
 
 ## Flexible layout resolution — deferred rules

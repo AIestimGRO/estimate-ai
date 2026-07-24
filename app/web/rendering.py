@@ -21,6 +21,7 @@ from app.services.rnmc_excel import (
     RnmcZipCatalogImportResult,
     RnmcZipRowPreviewResult,
 )
+from app.services.tkp_shadow import ShadowCandidate, ShadowComparison
 from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord, normalize_import_filename
@@ -336,6 +337,36 @@ body.tkp-resizing, body.tkp-resizing * { cursor: col-resize !important; user-sel
 .catalog-table button { width: auto; margin: 2px 0; padding: 6px 8px; font-size: 12px; border-radius: 7px; }
 .catalog-table button.danger { background: #dc2626; }
 .catalog-table button.danger:hover { background: #b91c1c; }
+.catalog-table[data-catalog-table] { table-layout: fixed; width: max-content; min-width: 100%; }
+.catalog-table[data-catalog-table] th { position: sticky; padding-right: 16px; }
+.catalog-table[data-catalog-table] td { overflow: hidden; }
+.catalog-table[data-catalog-table] input[type=text],
+.catalog-table[data-catalog-table] input[type=number],
+.catalog-table[data-catalog-table] textarea { min-width: 0; width: 100%; }
+.catalog-table[data-catalog-table] .short-cell,
+.catalog-table[data-catalog-table] .number-cell,
+.catalog-table[data-catalog-table] .work-cell,
+.catalog-table[data-catalog-table] .file-cell { min-width: 0; }
+.catalog-col-resizer {
+  position: absolute; top: 0; right: -6px; width: 12px; height: 100%;
+  cursor: col-resize; user-select: none; z-index: 6; touch-action: none;
+}
+.catalog-col-resizer::after {
+  content: ""; position: absolute; top: 5px; bottom: 5px; left: 5px;
+  width: 2px; border-radius: 999px; background: #93c5fd;
+}
+.catalog-col-resizer:hover::after, .catalog-col-resizer.active::after {
+  background: #2563eb; width: 3px;
+}
+body.catalog-resizing, body.catalog-resizing * {
+  cursor: col-resize !important; user-select: none !important;
+}
+.rnmc-exclusion-check { width: 18px; height: 18px; margin: 0; }
+.rnmc-row-range { min-width: 150px; margin: 0 !important; padding: 6px 8px !important; }
+.rnmc-exclusion-summary {
+  margin: 10px 0; padding: 10px 12px; border-radius: 10px;
+  background: #eff6ff; color: #1e40af; font-size: 13px;
+}
 .catalog-pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; color: #475569; }
 .catalog-pager a { padding: 7px 10px; border-radius: 8px; background: #eef2ff; color: #3730a3; text-decoration: none; font-weight: 600; }
 .catalog-warning { padding: 10px; margin: 10px 0; background: #fffbeb; color: #92400e; border-radius: 10px; }
@@ -870,10 +901,11 @@ def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: st
         '<label>Значение<input type="text" name="bulk_value" placeholder="например 1,2"></label>'
         '<label>Обоснование<input type="text" name="bulk_reason" placeholder="обязательное обоснование" required></label>'
         '<button type="submit" formaction="/admin/catalog/bulk" onclick="return prepareCatalogBulkAction(this.form)">Отправить на согласование</button>'
+        '<button type="button" data-catalog-reset-widths>Сбросить ширины</button>'
         '</div>'
         f'{_render_catalog_bulk_confirm_script()}'
         '<div class="preview-wide">'
-        '<table class="preview catalog-table"><thead><tr>'
+        '<table class="preview catalog-table" data-catalog-table="analogs"><thead><tr>'
         '<th></th><th>ID</th><th>Источник</th><th>Регион</th><th>Задача</th><th>Код</th><th>Ед.</th>'
         '<th>Кол-во</th><th>Цена раб.</th><th>Цена ориг.</th><th>Цена ZLVL</th><th>Итого</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
         '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Коэф.</th><th>ЛСР</th><th>Начало</th><th>Окончание</th><th class="wrap">Работа</th>'
@@ -881,7 +913,12 @@ def _render_catalog_editor_table(catalog_page: CatalogEditorPage, return_url: st
         '</tr></thead><tbody>'
     )
     rows = "".join(_render_catalog_editor_row(row) for row in catalog_page.rows)
-    return header + rows + '</tbody></table></div></form>'
+    return (
+        header
+        + rows
+        + '</tbody></table></div></form>'
+        + _render_catalog_column_width_script()
+    )
 
 
 
@@ -918,13 +955,112 @@ function confirmCatalogBulkAction(form) {
   const valueText = valueInput && valueInput.value ? valueInput.value : '';
   let message = 'Вы уверены, что хотите ' + actionText + ' ' + checked.length + ' строк каталога?';
   if (action !== 'delete') {
-    message += '\nПоле: ' + fieldText + '\nОперация: ' + operationText + '\nЗначение: ' + valueText;
+    message += '\\nПоле: ' + fieldText + '\\nОперация: ' + operationText + '\\nЗначение: ' + valueText;
   }
-  message += '\n\nПосле подтверждения изменения попадут в журнал и будут ждать согласования.';
+  message += '\\n\\nПосле подтверждения изменения попадут в журнал и будут ждать согласования.';
   return confirm(message);
 }
 </script>
+    """
+
+
+def _render_catalog_column_width_script() -> str:
+    return """
+<script>
+(function () {
+  var table = document.querySelector('[data-catalog-table="analogs"]');
+  if (!table) return;
+  var storageKey = 'estimate-ai:catalog-widths:analogs';
+  var defaults = [
+    48, 64, 120, 120, 110, 130, 80, 90, 100, 100, 100, 100, 90,
+    90, 90, 90, 90, 100, 110, 110, 360, 220, 220, 90, 220, 160
+  ];
+  var headers = Array.prototype.slice.call(table.querySelectorAll('thead th'));
+  var stored = [];
+  try {
+    stored = JSON.parse(window.localStorage.getItem(storageKey) || '[]') || [];
+  } catch (error) {
+    stored = [];
+  }
+  var group = document.createElement('colgroup');
+  headers.forEach(function (header, index) {
+    var col = document.createElement('col');
+    var width = parseInt(stored[index] || defaults[index] || 120, 10);
+    col.style.width = Math.max(48, width) + 'px';
+    group.appendChild(col);
+    var handle = document.createElement('span');
+    handle.className = 'catalog-col-resizer';
+    handle.dataset.catalogResize = String(index);
+    handle.title = 'Потяните, чтобы изменить ширину столбца';
+    header.appendChild(handle);
+  });
+  table.insertBefore(group, table.firstChild);
+  function columns() {
+    return Array.prototype.slice.call(group.querySelectorAll('col'));
+  }
+  function updateTableWidth() {
+    var width = columns().reduce(function (total, col) {
+      return total + (parseInt(col.style.width || '0', 10) || 120);
+    }, 0);
+    table.style.width = Math.max(width, table.parentElement.clientWidth || 0) + 'px';
+  }
+  function saveWidths() {
+    var widths = columns().map(function (col) {
+      return parseInt(col.style.width || '0', 10) || 120;
+    });
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(widths));
+    } catch (error) {}
+  }
+  var resize = null;
+  document.addEventListener('pointerdown', function (event) {
+    var handle = event.target.closest
+      ? event.target.closest('[data-catalog-resize]')
+      : null;
+    if (!handle) return;
+    var col = columns()[parseInt(handle.dataset.catalogResize || '0', 10)];
+    if (!col) return;
+    resize = {
+      col: col,
+      handle: handle,
+      startX: event.clientX,
+      startWidth: parseInt(col.style.width || '0', 10) || 120
+    };
+    handle.classList.add('active');
+    document.body.classList.add('catalog-resizing');
+    event.preventDefault();
+  });
+  document.addEventListener('pointermove', function (event) {
+    if (!resize) return;
+    resize.col.style.width = Math.max(
+      48,
+      resize.startWidth + event.clientX - resize.startX
+    ) + 'px';
+    updateTableWidth();
+    event.preventDefault();
+  });
+  document.addEventListener('pointerup', function () {
+    if (!resize) return;
+    resize.handle.classList.remove('active');
+    document.body.classList.remove('catalog-resizing');
+    resize = null;
+    saveWidths();
+  });
+  var reset = document.querySelector('[data-catalog-reset-widths]');
+  if (reset) {
+    reset.addEventListener('click', function () {
+      try {
+        window.localStorage.removeItem(storageKey);
+      } catch (error) {}
+      window.location.reload();
+    });
+  }
+  updateTableWidth();
+  window.addEventListener('resize', updateTableWidth);
+})();
+</script>
 """
+
 
 def _catalog_bulk_field_options() -> str:
     options = [
@@ -1309,11 +1445,22 @@ def _render_rnmc_stage_commit(
                 'на вкладке <strong>Метаданные</strong>. Значение из этой колонки будет применено '
                 'к строкам файла: price_zlvl = price_original / коэффициент.</p>'
             )
+    exclusion_note = ""
+    if stage_mode != "legacy_catalog" and row_preview_result is not None:
+        exclusion_note = (
+            '<div class="rnmc-exclusion-summary">'
+            '<strong>Исключение перед импортом.</strong> На вкладке «Файлы и статусы» '
+            'можно исключить задачу целиком или указать дополнительные номера строк. '
+            'На вкладке «Строки предпросмотра» можно отметить видимые строки. '
+            'Они не попадут в каталог, но останутся в журнале как «Исключено пользователем».'
+            '</div>'
+        )
     return (
         '<div class="admin-confirm-box">'
         '<h2 class="section">Предпросмотр готов</h2>'
         f'<p>{object_label} <strong>{html.escape(stage_filename)}</strong> проверен.{mode_note} Сохраните данные, если всё верно.</p>'
         f'{coefficient_note}'
+        f'{exclusion_note}'
         '<form id="rnmc-stage-commit-form" action="/admin/imports/rnmc-stage-commit" method="post">'
         f'<input type="hidden" name="stage_token" value="{html.escape(stage_token, quote=True)}">'
         '<button type="submit">Сохранить в каталог</button>'
@@ -1755,6 +1902,7 @@ def _render_rnmc_preview_file_table(entries) -> str:
         f'<div class="preview-wide"><table class="preview" data-rnmc-table="{table_id}"><thead><tr>'
         '<th>Файл</th><th>Регион</th><th>Статус</th><th>Причина</th>'
         '<th>Лист</th><th>Header row</th><th>Задача</th><th>OK</th><th>Rejected</th><th>Лимит</th>'
+        '<th>Не сохранять задачу</th><th>Доп. строки Excel</th>'
         '</tr></thead><tbody>'
     )
     rows = []
@@ -1763,6 +1911,21 @@ def _render_rnmc_preview_file_table(entries) -> str:
         processed = entry.status == "skipped_processed"
         problem = entry.status != "preview_ok" or bool(entry.reason)
         empty = entry.rows_ok <= 0 and entry.rows_rejected <= 0
+        editable = entry.status == "preview_ok"
+        filename_key = normalize_import_filename(entry.filename)
+        exclude_file = (
+            f'<input class="rnmc-exclusion-check" type="checkbox" name="exclude_file" '
+            f'value="{html.escape(filename_key, quote=True)}" form="rnmc-stage-commit-form" '
+            'title="Не сохранять ни одной строки этой задачи">'
+            if editable else ""
+        )
+        extra_rows = (
+            f'<input class="rnmc-row-range" type="text" '
+            f'name="exclude_rows__{html.escape(filename_key, quote=True)}" '
+            'form="rnmc-stage-commit-form" placeholder="34, 40-45" '
+            'title="Номера строк Excel, которых нет среди первых 30">'
+            if editable else ""
+        )
         rows.append(
             '<tr data-rnmc-row="1" '
             f'data-status="{_attr(entry.status)}" data-processed="{_flag(processed)}" '
@@ -1777,6 +1940,8 @@ def _render_rnmc_preview_file_table(entries) -> str:
             f'<td>{entry.rows_ok}</td>'
             f'<td>{entry.rows_rejected}</td>'
             f'<td>{"да" if entry.is_limited else ""}</td>'
+            f'<td>{exclude_file}</td>'
+            f'<td>{extra_rows}</td>'
             '</tr>'
         )
     return header + ''.join(rows) + '</tbody></table></div>'
@@ -1874,7 +2039,7 @@ def _render_rnmc_preview_rows_table(entries) -> str:
     header = (
         f'{_rnmc_filter_toolbar(table_id)}'
         f'<div class="preview-wide"><table class="preview" data-rnmc-table="{table_id}"><thead><tr>'
-        '<th>Файл</th><th>Excel row</th><th>Код</th><th class="wrap">Работа</th><th>Ед.</th><th>Кол-во</th>'
+        '<th>Не сохранять</th><th>Файл</th><th>Excel row</th><th>Код</th><th class="wrap">Работа</th><th>Ед.</th><th>Кол-во</th>'
         '<th>Цена ед. без НДС</th><th>Итого без НДС</th><th>ТЗ ед.</th><th>ТЗ всего</th>'
         '<th>ТЗм ед.</th><th>ТЗм всего</th><th>Проблема</th>'
         '</tr></thead><tbody>'
@@ -1886,10 +2051,20 @@ def _render_rnmc_preview_rows_table(entries) -> str:
         for sample in entry.sample_rows:
             problem = bool(sample.issue)
             empty = not any([sample.code, sample.work_name, sample.unit, sample.quantity, sample.unit_price, sample.total_price])
+            filename_key = normalize_import_filename(entry.filename)
+            exclude_checkbox = ""
+            if entry.status == "preview_ok" and not sample.issue:
+                exclude_checkbox = (
+                    f'<input class="rnmc-exclusion-check" type="checkbox" '
+                    f'name="exclude_row__{html.escape(filename_key, quote=True)}" '
+                    f'value="{sample.row_number}" form="rnmc-stage-commit-form" '
+                    'title="Не сохранять эту строку в каталог">'
+                )
             rows.append(
                 '<tr data-rnmc-row="1" '
                 f'data-status="{_attr(entry.status)}" data-processed="{_flag(entry.status == "skipped_processed")}" '
                 f'data-problem="{_flag(problem)}" data-empty="{_flag(empty)}">'
+                f'<td>{exclude_checkbox}</td>'
                 f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
                 f'<td>{sample.row_number}</td>'
                 f'<td>{html.escape(sample.code)}</td>'
@@ -1910,13 +2085,14 @@ def _render_rnmc_preview_rows_table(entries) -> str:
                 '<tr data-rnmc-row="1" '
                 f'data-status="{_attr(entry.status)}" data-processed="{_flag(entry.status == "skipped_processed")}" '
                 'data-problem="0" data-empty="1">'
+                '<td></td>'
                 f'<td class="path" title="{_attr(entry.archive_path)}">{html.escape(entry.filename)}</td>'
                 f'<td colspan="12" class="muted">Показаны первые {DEFAULT_ROW_PREVIEW_LIMIT} строк тела таблицы</td>'
                 '</tr>'
             )
     if not rows:
         rows.append(
-            '<tr><td colspan="13" class="muted">Нет строк для показа. Подробные причины смотрите во вкладке «Файлы и статусы».</td></tr>'
+            '<tr><td colspan="14" class="muted">Нет строк для показа. Подробные причины смотрите во вкладке «Файлы и статусы».</td></tr>'
         )
     return header + ''.join(rows) + '</tbody></table></div>'
 
@@ -1948,6 +2124,7 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
         f'<div><dt>Excel-файлов найдено</dt><dd>{result.total_excel_files}</dd></div>'
         f'<div><dt>Успешных файлов</dt><dd>{result.success_count}</dd></div>'
         f'<div><dt>Строк добавлено</dt><dd>{result.rows_imported_total}</dd></div>'
+        f'<div><dt>Исключено пользователем</dt><dd>{result.rows_excluded_total}</dd></div>'
         f'<div><dt>Строк отклонено</dt><dd>{result.rows_rejected_total}</dd></div>'
         f'<div><dt>Без данных</dt><dd>{result.no_data_count}</dd></div>'
         f'<div><dt>Пропущено</dt><dd>{result.skipped_count}</dd></div>'
@@ -1978,6 +2155,7 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
         '<th>Окончание</th>'
         '<th>Коэф.</th>'
         '<th>Добавлено</th>'
+        '<th>Исключено</th>'
         '<th>Отклонено</th>'
         '</tr></thead><tbody>'
     )
@@ -1998,6 +2176,7 @@ def _render_rnmc_zip_catalog_import_result(result: RnmcZipCatalogImportResult | 
             f'<td>{html.escape(entry.planned_finish)}</td>'
             f'<td>{_display_optional_number(entry.regional_coefficient)}</td>'
             f'<td>{entry.rows_imported}</td>'
+            f'<td>{entry.rows_excluded}</td>'
             f'<td>{entry.rows_rejected}</td>'
             '</tr>'
         )
@@ -2044,6 +2223,7 @@ def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
         '<th>Статус</th>'
         '<th>OK</th>'
         '<th>Rejected</th>'
+        '<th>Исключено</th>'
         '<th>Legacy</th>'
         '<th>ЛСР</th>'
         '<th>Начало</th>'
@@ -2066,6 +2246,7 @@ def _render_imported_file_table(imports: list[ImportedFileRecord]) -> str:
             f'<td>{html.escape(item.status)}</td>'
             f'<td>{item.rows_ok}</td>'
             f'<td>{item.rows_rejected}</td>'
+            f'<td>{item.rows_excluded}</td>'
             f'<td>{html.escape(item.legacy_note)}</td>'
             f'<td>{html.escape(item.lsr_quarter)}</td>'
             f'<td>{html.escape(item.planned_start)}</td>'
@@ -2128,6 +2309,7 @@ def _render_import_detail_summary(record: ImportedFileRecord) -> str:
         ("Задача", record.task_number),
         ("OK-строки", str(record.rows_ok)),
         ("Rejected-строки", str(record.rows_rejected)),
+        ("Исключено пользователем", str(record.rows_excluded)),
         ("ЛСР", record.lsr_quarter),
         ("Начало", record.planned_start),
         ("Окончание", record.planned_finish),
@@ -2205,9 +2387,9 @@ def _display_optional_number(value: float | None) -> str:
 
 def _render_import_row_logs(rows: list[ImportRowLogRecord]) -> str:
     if not rows:
-        return '<div class="admin-form"><h2 class="section">Rejected-лог</h2><p class="muted">Rejected-строки по файлу не записаны.</p></div>'
+        return '<div class="admin-form"><h2 class="section">Журнал строк</h2><p class="muted">Отклонённые или исключённые строки по файлу не записаны.</p></div>'
     header = (
-        '<div class="admin-form"><h2 class="section">Rejected-лог</h2>'
+        '<div class="admin-form"><h2 class="section">Журнал строк</h2>'
         '<table class="preview"><thead><tr>'
         '<th>Excel row</th><th>Статус</th><th>Причина</th>'
         '</tr></thead><tbody>'
@@ -2349,6 +2531,9 @@ def render_admin_tkp(
     *,
     error: str = "",
     notice: str = "",
+    shadow_result: ShadowComparison | None = None,
+    shadow_query_name: str = "",
+    shadow_query_unit: str = "",
 ) -> str:
     content = (
         '<section class="admin-panel">'
@@ -2356,6 +2541,7 @@ def render_admin_tkp(
         '<p>Загрузите папку с исходными КЛ: приложение само найдет книги КЛ 2.0, определит победителя, соберет его цены и обновит каталог. Неизмененные файлы повторно не добавляются.</p>'
         f'{_render_admin_message(error, notice)}'
         f'{_render_tkp_import_form()}'
+        f'{_render_tkp_shadow_panel(shadow_result, shadow_query_name, shadow_query_unit)}'
         '<details class="maintenance-tools">'
         f'<summary>Импортированные файлы: {len(sources)}</summary>'
         f'<div class="maintenance-tools-body">{_render_tkp_sources_table(sources)}</div>'
@@ -2377,6 +2563,107 @@ def render_admin_tkp(
     )
 
 
+def _render_tkp_shadow_panel(
+    result: ShadowComparison | None,
+    query_name: str,
+    query_unit: str,
+) -> str:
+    form = (
+        '<div class="admin-form">'
+        '<h2 class="section">Теневой подбор ТКП</h2>'
+        '<p class="muted">Сравнение не меняет рабочий подбор, цены и итоговый Excel. '
+        'Qwen/BGE используются только если модели установлены локально.</p>'
+        '<form action="/admin/tkp/shadow" method="post">'
+        f'<label>Наименование работы<textarea name="work_name" required>{html.escape(query_name)}</textarea></label>'
+        f'<label>Единица измерения<input type="text" name="unit" value="{html.escape(query_unit, quote=True)}" required></label>'
+        '<button type="submit">Сравнить кандидатов</button>'
+        '</form>'
+        '</div>'
+    )
+    if result is None:
+        return form
+
+    sections = [
+        '<div class="admin-form"><h2 class="section">Результат теневого сравнения</h2>'
+        '<p class="catalog-warning"><strong>Теневой режим:</strong> предложения ниже '
+        'не меняют итоговый Excel и не участвуют в расчёте цены.</p>',
+        '<h3>Рабочий алгоритм</h3>',
+        _render_live_tkp_candidates(result),
+        '<h3>Строгий гибрид</h3>',
+        _render_shadow_tkp_candidates(result.strict_candidates),
+    ]
+    for model in result.semantic_models:
+        sections.append(
+            f'<h3>{html.escape(model.display_name)} '
+            f'<span class="status-pill">{html.escape(model.status.value)}</span></h3>'
+        )
+        if model.message:
+            sections.append(f'<p class="muted">{html.escape(model.message)}</p>')
+        sections.append(_render_shadow_tkp_candidates(model.candidates))
+    sections.append(
+        f'<p class="muted">Строгими правилами отклонено кандидатов: '
+        f'{len(result.rejected_candidates)}.</p></div>'
+    )
+    return form + "".join(sections)
+
+
+def _render_live_tkp_candidates(result: ShadowComparison) -> str:
+    if not result.live_candidates:
+        return '<p class="muted">Текущий порог не прошёл ни один кандидат.</p>'
+    rows = []
+    for match in result.live_candidates:
+        entry = match.entry
+        rows.append(
+            '<tr>'
+            f'<td>{entry.item_id}</td>'
+            f'<td>{html.escape(entry.item_name)}</td>'
+            f'<td>{html.escape(entry.unit)}</td>'
+            f'<td>{_fmt_number(entry.winner_unit_price_no_vat)}</td>'
+            f'<td>{match.score:.2f}</td>'
+            f'<td>{html.escape(entry.task_no)}</td>'
+            '</tr>'
+        )
+    return (
+        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        '<th>ID</th><th>Кандидат</th><th>Ед.</th><th>Цена</th>'
+        '<th>Оценка</th><th>Задача</th></tr></thead><tbody>'
+        + "".join(rows)
+        + '</tbody></table></div>'
+    )
+
+
+def _render_shadow_tkp_candidates(candidates: list[ShadowCandidate]) -> str:
+    if not candidates:
+        return '<p class="muted">Кандидаты не найдены или модель недоступна.</p>'
+    rows = []
+    for candidate in candidates:
+        entry = candidate.entry
+        semantic = (
+            ""
+            if candidate.semantic_score is None
+            else f"{candidate.semantic_score:.2f}"
+        )
+        rows.append(
+            '<tr>'
+            f'<td>{entry.item_id}</td>'
+            f'<td>{html.escape(entry.item_name)}</td>'
+            f'<td>{html.escape(entry.section_name)}</td>'
+            f'<td>{html.escape(entry.unit)}</td>'
+            f'<td>{_fmt_number(candidate.normalized_unit_price)}</td>'
+            f'<td>{candidate.unit_price_factor:g}</td>'
+            f'<td>{candidate.lexical_score:.2f}</td>'
+            f'<td>{semantic}</td>'
+            f'<td>{html.escape(entry.task_no)}</td>'
+            '</tr>'
+        )
+    return (
+        '<div class="preview-wide"><table class="preview"><thead><tr>'
+        '<th>ID</th><th>Кандидат</th><th>Раздел</th><th>Ед.</th>'
+        '<th>Приведённая цена</th><th>Коэф. цены</th><th>Текст</th>'
+        '<th>Семантика</th><th>Задача</th></tr></thead><tbody>'
+        + "".join(rows)
+        + '</tbody></table></div>'
+    )
 def _render_tkp_import_form() -> str:
     return (
         '<form class="admin-form" method="post" action="/admin/tkp/import-folder" enctype="multipart/form-data">'

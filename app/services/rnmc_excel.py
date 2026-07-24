@@ -23,6 +23,7 @@ from app.services.rnmc_zip import EXCEL_SUFFIXES
 from core.catalog import CatalogRow
 from core.normalize import NormCode, NormUnit
 from core.storage.catalog import (
+    ROW_LOG_STATUS_EXCLUDED,
     ROW_LOG_STATUS_REJECTED,
     STATUS_DUPLICATE_NAME as DB_STATUS_DUPLICATE_NAME,
     STATUS_FAILED,
@@ -256,6 +257,7 @@ class RnmcZipCatalogImportEntry:
     regional_coefficient: float | None
     rows_imported: int
     rows_rejected: int
+    rows_excluded: int
 
 
 @dataclass(frozen=True)
@@ -294,6 +296,10 @@ class RnmcZipCatalogImportResult:
     @property
     def rows_rejected_total(self) -> int:
         return sum(entry.rows_rejected for entry in self.entries)
+
+    @property
+    def rows_excluded_total(self) -> int:
+        return sum(entry.rows_excluded for entry in self.entries)
 
 
 def analyze_rnmc_zip_row_preview(
@@ -388,10 +394,26 @@ def import_rnmc_zip_catalog_rows(
     *,
     region_override: str = "",
     coefficient_overrides: Mapping[str, float] | None = None,
+    excluded_file_keys: set[str] | frozenset[str] | None = None,
+    excluded_rows_by_file: Mapping[str, set[int] | frozenset[int]] | None = None,
 ) -> RnmcZipCatalogImportResult:
     """Import valid RNMC rows from a zip archive into catalog_items."""
     manual_region = _text(region_override)
     overrides = coefficient_overrides or {}
+    excluded_files = {
+        normalize_import_filename(value)
+        for value in (excluded_file_keys or ())
+        if normalize_import_filename(value)
+    }
+    excluded_rows = {
+        normalize_import_filename(filename): {
+            int(row_number)
+            for row_number in row_numbers
+            if int(row_number) > 0
+        }
+        for filename, row_numbers in (excluded_rows_by_file or {}).items()
+        if normalize_import_filename(filename)
+    }
     final_filename_keys = final_filename_keys_for_preview(connection)
     entries: list[RnmcZipCatalogImportEntry] = []
     ignored_files = 0
@@ -461,6 +483,8 @@ def import_rnmc_zip_catalog_rows(
                             region,
                             allow_metadata_region=manual_region == "",
                             coefficient_override=overrides.get(key),
+                            exclude_all_rows=key in excluded_files,
+                            excluded_row_numbers=excluded_rows.get(key, set()),
                         )
                     except Exception as exc:  # pragma: no cover - defensive UI boundary
                         entry = _record_non_imported_file(
@@ -489,6 +513,8 @@ def _import_workbook_bytes(
     *,
     allow_metadata_region: bool = True,
     coefficient_override: float | None = None,
+    exclude_all_rows: bool = False,
+    excluded_row_numbers: set[int] | frozenset[int] | None = None,
 ) -> RnmcZipCatalogImportEntry:
     workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
@@ -500,6 +526,11 @@ def _import_workbook_bytes(
             else metadata.regional_coefficient
         )
         task_number = _extract_task_number(workbook)
+        requested_excluded_rows = {
+            int(row_number)
+            for row_number in (excluded_row_numbers or ())
+            if int(row_number) > 0
+        }
         for sheet in workbook.worksheets:
             header = _find_header_row(sheet)
             if header is None:
@@ -516,7 +547,58 @@ def _import_workbook_bytes(
                 planned_finish=metadata.planned_finish,
             )
             rejected = len(rejected_rows)
+            excluded_candidates = [
+                row
+                for row in rows
+                if exclude_all_rows or row.row_number in requested_excluded_rows
+            ]
+            excluded_numbers = {row.row_number for row in excluded_candidates}
+            rows = [row for row in rows if row.row_number not in excluded_numbers]
+            excluded_count = len(excluded_candidates)
             if not rows:
+                if excluded_count:
+                    replace_catalog_rows_for_file(
+                        connection,
+                        [],
+                        region_folder=resolved_region,
+                        filename=filename,
+                    )
+                    file_id = record_imported_file(
+                        connection,
+                        region_folder=resolved_region,
+                        filename=filename,
+                        status=STATUS_SUCCESS,
+                        rows_ok=0,
+                        rows_rejected=rejected,
+                        rows_excluded=excluded_count,
+                        failure_reason="All valid catalog rows were excluded by user",
+                        task_number=task_number,
+                        lsr_quarter=metadata.lsr_quarter,
+                        planned_start=metadata.planned_start,
+                        planned_finish=metadata.planned_finish,
+                        regional_coefficient=resolved_coefficient,
+                    )
+                    replace_import_row_logs(
+                        connection,
+                        file_id,
+                        _row_logs(rejected_rows, excluded_candidates),
+                    )
+                    return _import_entry(
+                        archive_path,
+                        filename,
+                        resolved_region,
+                        STATUS_SUCCESS,
+                        "All valid catalog rows were excluded by user",
+                        sheet_name=str(sheet.title),
+                        header_row=header.row_number,
+                        task_number=task_number,
+                        lsr_quarter=metadata.lsr_quarter,
+                        planned_start=metadata.planned_start,
+                        planned_finish=metadata.planned_finish,
+                        regional_coefficient=resolved_coefficient,
+                        rows_rejected=rejected,
+                        rows_excluded=excluded_count,
+                    )
                 file_id = record_imported_file(
                     connection,
                     region_folder=resolved_region,
@@ -576,6 +658,7 @@ def _import_workbook_bytes(
                 status=STATUS_SUCCESS,
                 rows_ok=result.rows_imported,
                 rows_rejected=rejected + result.rows_skipped,
+                rows_excluded=excluded_count,
                 failure_reason="",
                 task_number=task_number,
                 lsr_quarter=metadata.lsr_quarter,
@@ -586,10 +669,7 @@ def _import_workbook_bytes(
             replace_import_row_logs(
                 connection,
                 file_id,
-                [
-                    (row.row_number, ROW_LOG_STATUS_REJECTED, row.reason)
-                    for row in rejected_rows
-                ],
+                _row_logs(rejected_rows, excluded_candidates),
             )
             return _import_entry(
                 archive_path,
@@ -606,6 +686,7 @@ def _import_workbook_bytes(
                 regional_coefficient=resolved_coefficient,
                 rows_imported=result.rows_imported,
                 rows_rejected=rejected + result.rows_skipped,
+                rows_excluded=excluded_count,
             )
 
         file_id = record_imported_file(
@@ -816,6 +897,7 @@ def _import_entry(
     regional_coefficient: float | None = None,
     rows_imported: int = 0,
     rows_rejected: int = 0,
+    rows_excluded: int = 0,
 ) -> RnmcZipCatalogImportEntry:
     return RnmcZipCatalogImportEntry(
         archive_path=archive_path,
@@ -832,7 +914,27 @@ def _import_entry(
         regional_coefficient=regional_coefficient,
         rows_imported=rows_imported,
         rows_rejected=rows_rejected,
+        rows_excluded=rows_excluded,
     )
+
+
+def _row_logs(
+    rejected_rows: list[RnmcRejectedRow],
+    excluded_rows: list[RnmcCatalogRowCandidate],
+) -> list[tuple[int, str, str]]:
+    logs = [
+        (row.row_number, ROW_LOG_STATUS_REJECTED, row.reason)
+        for row in rejected_rows
+    ]
+    logs.extend(
+        (
+            row.row_number,
+            ROW_LOG_STATUS_EXCLUDED,
+            "Excluded by user before import",
+        )
+        for row in excluded_rows
+    )
+    return sorted(logs, key=lambda item: (item[0], item[1]))
 
 
 def _preview_workbook_bytes(

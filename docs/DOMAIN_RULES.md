@@ -312,6 +312,22 @@ encode business rules that must be preserved:
 - Importing the legacy two-sheet/WOR-only CatalogBuilder result remains
   available under the fallback import control.
 
+### 6.4 TKP shadow comparison (2026-07 product rule)
+
+- The live estimate-processing path remains the deterministic lexical matcher
+  described in §6.1. Shadow results never change a workbook or database row.
+- `/admin/tkp` can compare one work name/unit against the live result, a strict
+  filtered lexical list, and optional local embedding models.
+- Strict filtering requires a positive winner price, compatible base units,
+  correct numeric unit scaling (for example `100 m2` to `m2`), compatible
+  explicit multiplicity, and no installation/demolition conflict.
+- The strict lexical list has its own minimum relevance threshold so unrelated
+  same-unit positions are not presented as useful analogs.
+- Optional Qwen3-Embedding-0.6B and BGE-M3 adapters load only from local model
+  directories. The application never downloads weights automatically.
+- A missing dependency/model is a visible `unavailable` shadow status and does
+  not affect live matching.
+
 ## 7. Name exclusion rules (Module7)
 
 A configurable rule table on sheet `Name_Exclusions`, columns:
@@ -338,7 +354,7 @@ earlier "stop list" concept was retired (`IsTaskStopped` is now a
 compatibility no-op that always returns False) — do not reintroduce
 task-level blocking without an explicit decision.
 
-## 8. What is explicitly NOT happening in current logic
+## 8. What is explicitly NOT happening in the live RNMC logic
 
 These are worth stating because they differ from earlier, more
 speculative product planning:
@@ -361,6 +377,9 @@ speculative product planning:
 These gaps are reasonable candidates for the Python port to *improve on*,
 but the existing approval/exception workflow (§5.2) is the differentiating
 asset and must not be lost or simplified away in the process.
+
+The isolated TKP shadow comparison in §6.4 is an explicit exception to this
+description. It is an admin experiment, not part of live RNMC or TKP output.
 
 ## 9. Catalog import module (`Module8_catalog_import.bas` — file named
 "Module6.bas" by the author, renamed in this repo to avoid clashing with

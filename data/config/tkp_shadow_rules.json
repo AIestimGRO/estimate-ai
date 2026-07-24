@@ -1,0 +1,30 @@
+{
+  "work_types": {
+    "demolition": [
+      "демонт",
+      "разбор",
+      "снят",
+      "вскрыт",
+      "demolition",
+      "dismantl",
+      "removal"
+    ],
+    "restoration": [
+      "восстанов",
+      "ремонт",
+      "замен",
+      "restoration",
+      "repair",
+      "replacement"
+    ],
+    "installation": [
+      "монтаж",
+      "устройств",
+      "установ",
+      "проклад",
+      "сборк",
+      "installation",
+      "assembly"
+    ]
+  }
+}

@@ -16,7 +16,9 @@ Implemented in the `feature/admin-ui` branch:
 - per-file detail pages with catalog rows and rejected-row logs;
 - automatic detection of `lsr_quarter`, planned start, planned finish, object region, and regional coefficient from `.xlsx` / `.xlsm` workbooks;
 - strict mapping of RNMC value columns: unit price, total cost, and labor columns;
-- manual metadata edits and retry unlock for `failed` / `no_data` records.
+- manual metadata edits and retry unlock for `failed` / `no_data` records;
+- user exclusion of selected Excel rows or a whole workbook/task before the
+  confirmed import.
 
 ## File identity and duplicates
 
@@ -59,9 +61,12 @@ The main `/admin/imports` flow is intentionally compact:
    rows per workbook after the detected header row; blank technical rows before
    the table body do not consume the limit. The real catalog import still
    validates and imports all rows. No catalog rows are imported during preview.
-3. Confirm the staged import. The confirmed import validates and writes accepted
-   rows to `catalog_items`, updates `imported_files`, stores detected workbook
-   metadata, and writes rejected-row details to `import_row_log`.
+3. Optionally mark visible rows, enter additional Excel row ranges, or exclude a
+   whole workbook/task. These choices can be changed until confirmation.
+4. Confirm the staged import. The confirmed import validates and writes only
+   accepted, non-excluded rows to `catalog_items`, updates `imported_files`,
+   stores detected workbook metadata, and writes rejected/excluded row details
+   to `import_row_log`.
 
 Older technical endpoints for dry-run and manual log operations are kept for
 compatibility tests, but they are not part of the regular admin UI.
@@ -80,7 +85,14 @@ reviewable:
 - **Headers** shows the original Excel header texts that were mapped to code,
   work name, unit, quantity, unit price, total price, and labor columns.
 - **Rows** shows up to 30 real body rows per workbook with normalized unit price
-  without VAT, total without VAT, labor fields, and preview-only row issues.
+  without VAT, total without VAT, labor fields, preview-only row issues, and a
+  checkbox for excluding a valid visible row.
+
+The file table also provides a whole-task exclusion checkbox and a compact
+Excel-row range field such as `34-38,42`. A whole-task exclusion records all
+otherwise valid rows as excluded. Excluded rows are not catalog rows, but the
+workbook is recorded with final status `success`, its `rows_excluded` count is
+kept, and normal future uploads skip the same filename.
 
 Preview tables include client-side filters for search, status, already-processed
 files, problem rows, and empty rows. They also include local table zoom/density
@@ -245,6 +257,11 @@ Current import statuses:
 Final statuses block normal re-import by filename. `pending` remains eligible
 for row preview/import.
 
+`success` may contain zero imported rows when the user deliberately excludes
+the whole task. Each omitted valid row is stored in `import_row_log` with status
+`excluded_by_user` and reason `Excluded by user before import`; it is distinct
+from a parser rejection.
+
 ## Retry model
 
 Current retry is explicit and requires the user to upload the ZIP again.
@@ -302,7 +319,9 @@ The regular admin workflow is intentionally limited to one staged action:
 
 1. Upload one RNMC ZIP and run preview.
 2. Review summary, file statuses, metadata, detected headers, and sample rows.
-3. Confirm the staged ZIP to write catalog rows and update `imported_files` automatically.
+3. Optionally exclude rows or whole tasks from the final catalog write.
+4. Confirm the staged ZIP to write the remaining catalog rows and update
+   `imported_files` automatically.
 
 Legacy `File_Log.xlsx` migration and low-level log-only endpoints remain available for compatibility and tests, but they are not shown in the regular admin interface. One-time catalog migrations should be run as maintenance scripts instead of permanent UI actions.
 

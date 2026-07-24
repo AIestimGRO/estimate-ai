@@ -79,6 +79,10 @@ class TkpItemRecord:
     id: int
     source_id: int
     source_file_name: str
+    section_code: str
+    section_name: str
+    subsection_name: str
+    item_code: str
     item_name: str
     unit: str
     qty: float | None
@@ -405,6 +409,8 @@ def list_tkp_items(
 def _tkp_item_select_sql() -> str:
     return """
         SELECT tkp_items.id, tkp_items.source_id, tkp_sources.file_name AS source_file_name,
+               tkp_items.section_code, tkp_items.section_name,
+               tkp_items.subsection_name, tkp_items.item_code,
                tkp_items.item_name, tkp_items.unit, tkp_items.qty,
                tkp_items.qty_source_text, tkp_items.rnmc_unit_price_no_vat,
                tkp_items.rnmc_line_total_no_vat,
@@ -463,6 +469,10 @@ def _tkp_item_record(row: sqlite3.Row) -> TkpItemRecord:
         id=int(row["id"]),
         source_id=int(row["source_id"]),
         source_file_name=str(row["source_file_name"]),
+        section_code=str(row["section_code"]),
+        section_name=str(row["section_name"]),
+        subsection_name=str(row["subsection_name"]),
+        item_code=str(row["item_code"]),
         item_name=str(row["item_name"]),
         unit=str(row["unit"]),
         qty=row["qty"],

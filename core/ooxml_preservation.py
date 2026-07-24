@@ -24,6 +24,7 @@ CONTENT_TYPES_NS = "http://schemas.openxmlformats.org/package/2006/content-types
 RELATIONSHIP_ID = f"{{{DOCUMENT_REL_NS}}}id"
 PRESERVED_PART_PREFIXES = (
     "xl/drawings/",
+    "xl/externalLinks/",
     "xl/media/",
     "xl/printerSettings/",
     "xl/vmlDrawings/",
@@ -319,7 +320,10 @@ def _merge_workbook_relationships(
     output_root = ET.fromstring(output_zip.read(part))
     used_ids = {rel.attrib.get("Id", "") for rel in output_root}
     existing = {
-        (rel.attrib.get("Type"), rel.attrib.get("Target"))
+        (
+            rel.attrib.get("Type"),
+            _resolve_part("xl/workbook.xml", rel.attrib.get("Target", "")),
+        )
         for rel in output_root
     }
 
@@ -328,7 +332,7 @@ def _merge_workbook_relationships(
         if not target:
             continue
         resolved_target = _resolve_part("xl/workbook.xml", target)
-        key = (source_rel.attrib.get("Type"), target)
+        key = (source_rel.attrib.get("Type"), resolved_target)
         if resolved_target not in replacements or key in existing:
             continue
         new_rel = copy.deepcopy(source_rel)

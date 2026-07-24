@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS imported_files (
     task_number TEXT NOT NULL DEFAULT '',
     rows_ok INTEGER NOT NULL DEFAULT 0,
     rows_rejected INTEGER NOT NULL DEFAULT 0,
+    rows_excluded INTEGER NOT NULL DEFAULT 0,
     failure_reason TEXT NOT NULL DEFAULT '',
     filename_key TEXT NOT NULL DEFAULT '',
     legacy_note TEXT NOT NULL DEFAULT '',

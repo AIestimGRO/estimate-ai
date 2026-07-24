@@ -61,7 +61,8 @@ connected to the main estimate-processing flow.
   download WA workbook.
 - `/admin/sources` — catalog source overview.
 - `/admin/catalog` — catalog table whose row, delete, and bulk actions create
-  pending correction requests instead of changing the database immediately.
+  pending correction requests instead of changing the database immediately;
+  column widths can be dragged, saved in the browser, and reset.
 - `/admin/corrections` — correction review, approve/reject actions, and the
   complete per-request event history.
 - `/admin/imports` — RNMC import dashboard and control center.
@@ -82,6 +83,8 @@ connected to the main estimate-processing flow.
 - ZIP row preview for `.xlsx` / `.xlsm`, including pre-skip of final
   processed filenames, a 30-real-body-row preview limit, and a readable tabbed
   UI for summary, statuses, metadata, headers, and preview rows.
+- Exclude selected Excel rows, manual row ranges, or a whole workbook/task
+  before confirmation while recording those rows as processed exclusions.
 - Real ZIP import into `catalog_items`.
 - Per-file detail page with metadata, imported rows, rejected-row log, and retry
   unlock for `failed` / `no_data`.
@@ -118,6 +121,8 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   WOR-only catalog; show an unambiguous winner unit-price label and all
   retained fields in a full admin grid with filters, sorting, pagination,
   configurable columns, and resizable widths.
+- Read-only TKP shadow comparison: unchanged live result, strict deterministic
+  filters/unit-price conversion, and optional local Qwen3/BGE-M3 embeddings.
 
 ### Done — validation
 
@@ -159,6 +164,10 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   state different layer counts.
 - [x] TKP catalog import, deterministic best-candidate matching, per-run toggle,
   Excel output block, and average-price integration.
+- [x] User exclusions during RNMC preview with durable processed-file history.
+- [x] Resizable main analog-catalog columns with browser-local persistence/reset.
+- [x] Isolated TKP shadow prototype with strict safety filters and optional
+  local semantic backends.
 
 ## Next milestone — RNMC import quality automation
 

@@ -22,7 +22,8 @@ Implemented product flows:
   approval in `/admin/corrections`.
 - Import legacy `File_Log.xlsx` records into `imported_files`.
 - Upload RNMC ZIP archives, run dry-run checks, use a tabbed 30-row workbook
-  preview, import valid rows into `catalog_items`, detect workbook metadata, store
+  preview, exclude selected rows or whole tasks before confirmation, import the
+  remaining valid rows into `catalog_items`, detect workbook metadata, store
   original and ZLVL unit prices, and inspect per-file import details.
 - Select a folder of original KL 2.0 workbooks in the TKP admin page, detect
   each winner, import the winner's priced WOR rows into SQLite, retain the
@@ -31,9 +32,14 @@ Implemented product flows:
   CatalogBuilder workbook remains available as a fallback.
 - Approve price risks into `gesn_exceptions`.
 - Edit task color entries and name exclusion rules from the admin UI.
+- Resize columns in the analog catalog; browser-local widths can be reset from
+  the catalog toolbar.
+- Compare the live TKP result with strict deterministic filtering and optional
+  local Qwen3/BGE-M3 embedding models in an isolated shadow panel.
 
 Matching/pricing remains deterministic. No LLM or semantic matching is used
-inside the matching/pricing path.
+inside the matching/pricing path. Shadow TKP comparisons are read-only and
+never alter an estimate result.
 
 ## How to run
 
@@ -44,6 +50,10 @@ pip install -r requirements.txt
 python -m pytest -q
 python -m app.web
 ```
+
+Optional local semantic experiments use `requirements-semantic.txt`. Model
+weights are not included in the application archive and are never downloaded
+automatically.
 
 Main web routes:
 

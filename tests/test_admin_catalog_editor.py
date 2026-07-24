@@ -362,6 +362,26 @@ def test_admin_catalog_bulk_action_has_confirmation_guard(tmp_path, monkeypatch)
     assert "изменения попадут в журнал" in response.text
 
 
+def test_admin_catalog_columns_are_resizable_and_persisted(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_catalog_row(db_path)
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.get("/admin/catalog")
+
+    assert response.status_code == 200
+    assert 'data-catalog-table="analogs"' in response.text
+    assert "catalog-col-resizer" in response.text
+    assert "estimate-ai:catalog-widths:analogs" in response.text
+    assert "data-catalog-reset-widths" in response.text
+    assert "Сбросить ширины" in response.text
+    assert "message += '\\nПоле:" in response.text
+
+
 def test_admin_catalog_row_actions_use_small_independent_forms(
     tmp_path,
     monkeypatch,

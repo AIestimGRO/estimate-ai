@@ -148,6 +148,8 @@ class TkpCatalogEntry:
     _normalized_tokens: frozenset[str]
     _normalized_unit: str
     _leading_word: str
+    section_name: str = ""
+    subsection_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -186,6 +188,8 @@ def build_tkp_catalog_index(items: list) -> list[TkpCatalogEntry]:
                 _normalized_tokens=tokens,
                 _normalized_unit=NormUnit(item.unit),
                 _leading_word=leading_action_word(normalized_text),
+                section_name=str(getattr(item, "section_name", "") or ""),
+                subsection_name=str(getattr(item, "subsection_name", "") or ""),
             )
         )
     return index

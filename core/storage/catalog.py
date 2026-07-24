@@ -29,6 +29,7 @@ STATUS_DUPLICATE_NAME = "duplicate_name"
 STATUS_MANUAL_CHECKED = "manual_checked"
 STATUS_PENDING = "pending"
 ROW_LOG_STATUS_REJECTED = "rejected"
+ROW_LOG_STATUS_EXCLUDED = "excluded_by_user"
 RNMC_ZIP_SOURCE_NAME = "rnmc_zip_upload"
 RNMC_ZIP_SOURCE_KIND = "rnmc_zip"
 PROCESSED_FILE_STATUSES = frozenset(
@@ -107,6 +108,7 @@ class ImportedFileRecord:
     task_number: str
     rows_ok: int
     rows_rejected: int
+    rows_excluded: int
     failure_reason: str
     filename_key: str
     legacy_note: str
@@ -286,6 +288,7 @@ def _imported_file_records_from_query(
             imported_files.task_number,
             imported_files.rows_ok,
             imported_files.rows_rejected,
+            imported_files.rows_excluded,
             imported_files.failure_reason,
             imported_files.filename_key,
             imported_files.legacy_note,
@@ -312,6 +315,7 @@ def _imported_file_records_from_query(
             task_number=str(row["task_number"]),
             rows_ok=int(row["rows_ok"]),
             rows_rejected=int(row["rows_rejected"]),
+            rows_excluded=int(row["rows_excluded"]),
             failure_reason=str(row["failure_reason"]),
             filename_key=str(row["filename_key"]),
             legacy_note=str(row["legacy_note"]),
@@ -1053,6 +1057,7 @@ def record_imported_file(
     status: str,
     rows_ok: int = 0,
     rows_rejected: int = 0,
+    rows_excluded: int = 0,
     failure_reason: str = "",
     task_number: str = "",
     legacy_note: str = "",
@@ -1072,6 +1077,7 @@ def record_imported_file(
         status=status,
         rows_ok=rows_ok,
         rows_rejected=rows_rejected,
+        rows_excluded=rows_excluded,
         failure_reason=failure_reason,
         task_number=task_number,
         legacy_note=legacy_note,
@@ -1717,6 +1723,7 @@ def _record_imported_file(
     status: str,
     rows_ok: int,
     rows_rejected: int,
+    rows_excluded: int = 0,
     failure_reason: str = "",
     task_number: str = "",
     legacy_note: str = "",
@@ -1729,9 +1736,9 @@ def _record_imported_file(
         """
         INSERT INTO imported_files (
             source_id, region_folder, filename, status, task_number,
-            rows_ok, rows_rejected, failure_reason, filename_key, legacy_note,
+            rows_ok, rows_rejected, rows_excluded, failure_reason, filename_key, legacy_note,
             lsr_quarter, planned_start, planned_finish, regional_coefficient
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(region_folder, filename) DO UPDATE SET
             source_id = excluded.source_id,
             status = excluded.status,
@@ -1739,6 +1746,7 @@ def _record_imported_file(
             task_number = excluded.task_number,
             rows_ok = excluded.rows_ok,
             rows_rejected = excluded.rows_rejected,
+            rows_excluded = excluded.rows_excluded,
             failure_reason = excluded.failure_reason,
             filename_key = excluded.filename_key,
             legacy_note = excluded.legacy_note,
@@ -1755,6 +1763,7 @@ def _record_imported_file(
             task_number,
             rows_ok,
             rows_rejected,
+            rows_excluded,
             failure_reason,
             normalize_import_filename(filename),
             legacy_note,

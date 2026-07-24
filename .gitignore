@@ -234,3 +234,6 @@ estimate-ai-tkp-folder-import-ready.zip
 # Catalog correction bulk approval fix delivery artifacts
 estimate-ai-correction-bulk-approval-fix-ready.zip
 _correction_bulk_fix_review/
+
+# Local semantic embedding weights (optional; never auto-downloaded)
+data/models/

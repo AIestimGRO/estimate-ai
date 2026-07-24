@@ -16,7 +16,18 @@ from app.services.rnmc_excel import (
 )
 from app.web.app import create_app
 from core.storage import connect, init_database
-from core.storage.catalog import RNMC_ZIP_SOURCE_NAME, STATUS_PENDING, import_legacy_file_log, list_catalog_rows, record_imported_file
+from core.storage.catalog import (
+    RNMC_ZIP_SOURCE_NAME,
+    ROW_LOG_STATUS_EXCLUDED,
+    STATUS_PENDING,
+    get_imported_file,
+    import_legacy_file_log,
+    list_catalog_items_for_imported_file,
+    list_catalog_rows,
+    list_import_row_logs,
+    list_imported_files,
+    record_imported_file,
+)
 
 
 def test_rnmc_zip_row_preview_counts_rows_and_keeps_pending_previewable(tmp_path: Path) -> None:
@@ -196,6 +207,10 @@ def test_admin_can_preview_rnmc_zip_rows(tmp_path: Path, monkeypatch) -> None:
     assert "data-rnmc-reset-widths" in response.text
     assert "rnmc-col-resizer" in response.text
     assert "estimate-ai:rnmc-preview-widths" in response.text
+    assert 'name="exclude_file" value="admin-new.xlsx"' in response.text
+    assert 'name="exclude_row__admin-new.xlsx" value="4"' in response.text
+    assert 'name="exclude_row__admin-new.xlsx" value="5"' in response.text
+    assert 'name="exclude_rows__admin-new.xlsx"' in response.text
 
 
 
@@ -232,6 +247,124 @@ def test_admin_can_confirm_staged_rnmc_import(tmp_path: Path, monkeypatch) -> No
         connection.close()
     assert len(rows) == 2
     assert rows[0].region == "Stage Region"
+
+
+def test_admin_staged_import_excludes_selected_rows_and_logs_them(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    zip_path = tmp_path / "rnmc.zip"
+    _write_zip(
+        zip_path,
+        {"Folder/selected.xlsx": _large_workbook_bytes(rows=35, with_import_columns=True)},
+    )
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        with zip_path.open("rb") as handle:
+            preview = client.post(
+                "/admin/imports/rnmc-row-preview",
+                data={"region_override": "Stage Region"},
+                files={"rnmc_zip": ("rnmc.zip", handle, "application/zip")},
+            )
+        match = re.search(r'name="stage_token" value="([a-f0-9]+)"', preview.text)
+        assert match is not None
+        committed = client.post(
+            "/admin/imports/rnmc-stage-commit",
+            data={
+                "stage_token": match.group(1),
+                "exclude_row__selected.xlsx": ["4", "5"],
+                "exclude_rows__selected.xlsx": "34-35, 38",
+            },
+        )
+
+    assert committed.status_code == 200
+    assert "исключено пользователем 5" in committed.text
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        record = next(
+            item for item in list_imported_files(connection)
+            if item.filename == "selected.xlsx"
+        )
+        rows = list_catalog_items_for_imported_file(connection, record.id)
+        row_logs = list_import_row_logs(connection, record.id)
+    finally:
+        connection.close()
+
+    assert len(rows) == 30
+    assert {row.source_row_number for row in rows}.isdisjoint({4, 5, 34, 35, 38})
+    assert record.rows_ok == 30
+    assert record.rows_excluded == 5
+    assert {
+        row.row_number for row in row_logs
+        if row.status == ROW_LOG_STATUS_EXCLUDED
+    } == {4, 5, 34, 35, 38}
+    assert {
+        row.reason for row in row_logs
+        if row.status == ROW_LOG_STATUS_EXCLUDED
+    } == {"Excluded by user before import"}
+
+
+def test_admin_staged_import_can_exclude_whole_task_and_marks_file_processed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    workbook_path = tmp_path / "single.xlsx"
+    workbook_path.write_bytes(_workbook_bytes(task_number="TASK-EXCLUDED"))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        with workbook_path.open("rb") as handle:
+            preview = client.post(
+                "/admin/imports/rnmc-file-preview",
+                files={
+                    "rnmc_file": (
+                        workbook_path.name,
+                        handle,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                },
+            )
+        match = re.search(r'name="stage_token" value="([a-f0-9]+)"', preview.text)
+        assert match is not None
+        committed = client.post(
+            "/admin/imports/rnmc-stage-commit",
+            data={
+                "stage_token": match.group(1),
+                "exclude_file": "single.xlsx",
+            },
+        )
+
+    assert committed.status_code == 200
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        rows = list_catalog_rows(connection, source_name=RNMC_ZIP_SOURCE_NAME)
+        record = next(
+            item for item in list_imported_files(connection)
+            if item.filename == "single.xlsx"
+        )
+        row_logs = list_import_row_logs(connection, record.id)
+        second_preview = analyze_rnmc_zip_row_preview(
+            connection,
+            str(_single_file_zip(tmp_path, "single.xlsx", workbook_path.read_bytes())),
+        )
+    finally:
+        connection.close()
+
+    assert rows == []
+    assert record.status == "success"
+    assert record.rows_ok == 0
+    assert record.rows_rejected == 1
+    assert record.rows_excluded == 2
+    assert {
+        row.row_number for row in row_logs
+        if row.status == ROW_LOG_STATUS_EXCLUDED
+    } == {4, 5}
+    assert second_preview.skipped_processed_count == 1
 
 
 def test_zip_import_accepts_manual_coefficient_override(tmp_path: Path) -> None:
@@ -328,6 +461,16 @@ def _write_zip(path: Path, files: dict[str, bytes]) -> None:
     with ZipFile(path, "w") as archive:
         for name, data in files.items():
             archive.writestr(name, data)
+
+
+def _single_file_zip(
+    tmp_path: Path,
+    filename: str,
+    data: bytes,
+) -> Path:
+    path = tmp_path / f"repeat-{filename}.zip"
+    _write_zip(path, {filename: data})
+    return path
 
 
 def _write_file_log(path: Path, rows: list[list[object]]) -> None:

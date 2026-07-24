@@ -126,6 +126,8 @@ def test_admin_tkp_import_uploads_and_stores_catalog(tmp_path, monkeypatch) -> N
     assert 'data-tkp-column-toggle="winner_block_reason"' in page.text
     assert 'data-tkp-resize="item_name"' in page.text
     assert "Настроить столбцы" in page.text
+    assert 'action="/admin/tkp/shadow"' in page.text
+    assert "Теневой подбор ТКП" in page.text
 
     connection = connect(db_path)
     try:
@@ -135,6 +137,34 @@ def test_admin_tkp_import_uploads_and_stores_catalog(tmp_path, monkeypatch) -> N
         assert sources[0].file_name == FILE_NAME
     finally:
         connection.close()
+
+
+def test_admin_tkp_shadow_compares_without_changing_live_matching(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    content = _catalog_bytes([_file_row()], [_wor_row()])
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        client.post(
+            "/admin/tkp/import",
+            files={"tkp_catalog": ("catalog.xlsm", content, XLSM_MIME)},
+        )
+        response = client.post(
+            "/admin/tkp/shadow",
+            data={"work_name": ITEM_NAME, "unit": "м2"},
+        )
+
+    assert response.status_code == 200
+    assert "Рабочий алгоритм" in response.text
+    assert "Строгий гибрид" in response.text
+    assert "Qwen3-Embedding-0.6B" in response.text
+    assert "BGE-M3" in response.text
+    assert "unavailable" in response.text
+    assert "не меняют итоговый Excel" in response.text
+    assert ITEM_NAME in response.text
 
 
 def test_admin_tkp_reimport_reports_skipped_files(tmp_path, monkeypatch) -> None:
