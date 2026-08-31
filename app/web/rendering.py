@@ -2612,7 +2612,8 @@ def render_admin_tkp_stage_macro(
             f'<td>{rejected}</td>'
             f'<td>{html.escape(source.winner_name)}</td>'
             f'<td>{html.escape(source.reserve_name)}</td>'
-            f'<td><a href="/admin/tkp/stage/{html.escape(stage_id, quote=True)}/file/{index}">'
+            f'<td><a target="_blank" rel="noopener" '
+            f'href="/admin/tkp/stage/{html.escape(stage_id, quote=True)}/file/{index}">'
             'Открыть исходный файл</a></td>'
             '</tr>'
         )
@@ -2641,7 +2642,8 @@ def render_admin_tkp_stage_macro(
         f'{file_table}'
         + "".join(details)
         + '<div class="choices">'
-        f'<a class="choice" href="/admin/tkp/stage/{html.escape(stage_id, quote=True)}/rows">'
+        f'<a class="choice" target="_blank" rel="noopener" '
+        f'href="/admin/tkp/stage/{html.escape(stage_id, quote=True)}/rows">'
         'Открыть построчный предпросмотр</a>'
         '</div>'
         '<button type="submit">Подтвердить и записать допустимые строки в БД</button>'
