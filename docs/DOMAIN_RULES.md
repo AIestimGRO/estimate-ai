@@ -271,34 +271,65 @@ encode business rules that must be preserved:
 - A TKP-only match does not make an RNMC row "matched", does not add `/КР`, and
   does not enter the RNMC price-spread risk calculation.
 
-### 6.2 TKP retained fields (2026-07 product rule)
+### 6.2 TKP retained fields and import quality gate (2026-08 product rule)
 
 - The application does not archive every raw TKP workbook cell. It persists the
-  selected position, price, winner, procedure, and audit fields needed to trace
-  a candidate back to the detected winner block.
-- Required position fields are `ItemName`, `Unit`, `Qty`, `QtySourceText`,
-  `RnmcUnitPriceNoVat`, `RnmcLineTotalNoVat`, `WinnerUnitPriceNoVat`, and
-  `WinnerLineTotalNoVat`. `QtySourceText` preserves the source spelling while
+  selected position, participant prices, procedure, and audit fields needed to
+  trace a candidate back to the detected winner/reserve blocks.
+- `TaskNo` is mandatory for every row written to `tkp_items`. A healthy KL
+  whose task number was not detected is kept in the staged preview so the user
+  can inspect the original workbook and provide the task number manually before
+  confirmation; it is not written to the database while the task number is
+  blank.
+- A row is eligible for `tkp_items` when **at least one** explicit positive
+  participant unit price is present: `WinnerUnitPriceNoVat > 0` **or**
+  `ReserveUnitPriceNoVat > 0`. Both prices may be present, or only one of them.
+  If both unit-price cells are blank/non-positive, the row is rejected.
+- Missing participant unit prices are never reconstructed from line total,
+  quantity, offer total, or any other derived arithmetic. The importer uses
+  only the explicit unit-price cells read from the source workbook.
+- Position/audit data retained for accepted rows includes item name/unit/qty,
+  source row and section context, RNMC comparison values, winner and reserve
+  identities/prices, participant-column metadata, request metadata, and source
+  workbook identity. `QtySourceText` preserves the source spelling while
   `Qty` remains numeric.
-- Required winner/audit fields are `WinnerName`, `WinnerINN`, `WinnerUIN`,
-  `WinnerGroupIndex`, `WinnerStartCol`, `WinnerStartColLetter`,
-  `WinnerUnitHeader`, `WinnerTotalHeader`, `WinnerMethod`, `WinnerBlockName`,
-  `WinnerBlockUIN`, `WinnerBlockTotalVat`, and `WinnerBlockReason`.
-- Required procedure fields are `TaskNo`, `RequestDate`, `Version`, `Customer`,
-  `GeneralContractor`, and `ProcedureName`.
-- Empty optional values are valid and are stored as empty/NULL. In particular,
-  a missing `GeneralContractor`, `WinnerBlockUIN`, or RNMC price is not an
+- Empty optional values remain valid. In particular, one participant unit price
+  may be NULL when the other participant unit price is usable; missing
+  `GeneralContractor`, `WinnerBlockUIN`, or RNMC price is not by itself an
   import error.
-- `KL20_WOR_Catalog` is sufficient for import. When `KL20_FileCatalog` is
-  absent, source records are derived from WOR metadata without inventing
-  missing source totals.
+- The same storage gate applies to the fallback CatalogBuilder import, so a
+  prebuilt aggregate cannot bypass the task-number or participant-unit-price
+  requirements.
+- `KL20_WOR_Catalog` is sufficient for fallback import. When
+  `KL20_FileCatalog` is absent, source records are derived from WOR metadata
+  without inventing missing source totals.
 
-### 6.3 Direct KL folder import (2026-07 product rule)
+### 6.3 Direct KL folder import and staged review (2026-08 product rule)
 
 - `/admin/tkp` provides the primary `Upload new TKP` action as a browser folder
   picker. All selected `.xlsx` and `.xlsm` files, including files in nested
   folders, are inspected directly; the VBA CatalogBuilder is not required and
   workbook macros are never executed.
+- Folder upload is a staged operation: upload and parsing do **not** write to
+  SQLite. The user first receives a file-level macro preview, can open the
+  separate row-level preview, and explicitly confirms the import only after
+  inspection.
+- The macro preview reports, per source file, the detected KL sheet, WOR
+  start/end/schema, participant count, winner/reserve identity, accepted and
+  rejected row counts, and block diagnostics for `1.1`, `1.2`, `1.3`,
+  `1.5`, `1.7`, `2.2`, the WOR block, `8.1`, `8.2`, `10.1`, and
+  `10.2`. Each block is shown as found/not found together with its source row
+  and detected value where available.
+- The staged preview keeps a temporary copy of each uploaded source workbook and
+  exposes an `Open source file` action. If `1.3 Task number` is missing or
+  blank while usable priced rows exist, confirmation is blocked; the user may
+  inspect the workbook, enter the task number manually for that file, and then
+  confirm. The manual value is applied to the source record and all accepted
+  rows from that workbook.
+- The separate row preview shows source file/Excel row, task number, item/unit/
+  quantity, winner and reserve names, both participant unit prices, and whether
+  the row is ready for DB storage. Rows with neither usable participant unit
+  price are visibly rejected before confirmation.
 - The preferred worksheet names normalize to `KL20` or `KL2`. If the title is
   nonstandard (a real file uses `KL 4`), the worksheet is accepted only when
   its structure contains the participant-name row, `WOR and Price` block, and
@@ -309,18 +340,20 @@ encode business rules that must be preserved:
   never create phantom participants.
 - Winner priority matches the CatalogBuilder business rule: final recommended
   winner (`10.1`), preliminary recommended winner (`8.1`), single participant,
-  minimum no-VAT offer total, then minimum sum of WOR line totals.
-- Only the selected winner's unit and line prices are stored. Section context,
-  source row, quantity source text, RNMC comparison values, winner identity,
-  and procedure metadata remain auditable.
+  minimum no-VAT offer total, then minimum sum of WOR line totals. Reserve
+  detection first uses `10.2`/`8.2` and otherwise falls back to the best
+  remaining participant according to the deterministic total-price rules.
 - Direct uploads use a deterministic content fingerprint plus the parser
   version. Re-uploading identical bytes is skipped; changed bytes under the
-  same filename replace that file's old source and item rows.
+  same filename replace that file's old source and item rows after explicit
+  confirmation.
 - Duplicate base filenames inside one selected folder are rejected rather than
   silently overwriting one another. Unsupported files are ignored and
-  recognized workbooks with an unresolved winner are stored as `Needs review`.
+  recognized workbooks with unresolved structural problems remain visible as
+  `Needs review`.
 - Importing the legacy two-sheet/WOR-only CatalogBuilder result remains
-  available under the fallback import control.
+  available under the fallback import control; its final database write is
+  still protected by the storage quality gate in §6.2.
 
 ### 6.4 TKP shadow comparison (2026-07 product rule)
 
