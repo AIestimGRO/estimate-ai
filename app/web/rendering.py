@@ -2949,7 +2949,7 @@ def _render_tkp_import_form() -> str:
         '<label>Папка с ТКП (.xlsx или .xlsm)'
         '<input type="file" name="tkp_files" accept=".xlsx,.xlsm" webkitdirectory directory multiple required>'
         '</label>'
-        '<button type="submit">Выбрать папку и обновить каталог</button>'
+        '<button type="submit">Выбрать папку и открыть предпросмотр</button>'
         '</form>'
         '<details class="maintenance-tools">'
         '<summary>Резервный импорт готового каталога</summary>'
