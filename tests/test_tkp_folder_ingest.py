@@ -227,6 +227,84 @@ def test_original_kl_parser_reads_lot_schema_unit_prices(tmp_path) -> None:
     assert item.reserve_unit_price_no_vat == 100.0
 
 
+
+def test_import_accepts_either_unit_price_and_rejects_rows_with_neither(tmp_path) -> None:
+    reserve_only_path = tmp_path / "reserve-only.xlsx"
+    winner_only_path = tmp_path / "winner-only.xlsx"
+    no_price_path = tmp_path / "no-price.xlsx"
+    _write_source(
+        reserve_only_path,
+        winner_price=None,
+        reserve_price=100.0,
+        winner_total=900.0,
+    )
+    _write_source(
+        winner_only_path,
+        winner_price=90.0,
+        reserve_price=None,
+        reserve_total=1000.0,
+    )
+    _write_source(
+        no_price_path,
+        winner_price=None,
+        reserve_price=None,
+        winner_total=900.0,
+        reserve_total=1000.0,
+    )
+
+    reserve_only = parse_tkp_source_workbook(reserve_only_path)
+    winner_only = parse_tkp_source_workbook(winner_only_path)
+    no_price = parse_tkp_source_workbook(no_price_path)
+
+    assert reserve_only.items[0].winner_unit_price_no_vat is None
+    assert reserve_only.items[0].winner_line_total_no_vat == 900.0
+    assert reserve_only.items[0].reserve_unit_price_no_vat == 100.0
+    assert winner_only.items[0].winner_unit_price_no_vat == 90.0
+    assert winner_only.items[0].reserve_unit_price_no_vat is None
+    assert winner_only.items[0].reserve_line_total_no_vat == 1000.0
+    assert no_price.items[0].winner_unit_price_no_vat is None
+    assert no_price.items[0].winner_line_total_no_vat == 900.0
+    assert no_price.items[0].reserve_unit_price_no_vat is None
+    assert no_price.items[0].reserve_line_total_no_vat == 1000.0
+    assert no_price.diagnostics[0].rows_rejected_missing_prices == 1
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        import_tkp_parse_result(connection, reserve_only)
+        import_tkp_parse_result(connection, winner_only)
+        import_tkp_parse_result(connection, no_price)
+
+        rows = list_tkp_items(connection, limit=100)
+        assert len(rows) == 2
+        by_file = {row.source_file_name: row for row in rows}
+        assert by_file["reserve-only.xlsx"].winner_unit_price_no_vat is None
+        assert by_file["reserve-only.xlsx"].reserve_unit_price_no_vat == 100.0
+        assert by_file["winner-only.xlsx"].winner_unit_price_no_vat == 90.0
+        assert by_file["winner-only.xlsx"].reserve_unit_price_no_vat is None
+        assert "no-price.xlsx" not in by_file
+    finally:
+        connection.close()
+
+
+def test_storage_rejects_tkp_item_without_task_number(tmp_path) -> None:
+    source = tmp_path / "missing-task.xlsx"
+    _write_source(source, task_no=None)
+    parsed = parse_tkp_source_workbook(source)
+
+    assert parsed.files[0].parse_status == "Needs review"
+    assert parsed.files[0].task_no == ""
+    assert len(parsed.items) == 1
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        import_tkp_parse_result(connection, parsed)
+        assert count_tkp_items(connection) == 0
+    finally:
+        connection.close()
+
+
 def test_content_revision_skips_unchanged_and_updates_changed_file(tmp_path) -> None:
     source = tmp_path / "same-name.xlsx"
     db_path = tmp_path / "estimate_ai.db"
