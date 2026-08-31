@@ -133,6 +133,7 @@ def parse_tkp_source_workbooks(
     """Parse multiple original KL workbooks into the aggregate data model."""
     files: list[TkpSourceFile] = []
     items: list[TkpItem] = []
+    diagnostics: list[TkpSourceDiagnostics] = []
     run_ids: list[str] = []
     for source in sources:
         try:
@@ -154,15 +155,32 @@ def parse_tkp_source_workbooks(
                     message=f"Workbook read error: {exc}",
                 )
             )
+            diagnostics.append(
+                TkpSourceDiagnostics(
+                    file_path=source.display_path,
+                    file_name=file_name,
+                    sheet_name="",
+                    blocks=(
+                        TkpBlockDiagnostic(
+                            code="workbook",
+                            label="Workbook",
+                            found=False,
+                            value=f"Workbook read error: {exc}",
+                        ),
+                    ),
+                )
+            )
             run_ids.append(run_id)
             continue
         files.extend(result.files)
         items.extend(result.items)
+        diagnostics.extend(result.diagnostics)
         run_ids.extend(result.run_ids)
     return TkpCatalogParseResult(
         run_ids=tuple(dict.fromkeys(run_ids)),
         files=files,
         items=items,
+        diagnostics=diagnostics,
     )
 
 
