@@ -138,6 +138,16 @@ def test_original_kl_parser_finds_structural_sheet_and_winner(tmp_path) -> None:
     assert item.reserve_method == "block10_reserve"
     assert item.reserve_start_col == 11
     assert item.reserve_unit_price_no_vat == 100.0
+    assert len(result.diagnostics) == 1
+    diagnostics = result.diagnostics[0]
+    assert diagnostics.wor_start_row == 37
+    assert diagnostics.rows_found == 1
+    assert diagnostics.rows_with_usable_price == 1
+    blocks = {block.code: block for block in diagnostics.blocks}
+    assert blocks["1.3"].found is True
+    assert blocks["1.3"].value == "12345"
+    assert blocks["10.1"].found is True
+    assert blocks["10.2"].found is True
 
 
 
