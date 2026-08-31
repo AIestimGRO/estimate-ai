@@ -373,8 +373,8 @@ def test_admin_uploads_original_kl_folder_through_staged_preview(tmp_path, monke
         assert rows.status_code == 200
         assert "Построчный предпросмотр ТКП" in rows.text
         assert "READY" in rows.text
-        assert WINNER in rows.text
-        assert OTHER in rows.text
+        assert "\u041f\u043e\u0431\u0435\u0434\u0430" in rows.text
+        assert "\u0414\u0440\u0443\u0433\u043e\u0439" in rows.text
 
         source_file = client.get(stage_url + "/file/0")
         assert source_file.status_code == 200
