@@ -201,6 +201,33 @@ class AppState:
 
 
 
+def _tkp_source_with_task_override(
+    source: TkpSourceFile,
+    task_no: str,
+) -> TkpSourceFile:
+    """Apply a staged task number and clear the matching review reason."""
+    normalized = task_no.strip()
+    if not normalized or normalized == source.task_no.strip():
+        return replace(source, task_no=normalized)
+
+    message = source.parse_message.replace("Task number not found.", "").strip()
+    message = " ".join(message.split())
+    status = source.parse_status
+    if status == "Needs review" and message in {"Parsed.", "Parsed"}:
+        status = STATUS_OK
+        message = "Parsed. Task number supplied manually."
+    elif "Task number supplied manually." not in message:
+        if message and not message.endswith("."):
+            message += "."
+        message = (message + " Task number supplied manually.").strip()
+    return replace(
+        source,
+        task_no=normalized,
+        parse_status=status,
+        parse_message=message,
+    )
+
+
 def _sync_bundled_file_log(connection) -> int:
     """Restore missing processed-file names after the legacy catalog exists."""
     if count_catalog_rows(connection) <= 0:
