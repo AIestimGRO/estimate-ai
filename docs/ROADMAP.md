@@ -121,6 +121,16 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   WOR-only catalog; show an unambiguous winner unit-price label and all
   retained fields in a full admin grid with filters, sorting, pagination,
   configurable columns, and resizable widths.
+- Stage direct KL folder uploads before database writes: show a file-level
+  macro preview with detected/missing blocks and values, provide a separate
+  row-level preview, and allow opening the temporary source workbook.
+- Enforce TKP import quality at storage: every stored row must have a task
+  number and at least one explicit positive participant unit price (winner or
+  reserve). Rows with neither unit price are rejected and unit prices are never
+  reconstructed from line totals or quantity.
+- When a healthy KL has no detected task number, keep it in preview, block
+  confirmation, and allow the user to enter the task number manually before
+  the accepted rows are written to SQLite.
 - Read-only TKP shadow comparison: unchanged live result, strict deterministic
   filters/unit-price conversion, and optional local Qwen3/BGE-M3 embeddings.
 
@@ -164,6 +174,9 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   state different layer counts.
 - [x] TKP catalog import, deterministic best-candidate matching, per-run toggle,
   Excel output block, and average-price integration.
+- [x] TKP staged import quality gate: macro/file preview, row preview, source
+  workbook inspection, manual task-number recovery, and rejection of rows with
+  neither winner nor reserve unit price.
 - [x] User exclusions during RNMC preview with durable processed-file history.
 - [x] Resizable main analog-catalog columns with browser-local persistence/reset.
 - [x] Isolated TKP shadow prototype with strict safety filters and optional
