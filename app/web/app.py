@@ -1610,21 +1610,6 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             if source.file_path in usable_paths and not task_no:
                 missing_task_files.append(source.file_name)
 
-        if missing_task_files:
-            return HTMLResponse(
-                render_admin_tkp_stage_macro(
-                    stage_id,
-                    stage.parsed,
-                    ignored_files=stage.ignored_files,
-                    error=(
-                        "Номер задачи обязателен перед записью в БД. "
-                        "Заполните его для файлов: "
-                        + ", ".join(missing_task_files)
-                    ),
-                ),
-                status_code=400,
-            )
-
         prepared_files = [
             _tkp_source_with_task_override(
                 source,
@@ -1644,6 +1629,23 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             files=prepared_files,
             items=prepared_items,
         )
+        stage.parsed = prepared
+
+        if missing_task_files:
+            return HTMLResponse(
+                render_admin_tkp_stage_macro(
+                    stage_id,
+                    stage.parsed,
+                    ignored_files=stage.ignored_files,
+                    error=(
+                        "Номер задачи обязателен перед записью в БД. "
+                        "Заполните его для файлов: "
+                        + ", ".join(missing_task_files)
+                    ),
+                ),
+                status_code=400,
+            )
+
         accepted_rows = sum(
             tkp_item_has_usable_unit_price(item) and bool(item.task_no.strip())
             for item in prepared_items
