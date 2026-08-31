@@ -20,7 +20,14 @@ ITEM = "\u041c\u043e\u043d\u0442\u0430\u0436 \u043f\u0430\u043d\u0435\u043b\u043
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def _source_bytes(*, winner_price: float = 90.0) -> bytes:
+def _source_bytes(
+    *,
+    winner_price: float | None = 90.0,
+    reserve_price: float | None = 100.0,
+    task_no: object = 12345,
+    winner_total: float | None = None,
+    reserve_total: float | None = None,
+) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = KL_SHEET
@@ -28,7 +35,7 @@ def _source_bytes(*, winner_price: float = 90.0) -> bytes:
     metadata = (
         (6, "1.1.", "\u0414\u0430\u0442\u0430", datetime(2026, 7, 1)),
         (7, "1.2.", "\u0412\u0435\u0440\u0441\u0438\u044f", 1),
-        (8, "1.3.", "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438", 12345),
+        (8, "1.3.", "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438", task_no),
         (10, "1.5.", "\u0417\u0430\u043a\u0430\u0437\u0447\u0438\u043a", "\u0417\u0430\u043a\u0430\u0437\u0447\u0438\u043a"),
         (12, "1.7.", "\u0413\u0435\u043d\u043f\u043e\u0434\u0440\u044f\u0434\u0447\u0438\u043a", "\u0413\u041f"),
     )
@@ -61,22 +68,32 @@ def _source_bytes(*, winner_price: float = 90.0) -> bytes:
     sheet["D39"] = 10
     sheet["I39"] = 95
     sheet["J39"] = 950
-    sheet["K39"] = 100
-    sheet["L39"] = 1000
+    effective_winner_total = (
+        winner_price * 10 if winner_total is None and winner_price is not None else winner_total
+    )
+    effective_reserve_total = (
+        reserve_price * 10 if reserve_total is None and reserve_price is not None else reserve_total
+    )
+    sheet["K39"] = reserve_price
+    sheet["L39"] = effective_reserve_total
     sheet["O39"] = winner_price
-    sheet["P39"] = winner_price * 10
+    sheet["P39"] = effective_winner_total
     sheet["CM39"] = "\u0421\u043b\u0443\u0436\u0435\u0431\u043d\u043e\u0435 \u043f\u0440\u0438\u043c\u0435\u0447\u0430\u043d\u0438\u0435"
 
     sheet["A40"] = "4.2."
     sheet["B40"] = "\u043f\u0440\u0435\u0434\u0435\u043b\u044c\u043d\u044b\u0439 \u0440\u0430\u0437\u043c\u0435\u0440 \u0430\u0432\u0430\u043d\u0441\u0430, %"
     sheet["A41"] = "4.3."
     sheet["B41"] = "\u0418\u0442\u043e\u0433\u043e\u0432\u0430\u044f \u0441\u0443\u043c\u043c\u0430 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u044f, \u0440\u0443\u0431 \u0431\u0435\u0437 \u041d\u0414\u0421"
-    sheet["L41"] = 1000
-    sheet["P41"] = winner_price * 10
+    sheet["L41"] = effective_reserve_total
+    sheet["P41"] = effective_winner_total
     sheet["A42"] = "4.3.1."
     sheet["B42"] = "\u0418\u0442\u043e\u0433\u043e\u0432\u0430\u044f \u0441\u0443\u043c\u043c\u0430 \u043f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u044f, \u0440\u0443\u0431 \u0441 \u041d\u0414\u0421"
-    sheet["L42"] = 1220
-    sheet["P42"] = winner_price * 12.2
+    sheet["L42"] = (
+        effective_reserve_total * 1.22 if effective_reserve_total is not None else None
+    )
+    sheet["P42"] = (
+        effective_winner_total * 1.22 if effective_winner_total is not None else None
+    )
 
     sheet["A83"] = "10.1."
     sheet["B83"] = "\u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u0435\u043c\u044b\u0439 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044c \u041a\u041f"
@@ -95,8 +112,8 @@ def _source_bytes(*, winner_price: float = 90.0) -> bytes:
     return buffer.getvalue()
 
 
-def _write_source(path: Path, *, winner_price: float = 90.0) -> None:
-    path.write_bytes(_source_bytes(winner_price=winner_price))
+def _write_source(path: Path, **kwargs) -> None:
+    path.write_bytes(_source_bytes(**kwargs))
 
 
 def test_original_kl_parser_finds_structural_sheet_and_winner(tmp_path) -> None:
