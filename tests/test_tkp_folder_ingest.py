@@ -329,7 +329,7 @@ def test_content_revision_skips_unchanged_and_updates_changed_file(tmp_path) -> 
         connection.close()
 
 
-def test_admin_uploads_original_kl_folder(tmp_path, monkeypatch) -> None:
+def test_admin_uploads_original_kl_folder_through_staged_preview(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "estimate_ai.db"
     monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
 
@@ -337,6 +337,7 @@ def test_admin_uploads_original_kl_folder(tmp_path, monkeypatch) -> None:
         page = client.get("/admin/tkp")
         assert 'action="/admin/tkp/import-folder"' in page.text
         assert "webkitdirectory" in page.text
+        assert "открыть предпросмотр" in page.text.lower()
 
         response = client.post(
             "/admin/tkp/import-folder",
@@ -348,9 +349,45 @@ def test_admin_uploads_original_kl_folder(tmp_path, monkeypatch) -> None:
             ],
             follow_redirects=False,
         )
+        assert response.status_code == 303
+        stage_url = response.headers["location"]
+        assert stage_url.startswith("/admin/tkp/stage/")
 
-    assert response.status_code == 303
-    assert response.headers["location"].startswith("/admin/tkp?message=")
+        connection = connect(db_path)
+        try:
+            init_database(connection)
+            assert count_tkp_items(connection) == 0
+        finally:
+            connection.close()
+
+        preview = client.get(stage_url)
+        assert preview.status_code == 200
+        assert "Макропредпросмотр ТКП" in preview.text
+        assert "10.1" in preview.text
+        assert "10.2" in preview.text
+        assert "Открыть исходный файл" in preview.text
+        assert 'name="task_no__0"' in preview.text
+        assert 'value="12345"' in preview.text
+
+        rows = client.get(stage_url + "/rows")
+        assert rows.status_code == 200
+        assert "Построчный предпросмотр ТКП" in rows.text
+        assert "READY" in rows.text
+        assert WINNER in rows.text
+        assert OTHER in rows.text
+
+        source_file = client.get(stage_url + "/file/0")
+        assert source_file.status_code == 200
+        assert source_file.content[:2] == b"PK"
+
+        commit = client.post(
+            stage_url + "/commit",
+            data={"task_no__0": "12345"},
+            follow_redirects=False,
+        )
+        assert commit.status_code == 303
+        assert commit.headers["location"].startswith("/admin/tkp?message=")
+
     connection = connect(db_path)
     try:
         assert count_tkp_items(connection) == 1
@@ -358,6 +395,63 @@ def test_admin_uploads_original_kl_folder(tmp_path, monkeypatch) -> None:
         assert len(sources) == 1
         assert sources[0].file_name == "sample.xlsx"
         assert sources[0].winner_name == WINNER
+        assert sources[0].task_no == "12345"
+    finally:
+        connection.close()
+
+
+def test_admin_missing_task_can_be_filled_before_tkp_commit(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/tkp/import-folder",
+            files=[
+                (
+                    "tkp_files",
+                    ("nested/missing-task.xlsx", _source_bytes(task_no=None), XLSX_MIME),
+                )
+            ],
+            follow_redirects=False,
+        )
+        stage_url = response.headers["location"]
+
+        preview = client.get(stage_url)
+        assert preview.status_code == 200
+        assert "NEEDS_TASK_NUMBER" in preview.text
+        assert 'name="task_no__0"' in preview.text
+        assert 'value=""' in preview.text
+
+        blocked = client.post(
+            stage_url + "/commit",
+            data={"task_no__0": ""},
+        )
+        assert blocked.status_code == 400
+        assert "Номер задачи обязателен" in blocked.text
+
+        connection = connect(db_path)
+        try:
+            init_database(connection)
+            assert count_tkp_items(connection) == 0
+        finally:
+            connection.close()
+
+        committed = client.post(
+            stage_url + "/commit",
+            data={"task_no__0": "777001"},
+            follow_redirects=False,
+        )
+        assert committed.status_code == 303
+
+    connection = connect(db_path)
+    try:
+        rows = list_tkp_items(connection, limit=10)
+        assert len(rows) == 1
+        assert rows[0].task_no == "777001"
+        sources = list_tkp_sources(connection)
+        assert sources[0].task_no == "777001"
+        assert sources[0].parse_status == "OK"
     finally:
         connection.close()
 
