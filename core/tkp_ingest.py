@@ -162,12 +162,42 @@ class TkpItem:
 
 
 @dataclass(frozen=True)
+class TkpBlockDiagnostic:
+    """One macro-level source block check used by the staged TKP preview."""
+
+    code: str
+    label: str
+    found: bool
+    value: str = ""
+    row: int = 0
+
+
+@dataclass(frozen=True)
+class TkpSourceDiagnostics:
+    """Macro-level diagnostics for one original KL workbook."""
+
+    file_path: str
+    file_name: str
+    sheet_name: str
+    wor_start_row: int = 0
+    wor_end_row: int = 0
+    wor_end_method: str = ""
+    wor_schema: str = ""
+    participant_count: int = 0
+    rows_found: int = 0
+    rows_with_usable_price: int = 0
+    rows_rejected_missing_prices: int = 0
+    blocks: tuple[TkpBlockDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
 class TkpCatalogParseResult:
     """Everything read from one KL20 CatalogBuilder aggregate workbook."""
 
     run_ids: tuple[str, ...]
     files: list[TkpSourceFile] = field(default_factory=list)
     items: list[TkpItem] = field(default_factory=list)
+    diagnostics: list[TkpSourceDiagnostics] = field(default_factory=list)
 
 
 class TkpCatalogFormatError(ValueError):
