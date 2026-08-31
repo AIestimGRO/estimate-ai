@@ -161,6 +161,32 @@ class TkpItem:
     quality_flags: str = ""
 
 
+def is_usable_tkp_unit_price(value: float | None) -> bool:
+    """Return True only for an explicit positive participant unit price."""
+    return value is not None and value > 0
+
+
+def tkp_item_has_usable_unit_price(item: TkpItem) -> bool:
+    """A TKP row is importable when winner or reserve has an explicit unit price."""
+    return (
+        is_usable_tkp_unit_price(item.winner_unit_price_no_vat)
+        or is_usable_tkp_unit_price(item.reserve_unit_price_no_vat)
+    )
+
+
+def tkp_item_price_status(item: TkpItem) -> str:
+    """Return a stable preview status for participant unit-price completeness."""
+    winner_ok = is_usable_tkp_unit_price(item.winner_unit_price_no_vat)
+    reserve_ok = is_usable_tkp_unit_price(item.reserve_unit_price_no_vat)
+    if winner_ok and reserve_ok:
+        return "ready_both_prices"
+    if winner_ok:
+        return "ready_winner_price"
+    if reserve_ok:
+        return "ready_reserve_price"
+    return "missing_both_unit_prices"
+
+
 @dataclass(frozen=True)
 class TkpBlockDiagnostic:
     """One macro-level source block check used by the staged TKP preview."""
