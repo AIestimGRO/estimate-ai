@@ -19,11 +19,12 @@ Flow:
   GET  /download?token=        -> download the produced WA workbook
 """
 
+import shutil
 import sys
 import tempfile
 import uuid
 from urllib.parse import parse_qsl, quote, urlencode
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -89,6 +90,12 @@ from core.tkp_folder_ingest import (
     TkpSourceInput,
     parse_tkp_source_workbooks,
 )
+from core.tkp_ingest import (
+    STATUS_OK,
+    TkpCatalogParseResult,
+    TkpSourceFile,
+    tkp_item_has_usable_unit_price,
+)
 from core.storage.section_mappings import (
     list_manual_section_mappings,
     set_manual_section_mapping_enabled,
@@ -122,6 +129,8 @@ from app.web.rendering import (
     render_admin_corrections,
     render_admin_gesn_exceptions,
     render_admin_tkp,
+    render_admin_tkp_stage_macro,
+    render_admin_tkp_stage_rows,
     render_admin_import_detail,
     render_admin_imports,
     render_admin_name_exclusions,
@@ -172,12 +181,23 @@ class RnmcImportStage:
 
 
 @dataclass
+class TkpImportStage:
+    """Original KL files parsed and waiting for explicit DB confirmation."""
+
+    directory: Path
+    parsed: TkpCatalogParseResult
+    source_paths: dict[str, Path]
+    ignored_files: int = 0
+
+
+@dataclass
 class AppState:
     """Shared server state (upload stores + working directory)."""
 
     base_dir: Path
     store: dict[str, UploadRecord] = field(default_factory=dict)
     rnmc_stages: dict[str, RnmcImportStage] = field(default_factory=dict)
+    tkp_stages: dict[str, TkpImportStage] = field(default_factory=dict)
 
 
 
