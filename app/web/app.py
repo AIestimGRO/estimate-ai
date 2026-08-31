@@ -89,6 +89,11 @@ from core.tkp_folder_ingest import (
     TkpSourceInput,
     parse_tkp_source_workbooks,
 )
+from core.storage.section_mappings import (
+    list_manual_section_mappings,
+    set_manual_section_mapping_enabled,
+    upsert_manual_section_mapping,
+)
 from core.storage.risk_log import (
     STATUS_OPEN,
     approve_risk,
@@ -800,7 +805,15 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             if section_slug == "settings":
                 settings_rows = _admin_settings_rows(connection)
                 catalog_rows = connection.execute("SELECT COUNT(*) AS count FROM catalog_items").fetchone()["count"]
-                return HTMLResponse(render_admin_settings(settings_rows, catalog_rows=catalog_rows))
+                section_mappings = list_manual_section_mappings(connection)
+                return HTMLResponse(
+                    render_admin_settings(
+                        settings_rows,
+                        catalog_rows=catalog_rows,
+                        section_mappings=section_mappings,
+                        notice=message,
+                    )
+                )
         finally:
             connection.close()
 
@@ -1578,6 +1591,98 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             connection.close()
         return RedirectResponse("/admin/name-exclusions", status_code=303)
 
+    @app.post("/admin/section-mappings/add", response_class=HTMLResponse)
+    def admin_section_mapping_add(
+        code: str = Form(""),
+        section_code: str = Form(""),
+        comment: str = Form(""),
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                mapping = upsert_manual_section_mapping(
+                    connection,
+                    code=code,
+                    section_code=section_code,
+                    comment=comment,
+                    enabled=True,
+                )
+            except ValueError as error:
+                settings_rows = _admin_settings_rows(connection)
+                catalog_rows = connection.execute(
+                    "SELECT COUNT(*) AS count FROM catalog_items"
+                ).fetchone()["count"]
+                section_mappings = list_manual_section_mappings(connection)
+                return HTMLResponse(
+                    render_admin_settings(
+                        settings_rows,
+                        catalog_rows=catalog_rows,
+                        section_mappings=section_mappings,
+                        error=_section_mapping_error_message(error),
+                    ),
+                    status_code=400,
+                )
+        finally:
+            connection.close()
+        message = f"Соответствие сохранено: {mapping.code_norm} → {mapping.section_code}."
+        return RedirectResponse(
+            "/admin/settings?message=" + quote(message),
+            status_code=303,
+        )
+
+    @app.post("/admin/section-mappings/toggle", response_class=HTMLResponse)
+    def admin_section_mapping_toggle(
+        code: str = Form(""),
+        enabled: str = Form("0"),
+    ):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                changed = set_manual_section_mapping_enabled(
+                    connection,
+                    code=code,
+                    enabled=enabled == "1",
+                )
+            except ValueError as error:
+                settings_rows = _admin_settings_rows(connection)
+                catalog_rows = connection.execute(
+                    "SELECT COUNT(*) AS count FROM catalog_items"
+                ).fetchone()["count"]
+                section_mappings = list_manual_section_mappings(connection)
+                return HTMLResponse(
+                    render_admin_settings(
+                        settings_rows,
+                        catalog_rows=catalog_rows,
+                        section_mappings=section_mappings,
+                        error=_section_mapping_error_message(error),
+                    ),
+                    status_code=400,
+                )
+            if not changed:
+                settings_rows = _admin_settings_rows(connection)
+                catalog_rows = connection.execute(
+                    "SELECT COUNT(*) AS count FROM catalog_items"
+                ).fetchone()["count"]
+                section_mappings = list_manual_section_mappings(connection)
+                return HTMLResponse(
+                    render_admin_settings(
+                        settings_rows,
+                        catalog_rows=catalog_rows,
+                        section_mappings=section_mappings,
+                        error="Соответствие для изменения не найдено.",
+                    ),
+                    status_code=404,
+                )
+        finally:
+            connection.close()
+        message = "Соответствие включено." if enabled == "1" else "Соответствие выключено."
+        return RedirectResponse(
+            "/admin/settings?message=" + quote(message),
+            status_code=303,
+        )
+
     @app.post("/admin/task-colors/add", response_class=HTMLResponse)
     def admin_task_color_add(
         task_number: str = Form(""),
@@ -1920,13 +2025,15 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
     try:
         init_database(connection)
         db_task_colors = list_task_color_entries(connection)
+        db_name_rules = list_name_exclusion_rules(connection)
         task_highlight_reasons = list_task_highlight_reasons(connection)
     finally:
         connection.close()
-    # An empty DB list means "/admin/task-colors" has never been used on this
+    # An empty DB list means the admin section has never been used on this
     # install -- fall back to the macro workbook (run_and_write's default)
-    # instead of silently switching every task's highlighting off.
+    # instead of silently switching every task's highlighting/exclusions off.
     task_color_entries = db_task_colors or None
+    name_exclusion_rules = db_name_rules or None
     try:
         outcome = run_and_write(
             record.catalog_path,
@@ -1936,6 +2043,7 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             selected_sheet_title=selected_sheet,
             regional_coefficient=record.coefficient,
             target_region=record.target_region,
+            name_exclusion_rules=name_exclusion_rules,
             task_color_entries=task_color_entries,
             task_highlight_reasons=task_highlight_reasons,
             use_tkp_analogs=record.use_tkp_analogs,
@@ -1979,6 +2087,7 @@ def _admin_settings_rows(connection) -> list[tuple[str, str]]:
     exceptions = list_gesn_exceptions(connection)
     task_colors = list_task_color_entries(connection)
     name_rules = list_name_exclusion_rules(connection)
+    section_mappings = list_manual_section_mappings(connection)
     return [
         ("Database path", str(database_path)),
         ("Database exists", "yes" if database_path.is_file() else "no"),
@@ -1990,6 +2099,7 @@ def _admin_settings_rows(connection) -> list[tuple[str, str]]:
         ("GESN exceptions", str(len(exceptions))),
         ("Task color entries", str(len(task_colors))),
         ("Name exclusion rules", str(len(name_rules))),
+        ("Manual section mappings", str(len(section_mappings))),
     ]
 
 
@@ -2002,6 +2112,17 @@ def _name_exclusion_error_message(error: ValueError) -> str:
     if message == "invalid match_mode":
         return "Match mode должен быть CONTAINS или ALL_WORDS."
     return "Правило исключения заполнено некорректно."
+
+def _section_mapping_error_message(error: ValueError) -> str:
+    message = str(error)
+    if message == "code is required":
+        return "Код ГЭСН / ФЕР / ТЕР обязателен."
+    if message == "code must be GESN, FER, or TER":
+        return "Код должен быть ГЭСН, ФЕР или ТЕР."
+    if message == "section_code must be 01-99":
+        return "Раздел ЕКР должен быть числом от 01 до 99."
+    return "Соответствие заполнено некорректно."
+
 
 def _today_vba_date_serial() -> float:
     return float((date.today() - VBA_DATE_BASE).days)

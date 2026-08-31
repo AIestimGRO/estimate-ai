@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 14
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -112,6 +112,20 @@ CREATE TABLE IF NOT EXISTS task_highlight_reasons (
     sort_order INTEGER NOT NULL DEFAULT 0
 );
 
+
+CREATE TABLE IF NOT EXISTS manual_section_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    code_norm TEXT NOT NULL UNIQUE,
+    section_code TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    comment TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_section_mappings_enabled
+    ON manual_section_mappings(enabled);
+
 CREATE TABLE IF NOT EXISTS tkp_sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL DEFAULT '',
@@ -132,6 +146,12 @@ CREATE TABLE IF NOT EXISTS tkp_sources (
     winner_total_no_vat REAL,
     winner_total_vat REAL,
     rnmc_total_no_vat REAL,
+    reserve_name TEXT NOT NULL DEFAULT '',
+    reserve_inn TEXT NOT NULL DEFAULT '',
+    reserve_uin TEXT NOT NULL DEFAULT '',
+    reserve_total_no_vat REAL,
+    reserve_total_vat REAL,
+    reserve_method TEXT NOT NULL DEFAULT '',
     details_version INTEGER NOT NULL DEFAULT 0,
     item_count INTEGER NOT NULL DEFAULT 0,
     imported_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -172,7 +192,20 @@ CREATE TABLE IF NOT EXISTS tkp_items (
     winner_block_name TEXT NOT NULL DEFAULT '',
     winner_block_uin TEXT NOT NULL DEFAULT '',
     winner_block_total_vat REAL,
-    winner_block_reason TEXT NOT NULL DEFAULT ''
+    winner_block_reason TEXT NOT NULL DEFAULT '',
+    reserve_unit_price_no_vat REAL,
+    reserve_line_total_no_vat REAL,
+    reserve_name TEXT NOT NULL DEFAULT '',
+    reserve_inn TEXT NOT NULL DEFAULT '',
+    reserve_uin TEXT NOT NULL DEFAULT '',
+    reserve_group_index INTEGER NOT NULL DEFAULT 0,
+    reserve_start_col INTEGER NOT NULL DEFAULT 0,
+    reserve_start_col_letter TEXT NOT NULL DEFAULT '',
+    reserve_unit_header TEXT NOT NULL DEFAULT '',
+    reserve_total_header TEXT NOT NULL DEFAULT '',
+    reserve_method TEXT NOT NULL DEFAULT '',
+    wor_schema TEXT NOT NULL DEFAULT '',
+    quality_flags TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_tkp_items_source_id

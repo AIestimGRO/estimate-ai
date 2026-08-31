@@ -26,6 +26,7 @@ from core.macro_workbook import load_default_macro_settings
 from core.risk import DEFAULT_PRICE_SPREAD_LIMIT, GesnException
 from core.storage.catalog import CatalogEditorPage, CatalogEditorRow, CatalogItemRecord, CatalogSource, ImportedFileRecord, ImportRowLogRecord, normalize_import_filename
 from core.storage.risk_log import PriceRiskLogEntry
+from core.storage.section_mappings import ManualSectionMapping
 from core.storage.tkp import TkpCatalogPage, TkpItemRecord, TkpSourceRecord
 from core.storage.corrections import (
     ACTION_DELETE,
@@ -2697,6 +2698,7 @@ def _render_tkp_sources_table(sources: list[TkpSourceRecord]) -> str:
         '<th>Файл</th>'
         '<th>Статус</th>'
         '<th>Победитель</th>'
+        '<th>Резервный</th>'
         '<th>Заказчик</th>'
         '<th>№ задачи</th>'
         '<th>Позиций</th>'
@@ -2714,6 +2716,7 @@ def _render_tkp_sources_table(sources: list[TkpSourceRecord]) -> str:
             f'<td>{html.escape(source.file_name)}</td>'
             f'<td>{status_cell}</td>'
             f'<td>{html.escape(source.winner_name)}</td>'
+            f'<td>{html.escape(source.reserve_name)}</td>'
             f'<td>{html.escape(source.customer)}</td>'
             f'<td>{html.escape(source.task_no)}</td>'
             f'<td>{source.item_count}</td>'
@@ -2733,6 +2736,9 @@ TKP_CATALOG_COLUMNS = (
     ("winner_unit_price_no_vat", "Цена победителя за единицу, руб. без НДС", "winner_unit_price_no_vat", True, 190),
     ("winner_line_total_no_vat", "Стоимость позиции победителя, руб. без НДС", "winner_line_total_no_vat", True, 190),
     ("winner_name", "Победитель", "winner_name", True, 220),
+    ("reserve_unit_price_no_vat", "Цена резервного за единицу, руб. без НДС", "reserve_unit_price_no_vat", True, 190),
+    ("reserve_line_total_no_vat", "Стоимость позиции резервного, руб. без НДС", "reserve_line_total_no_vat", False, 190),
+    ("reserve_name", "Резервный победитель", "reserve_name", True, 220),
     ("winner_inn", "ИНН победителя", "", False, 150),
     ("winner_uin", "УИН победителя", "", False, 180),
     ("winner_group_index", "Группа победителя", "", False, 130),
@@ -2740,6 +2746,16 @@ TKP_CATALOG_COLUMNS = (
     ("winner_start_col_letter", "Буква начального столбца", "", False, 150),
     ("winner_unit_header", "Заголовок цены за единицу", "", False, 240),
     ("winner_total_header", "Заголовок общей стоимости", "", False, 240),
+    ("reserve_inn", "ИНН резервного", "", False, 150),
+    ("reserve_uin", "УИН резервного", "", False, 180),
+    ("reserve_group_index", "Группа резервного", "", False, 130),
+    ("reserve_start_col", "Начальный столбец резервного", "", False, 160),
+    ("reserve_start_col_letter", "Буква начального столбца резервного", "", False, 170),
+    ("reserve_unit_header", "Заголовок цены резервного", "", False, 240),
+    ("reserve_total_header", "Заголовок общей стоимости резервного", "", False, 260),
+    ("reserve_method", "Метод определения резервного", "", False, 220),
+    ("wor_schema", "Схема ВОР", "", False, 150),
+    ("quality_flags", "Флаги качества", "", False, 220),
     ("task_no", "№ задачи ТКП", "task_no", True, 130),
     ("request_date", "Дата запроса", "request_date", True, 130),
     ("version", "Версия", "", False, 90),
@@ -2757,13 +2773,16 @@ TKP_CATALOG_COLUMNS = (
 TKP_NUMERIC_COLUMNS = {
     "qty", "rnmc_unit_price_no_vat", "rnmc_line_total_no_vat",
     "winner_unit_price_no_vat", "winner_line_total_no_vat",
-    "winner_group_index", "winner_start_col", "winner_block_total_vat",
+    "reserve_unit_price_no_vat", "reserve_line_total_no_vat",
+    "winner_group_index", "winner_start_col", "reserve_group_index",
+    "reserve_start_col", "winner_block_total_vat",
 }
 
 TKP_WRAP_COLUMNS = {
-    "item_name", "winner_name", "customer", "general_contractor", "procedure_name",
-    "winner_unit_header", "winner_total_header", "winner_method", "winner_block_name",
-    "winner_block_reason", "source_file_name",
+    "item_name", "winner_name", "reserve_name", "customer", "general_contractor",
+    "procedure_name", "winner_unit_header", "winner_total_header",
+    "reserve_unit_header", "reserve_total_header", "winner_method", "reserve_method",
+    "winner_block_name", "winner_block_reason", "quality_flags", "source_file_name",
 }
 
 
@@ -3185,12 +3204,23 @@ def _render_name_exclusion_toggle(rule: NameExclusionRule) -> str:
     )
 
 
-def render_admin_settings(settings_rows: list[tuple[str, str]], *, catalog_rows: int = 0) -> str:
+def render_admin_settings(
+    settings_rows: list[tuple[str, str]],
+    *,
+    catalog_rows: int = 0,
+    section_mappings: list[ManualSectionMapping] | None = None,
+    error: str = "",
+    notice: str = "",
+) -> str:
+    mappings = [] if section_mappings is None else section_mappings
     content = (
         '<section class="admin-panel">'
         '<h2 class="section">Настройки и диагностика</h2>'
         '<p>Сводка по базе, конфигам и накопленным админ-таблицам.</p>'
+        f'{_render_admin_message(error, notice)}'
         f'{_render_settings_table(settings_rows)}'
+        f'{_render_manual_section_mapping_form()}'
+        f'{_render_manual_section_mapping_table(mappings)}'
         f'{_render_catalog_clear_form(catalog_rows)}'
         '</section>'
     )
@@ -3216,6 +3246,67 @@ def _render_settings_table(settings_rows: list[tuple[str, str]]) -> str:
             '</tr>'
         )
     return '<table class="preview"><tbody>' + ''.join(rows) + '</tbody></table>'
+
+
+def _render_manual_section_mapping_form() -> str:
+    return (
+        '<form class="admin-form" method="post" action="/admin/section-mappings/add">'
+        '<h2 class="section">Соответствия ГЭСН → раздел ЕКР</h2>'
+        '<p class="muted">Ручные соответствия имеют приоритет выше встроенного справочника и fallback-логики.</p>'
+        '<label>Код ГЭСН / ФЕР / ТЕР'
+        '<input type="text" name="code" placeholder="Например, ГЭСН20-06-021-01" required>'
+        '</label>'
+        '<label>Раздел ЕКР'
+        '<input type="text" name="section_code" placeholder="Например, 11" required>'
+        '</label>'
+        '<label>Комментарий'
+        '<textarea name="comment" placeholder="Короткое пояснение"></textarea>'
+        '</label>'
+        '<button type="submit">Добавить / обновить</button>'
+        '</form>'
+    )
+
+
+def _render_manual_section_mapping_table(mappings: list[ManualSectionMapping]) -> str:
+    if not mappings:
+        return '<p class="muted">Ручные соответствия пока не записаны.</p>'
+
+    header = (
+        '<table class="preview"><thead><tr>'
+        '<th>Вкл.</th>'
+        '<th>Код</th>'
+        '<th>Нормализованный код</th>'
+        '<th>Раздел</th>'
+        '<th>Комментарий</th>'
+        '<th>Действие</th>'
+        '</tr></thead><tbody>'
+    )
+    rows = []
+    for mapping in mappings:
+        rows.append(
+            '<tr>'
+            f'<td>{_enabled_label(mapping.enabled)}</td>'
+            f'<td>{html.escape(mapping.code)}</td>'
+            f'<td>{html.escape(mapping.code_norm)}</td>'
+            f'<td>{html.escape(mapping.section_code)}</td>'
+            f'<td>{html.escape(mapping.comment)}</td>'
+            f'<td>{_render_manual_section_mapping_actions(mapping)}</td>'
+            '</tr>'
+        )
+    return header + ''.join(rows) + '</tbody></table>'
+
+
+def _render_manual_section_mapping_actions(mapping: ManualSectionMapping) -> str:
+    next_enabled = "0" if mapping.enabled else "1"
+    button_label = "Выключить" if mapping.enabled else "Включить"
+    code_value = html.escape(mapping.code_norm, quote=True)
+    return (
+        '<form class="table-action" method="post" action="/admin/section-mappings/toggle">'
+        f'<input type="hidden" name="code" value="{code_value}">'
+        f'<input type="hidden" name="enabled" value="{next_enabled}">'
+        f'<button type="submit">{button_label}</button>'
+        '</form>'
+    )
 
 def render_admin_task_colors(
     entries: list[TaskColorEntry],

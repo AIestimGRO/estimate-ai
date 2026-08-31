@@ -4,13 +4,17 @@ from openpyxl import Workbook, load_workbook
 
 from app.services.run_matching import KR_END
 from app.services.write_result import run_and_write
-from core.excel_writer import PROBLEM_FILL, TASK_FILL
+from core.excel_writer import EXACT_SECTION_FILL, PROBLEM_FILL, TASK_FILL
 from core.exclusions import TaskColorEntry, TaskHighlightReason
 from core.risk import REASON_RATIO_EXCEEDED
 from core.storage import connect, init_database
 
 METER = "\u043c"
 CODE = "\u0413\u042d\u0421\u041d01-01-001-01"
+EXACT_SECTION_CODE = "\u0413\u042d\u0421\u041d\u043f01-11-011-01"
+FALLBACK_SECTION_CODE = "\u0413\u042d\u0421\u041d09-99-999-99"
+COMMISSIONING_SECTION_CODE = "\u0413\u042d\u0421\u041d\u043f02-99-999-99"
+MANUAL_SECTION_CODE = "\u0413\u042d\u0421\u041d20-06-021-01"
 INSTALLATION = "\u043c\u043e\u043d\u0442\u0430\u0436"
 REGION_LABEL = "\u0420\u0435\u0433\u0438\u043e\u043d"
 COEFFICIENT_LABEL = "\u041a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442"
@@ -53,6 +57,7 @@ def _make_catalog_file(
     *,
     region: str = "",
     regions: list[str] | None = None,
+    code: str = CODE,
 ) -> Path:
     workbook = Workbook()
     worksheet = workbook.active
@@ -63,7 +68,7 @@ def _make_catalog_file(
         worksheet.cell(row=row, column=3).value = INSTALLATION
         worksheet.cell(row=row, column=4).value = METER
         worksheet.cell(row=row, column=7).value = price
-        worksheet.cell(row=row, column=14).value = CODE
+        worksheet.cell(row=row, column=14).value = code
         row_region = regions[offset] if regions is not None else region
         if row_region:
             worksheet.cell(row=row, column=16).value = row_region
@@ -79,15 +84,16 @@ def _make_estimate_file(
     neighbour_value: object = None,
     with_coefficient: float | None = None,
     region_name: str = REGION_NAME,
+    code: str = CODE,
 ) -> Path:
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = ESTIMATE_TITLE
-    worksheet.cell(row=7, column=14).value = CODE
+    worksheet.cell(row=7, column=14).value = code
     worksheet.cell(row=9, column=3).value = INSTALLATION
     worksheet.cell(row=9, column=4).value = METER
     worksheet.cell(row=9, column=6).value = base_price
-    worksheet.cell(row=9, column=14).value = CODE
+    worksheet.cell(row=9, column=14).value = code
     if neighbour_value is not None:
         worksheet.cell(row=9, column=7).value = neighbour_value
     if with_coefficient is not None:
@@ -121,6 +127,100 @@ def test_writes_analogs_formula_kr_and_section(tmp_path: Path) -> None:
         assert sheet.cell(row=9, column=14).value == CODE
         assert str(sheet.cell(row=9, column=15).value).endswith(KR_END)
         assert sheet.cell(row=9, column=16).value == "01"
+    finally:
+        workbook.close()
+
+
+def test_section_cell_is_green_when_manual_mapping_is_used(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("task-1", 100)],
+        code=MANUAL_SECTION_CODE,
+    )
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx", code=MANUAL_SECTION_CODE)
+    database = tmp_path / "estimate_ai.db"
+    connection = connect(database)
+    try:
+        init_database(connection)
+    finally:
+        connection.close()
+    output = tmp_path / "out.xlsx"
+
+    run_and_write(catalog, estimate, output, database_path=database)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        section_cell = sheet.cell(row=9, column=16)
+        assert section_cell.value == "11"
+        assert section_cell.fill.start_color.rgb == EXACT_SECTION_FILL.start_color.rgb
+    finally:
+        workbook.close()
+
+
+
+def test_section_cell_is_green_when_exact_third_level_mapping_is_used(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("task-1", 100)],
+        code=EXACT_SECTION_CODE,
+    )
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx", code=EXACT_SECTION_CODE)
+    output = tmp_path / "out.xlsx"
+
+    run_and_write(catalog, estimate, output)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        section_cell = sheet.cell(row=9, column=16)
+        assert section_cell.value == "17"
+        assert section_cell.fill.start_color.rgb == EXACT_SECTION_FILL.start_color.rgb
+    finally:
+        workbook.close()
+
+
+def test_section_cell_is_not_green_when_fallback_mapping_is_used(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("task-1", 100)],
+        code=FALLBACK_SECTION_CODE,
+    )
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx", code=FALLBACK_SECTION_CODE)
+    output = tmp_path / "out.xlsx"
+
+    run_and_write(catalog, estimate, output)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        section_cell = sheet.cell(row=9, column=16)
+        assert section_cell.value == "04"
+        assert section_cell.fill.start_color.rgb != EXACT_SECTION_FILL.start_color.rgb
+    finally:
+        workbook.close()
+
+
+def test_section_cell_uses_commissioning_rule_without_green_fill(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("task-1", 100)],
+        code=COMMISSIONING_SECTION_CODE,
+    )
+    estimate = _make_estimate_file(
+        tmp_path / "estimate.xlsx",
+        code=COMMISSIONING_SECTION_CODE,
+    )
+    output = tmp_path / "out.xlsx"
+
+    run_and_write(catalog, estimate, output)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        section_cell = sheet.cell(row=9, column=16)
+        assert section_cell.value == "17"
+        assert section_cell.fill.start_color.rgb != EXACT_SECTION_FILL.start_color.rgb
     finally:
         workbook.close()
 
@@ -616,5 +716,34 @@ def test_kr_reuses_free_column_without_inserting(tmp_path: Path) -> None:
         assert str(sheet.cell(row=data_row, column=15).value).endswith(KR_END)
         assert sheet.cell(row=data_row, column=16).value == "01"
         assert sheet.cell(row=data_row, column=17).value == 100
+    finally:
+        workbook.close()
+
+
+def test_reprocessing_clears_stale_analog_columns(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+
+    workbook = load_workbook(estimate)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        sheet.cell(row=7, column=20).value = "stale-task"
+        sheet.cell(row=8, column=20).value = "stale-region"
+        sheet.cell(row=9, column=20).value = 999
+        workbook.save(estimate)
+    finally:
+        workbook.close()
+
+    output = tmp_path / "out.xlsx"
+    run_and_write(catalog, estimate, output)
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=7, column=17).value == "task-1"
+        assert sheet.cell(row=9, column=17).value == 100
+        assert sheet.cell(row=7, column=20).value is None
+        assert sheet.cell(row=8, column=20).value is None
+        assert sheet.cell(row=9, column=20).value is None
     finally:
         workbook.close()

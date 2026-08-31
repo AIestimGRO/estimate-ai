@@ -46,6 +46,11 @@ FILE_CATALOG_HEADERS = (
     "ProcedureName", "WinnerTotalNoVat", "WinnerTotalVat", "RnmcTotalNoVat",
 )
 
+FILE_CATALOG_OPTIONAL_HEADERS = (
+    "ReserveMethod", "ReserveName", "ReserveINN", "ReserveUIN",
+    "ReserveTotalNoVat", "ReserveTotalVat",
+)
+
 WOR_CATALOG_HEADERS = (
     "RunId", "FilePath", "FileName", "SheetName", "SourceRow",
     "SectionCode", "SectionName", "SubsectionName", "ItemCode", "ItemName",
@@ -57,6 +62,13 @@ WOR_CATALOG_HEADERS = (
     "GeneralContractor", "ProcedureName", "WinnerMethod", "WinnerBlockName",
     "WinnerBlockUIN", "WinnerBlockTotalVat", "WinnerBlockReason",
     "WinnerBlockSource",
+)
+
+WOR_CATALOG_OPTIONAL_HEADERS = (
+    "ReserveUnitPriceNoVat", "ReserveLineTotalNoVat", "ReserveName",
+    "ReserveINN", "ReserveUIN", "ReserveGroupIndex", "ReserveStartCol",
+    "ReserveStartColLetter", "ReserveUnitHeader", "ReserveTotalHeader",
+    "ReserveMethod", "WorSchema", "QualityFlags",
 )
 
 
@@ -82,6 +94,12 @@ class TkpSourceFile:
     winner_total_no_vat: float | None
     winner_total_vat: float | None
     rnmc_total_no_vat: float | None
+    reserve_name: str = ""
+    reserve_inn: str = ""
+    reserve_uin: str = ""
+    reserve_total_no_vat: float | None = None
+    reserve_total_vat: float | None = None
+    reserve_method: str = ""
 
     @property
     def is_parsed(self) -> bool:
@@ -128,6 +146,19 @@ class TkpItem:
     winner_block_uin: str
     winner_block_total_vat: float | None
     winner_block_reason: str
+    reserve_unit_price_no_vat: float | None = None
+    reserve_line_total_no_vat: float | None = None
+    reserve_name: str = ""
+    reserve_inn: str = ""
+    reserve_uin: str = ""
+    reserve_group_index: int = 0
+    reserve_start_col: int = 0
+    reserve_start_col_letter: str = ""
+    reserve_unit_header: str = ""
+    reserve_total_header: str = ""
+    reserve_method: str = ""
+    wor_schema: str = ""
+    quality_flags: str = ""
 
 
 @dataclass(frozen=True)
@@ -171,7 +202,12 @@ def parse_tkp_catalog_workbook(path: str | Path) -> TkpCatalogParseResult:
         workbook.close()
 
 
-def _header_index(worksheet: Worksheet, expected: tuple[str, ...], sheet_label: str) -> dict[str, int]:
+def _header_index(
+    worksheet: Worksheet,
+    expected: tuple[str, ...],
+    sheet_label: str,
+    optional: tuple[str, ...] = (),
+) -> dict[str, int]:
     header_row = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), ())
     index = {str(value): position for position, value in enumerate(header_row) if value is not None}
     missing = [name for name in expected if name not in index]
@@ -179,11 +215,25 @@ def _header_index(worksheet: Worksheet, expected: tuple[str, ...], sheet_label: 
         raise TkpCatalogFormatError(
             f"{sheet_label}: missing expected column(s) {missing}"
         )
+    for name in optional:
+        index.setdefault(name, -1)
     return index
 
 
+def _optional(row: tuple, index: dict[str, int], name: str) -> object:
+    position = index.get(name, -1)
+    if position < 0 or position >= len(row):
+        return None
+    return row[position]
+
+
 def _read_file_catalog(worksheet: Worksheet) -> list[TkpSourceFile]:
-    index = _header_index(worksheet, FILE_CATALOG_HEADERS, FILE_CATALOG_SHEET)
+    index = _header_index(
+        worksheet,
+        FILE_CATALOG_HEADERS,
+        FILE_CATALOG_SHEET,
+        FILE_CATALOG_OPTIONAL_HEADERS,
+    )
     files: list[TkpSourceFile] = []
     for row in worksheet.iter_rows(min_row=2, values_only=True):
         if row[index["FilePath"]] in (None, ""):
@@ -208,13 +258,24 @@ def _read_file_catalog(worksheet: Worksheet) -> list[TkpSourceFile]:
                 winner_total_no_vat=_as_float(row[index["WinnerTotalNoVat"]]),
                 winner_total_vat=_as_float(row[index["WinnerTotalVat"]]),
                 rnmc_total_no_vat=_as_float(row[index["RnmcTotalNoVat"]]),
+                reserve_name=_text(_optional(row, index, "ReserveName")),
+                reserve_inn=_text(_optional(row, index, "ReserveINN")),
+                reserve_uin=_text(_optional(row, index, "ReserveUIN")),
+                reserve_total_no_vat=_as_float(_optional(row, index, "ReserveTotalNoVat")),
+                reserve_total_vat=_as_float(_optional(row, index, "ReserveTotalVat")),
+                reserve_method=_text(_optional(row, index, "ReserveMethod")),
             )
         )
     return files
 
 
 def _read_wor_catalog(worksheet: Worksheet) -> list[TkpItem]:
-    index = _header_index(worksheet, WOR_CATALOG_HEADERS, WOR_CATALOG_SHEET)
+    index = _header_index(
+        worksheet,
+        WOR_CATALOG_HEADERS,
+        WOR_CATALOG_SHEET,
+        WOR_CATALOG_OPTIONAL_HEADERS,
+    )
     items: list[TkpItem] = []
     for row in worksheet.iter_rows(min_row=2, values_only=True):
         item_name = _text(row[index["ItemName"]])
@@ -258,6 +319,19 @@ def _read_wor_catalog(worksheet: Worksheet) -> list[TkpItem]:
                 winner_block_uin=_text(row[index["WinnerBlockUIN"]]),
                 winner_block_total_vat=_as_float(row[index["WinnerBlockTotalVat"]]),
                 winner_block_reason=_text(row[index["WinnerBlockReason"]]),
+                reserve_unit_price_no_vat=_as_float(_optional(row, index, "ReserveUnitPriceNoVat")),
+                reserve_line_total_no_vat=_as_float(_optional(row, index, "ReserveLineTotalNoVat")),
+                reserve_name=_text(_optional(row, index, "ReserveName")),
+                reserve_inn=_text(_optional(row, index, "ReserveINN")),
+                reserve_uin=_text(_optional(row, index, "ReserveUIN")),
+                reserve_group_index=_as_int(_optional(row, index, "ReserveGroupIndex")),
+                reserve_start_col=_as_int(_optional(row, index, "ReserveStartCol")),
+                reserve_start_col_letter=_text(_optional(row, index, "ReserveStartColLetter")),
+                reserve_unit_header=_text(_optional(row, index, "ReserveUnitHeader")),
+                reserve_total_header=_text(_optional(row, index, "ReserveTotalHeader")),
+                reserve_method=_text(_optional(row, index, "ReserveMethod")),
+                wor_schema=_text(_optional(row, index, "WorSchema")),
+                quality_flags=_text(_optional(row, index, "QualityFlags")),
             )
         )
     return items
@@ -297,6 +371,12 @@ def _include_sources_derived_from_items(
                 winner_total_no_vat=None,
                 winner_total_vat=None,
                 rnmc_total_no_vat=None,
+                reserve_name=item.reserve_name,
+                reserve_inn=item.reserve_inn,
+                reserve_uin=item.reserve_uin,
+                reserve_total_no_vat=None,
+                reserve_total_vat=None,
+                reserve_method=item.reserve_method,
             )
         )
     return result

@@ -18,7 +18,11 @@ from core.storage import (
     init_database,
     list_catalog_rows,
     list_catalog_sources,
+    list_manual_section_mappings,
     list_name_exclusion_rules,
+    load_manual_section_map,
+    set_manual_section_mapping_enabled,
+    upsert_manual_section_mapping,
     list_task_color_entries,
 )
 CODE = "\u0413\u042d\u0421\u041d01-01-001-01"
@@ -73,8 +77,38 @@ def test_init_database_creates_schema() -> None:
         assert "name_exclusion_rules" in tables
         assert "price_risk_log" in tables
         assert "gesn_exceptions" in tables
+        assert "manual_section_mappings" in tables
     finally:
         connection.close()
+
+
+def test_manual_section_mapping_storage_round_trip() -> None:
+    connection = connect(":memory:")
+    try:
+        init_database(connection)
+        initial_map = load_manual_section_map(connection)
+        assert initial_map["\u0413\u042d\u0421\u041d20-06-021-01"] == "11"
+
+        mapping = upsert_manual_section_mapping(
+            connection,
+            code="\u0424\u0415\u042020-06-021-01",
+            section_code="12",
+            comment="override",
+        )
+        assert mapping.code_norm == "\u0413\u042d\u0421\u041d20-06-021-01"
+        assert mapping.section_code == "12"
+
+        assert load_manual_section_map(connection)["\u0413\u042d\u0421\u041d20-06-021-01"] == "12"
+        assert set_manual_section_mapping_enabled(
+            connection,
+            "\u0413\u042d\u0421\u041d20-06-021-01",
+            False,
+        )
+        assert "\u0413\u042d\u0421\u041d20-06-021-01" not in load_manual_section_map(connection)
+        assert len(list_manual_section_mappings(connection)) == 1
+    finally:
+        connection.close()
+
 
 
 def test_import_catalog_from_excel_round_trip(tmp_path: Path) -> None:

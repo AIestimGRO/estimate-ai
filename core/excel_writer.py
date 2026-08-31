@@ -34,6 +34,10 @@ from core.exclusions import (
 from core.layout import resolve_average_placement
 from core.ooxml_preservation import preserve_workbook_package_features
 from core.risk import REASON_RATIO_EXCEEDED
+from core.sections import (
+    SECTION_SOURCE_MANUAL,
+    SECTION_SOURCE_THIRD_LEVEL,
+)
 
 # Module4_updated.bas RGB fills
 HEADER_FILL = PatternFill(start_color="FFD9E1F2", end_color="FFD9E1F2", fill_type="solid")
@@ -41,6 +45,7 @@ TASK_FILL = PatternFill(start_color="FFDDEBF7", end_color="FFDDEBF7", fill_type=
 REASON_LABEL_FONT = Font(bold=True, size=8, italic=True)
 DUP_FILL = PatternFill(start_color="FFD9D9D9", end_color="FFD9D9D9", fill_type="solid")
 PROBLEM_FILL = PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
+EXACT_SECTION_FILL = PatternFill(start_color="FFC6EFCE", end_color="FFC6EFCE", fill_type="solid")
 
 PRICE_NUMBER_FORMAT = "#,##0.00"
 HEADER_FONT = Font(bold=True, size=9)
@@ -191,7 +196,7 @@ def write_run_result(
                 header_row or output_columns.analog_start,
                 last_data_row,
                 output_columns.analog_start,
-                last_output_column,
+                max(last_output_column, worksheet.max_column),
             )
         if analog_plan.columns:
             _write_analog_headers(
@@ -829,6 +834,8 @@ def _write_row(
         section_cell = worksheet.cell(row=row_number, column=columns.section)
         section_cell.number_format = "@"
         section_cell.value = row.section_code
+        if row.section_source in {SECTION_SOURCE_MANUAL, SECTION_SOURCE_THIRD_LEVEL}:
+            section_cell.fill = EXACT_SECTION_FILL
 
     _write_average_formula(
         worksheet,

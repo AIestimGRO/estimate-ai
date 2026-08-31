@@ -23,7 +23,7 @@ from core.tkp_ingest import (
     parse_tkp_catalog_workbook,
 )
 
-TKP_DETAILS_VERSION = 1
+TKP_DETAILS_VERSION = 2
 
 TKP_SORT_COLUMNS = {
     "item_name": "tkp_items.item_name",
@@ -32,7 +32,10 @@ TKP_SORT_COLUMNS = {
     "rnmc_unit_price_no_vat": "tkp_items.rnmc_unit_price_no_vat",
     "winner_unit_price_no_vat": "tkp_items.winner_unit_price_no_vat",
     "winner_line_total_no_vat": "tkp_items.winner_line_total_no_vat",
+    "reserve_unit_price_no_vat": "tkp_items.reserve_unit_price_no_vat",
+    "reserve_line_total_no_vat": "tkp_items.reserve_line_total_no_vat",
     "winner_name": "tkp_items.winner_name",
+    "reserve_name": "tkp_items.reserve_name",
     "task_no": "tkp_items.task_no",
     "request_date": "tkp_items.request_date",
     "customer": "tkp_items.customer",
@@ -68,6 +71,9 @@ class TkpSourceRecord:
     procedure_name: str
     winner_name: str
     winner_total_no_vat: float | None
+    reserve_name: str
+    reserve_total_no_vat: float | None
+    reserve_method: str
     item_count: int
     imported_at: str
 
@@ -110,6 +116,19 @@ class TkpItemRecord:
     winner_block_uin: str
     winner_block_total_vat: float | None
     winner_block_reason: str
+    reserve_unit_price_no_vat: float | None
+    reserve_line_total_no_vat: float | None
+    reserve_name: str
+    reserve_inn: str
+    reserve_uin: str
+    reserve_group_index: int
+    reserve_start_col: int
+    reserve_start_col_letter: str
+    reserve_unit_header: str
+    reserve_total_header: str
+    reserve_method: str
+    wor_schema: str
+    quality_flags: str
 
 
 @dataclass(frozen=True)
@@ -217,8 +236,10 @@ def _upsert_source_file(
             parse_status, parse_message, task_no, request_date, customer,
             general_contractor, procedure_name, winner_name, winner_inn,
             winner_uin, winner_total_no_vat, winner_total_vat,
-            rnmc_total_no_vat, details_version, item_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            rnmc_total_no_vat, reserve_name, reserve_inn, reserve_uin,
+            reserve_total_no_vat, reserve_total_vat, reserve_method,
+            details_version, item_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             source_file.run_id,
@@ -239,6 +260,12 @@ def _upsert_source_file(
             source_file.winner_total_no_vat,
             source_file.winner_total_vat,
             source_file.rnmc_total_no_vat,
+            source_file.reserve_name,
+            source_file.reserve_inn,
+            source_file.reserve_uin,
+            source_file.reserve_total_no_vat,
+            source_file.reserve_total_vat,
+            source_file.reserve_method,
             TKP_DETAILS_VERSION,
             len(items),
         ),
@@ -259,8 +286,12 @@ def _upsert_source_file(
                 winner_total_header, task_no, request_date, version,
                 customer, general_contractor, procedure_name,
                 winner_method, winner_block_name, winner_block_uin,
-                winner_block_total_vat, winner_block_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                winner_block_total_vat, winner_block_reason,
+                reserve_unit_price_no_vat, reserve_line_total_no_vat,
+                reserve_name, reserve_inn, reserve_uin, reserve_group_index,
+                reserve_start_col, reserve_start_col_letter, reserve_unit_header,
+                reserve_total_header, reserve_method, wor_schema, quality_flags
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_id,
@@ -296,6 +327,19 @@ def _upsert_source_file(
                 item.winner_block_uin,
                 item.winner_block_total_vat,
                 item.winner_block_reason,
+                item.reserve_unit_price_no_vat,
+                item.reserve_line_total_no_vat,
+                item.reserve_name,
+                item.reserve_inn,
+                item.reserve_uin,
+                item.reserve_group_index,
+                item.reserve_start_col,
+                item.reserve_start_col_letter,
+                item.reserve_unit_header,
+                item.reserve_total_header,
+                item.reserve_method,
+                item.wor_schema,
+                item.quality_flags,
             ),
         )
 
@@ -307,7 +351,8 @@ def list_tkp_sources(connection: sqlite3.Connection) -> list[TkpSourceRecord]:
         """
         SELECT id, run_id, file_name, file_path, modified_date, parse_status,
                parse_message, task_no, customer, procedure_name, winner_name,
-               winner_total_no_vat, item_count, imported_at
+               winner_total_no_vat, reserve_name, reserve_total_no_vat,
+               reserve_method, item_count, imported_at
         FROM tkp_sources
         ORDER BY imported_at DESC, id DESC
         """
@@ -326,6 +371,9 @@ def list_tkp_sources(connection: sqlite3.Connection) -> list[TkpSourceRecord]:
             procedure_name=str(row["procedure_name"]),
             winner_name=str(row["winner_name"]),
             winner_total_no_vat=row["winner_total_no_vat"],
+            reserve_name=str(row["reserve_name"]),
+            reserve_total_no_vat=row["reserve_total_no_vat"],
+            reserve_method=str(row["reserve_method"]),
             item_count=int(row["item_count"]),
             imported_at=str(row["imported_at"]),
         )
@@ -424,7 +472,14 @@ def _tkp_item_select_sql() -> str:
                tkp_items.general_contractor, tkp_items.procedure_name,
                tkp_items.winner_method, tkp_items.winner_block_name,
                tkp_items.winner_block_uin, tkp_items.winner_block_total_vat,
-               tkp_items.winner_block_reason
+               tkp_items.winner_block_reason,
+               tkp_items.reserve_unit_price_no_vat,
+               tkp_items.reserve_line_total_no_vat, tkp_items.reserve_name,
+               tkp_items.reserve_inn, tkp_items.reserve_uin,
+               tkp_items.reserve_group_index, tkp_items.reserve_start_col,
+               tkp_items.reserve_start_col_letter, tkp_items.reserve_unit_header,
+               tkp_items.reserve_total_header, tkp_items.reserve_method,
+               tkp_items.wor_schema, tkp_items.quality_flags
         FROM tkp_items
         JOIN tkp_sources ON tkp_sources.id = tkp_items.source_id
     """
@@ -455,6 +510,7 @@ def _tkp_catalog_where(filters: dict[str, str]) -> tuple[str, tuple[object, ...]
         columns = (
             "tkp_items.item_name", "tkp_items.unit", "tkp_items.task_no",
             "tkp_items.winner_name", "tkp_items.winner_inn", "tkp_items.winner_uin",
+            "tkp_items.reserve_name", "tkp_items.reserve_inn", "tkp_items.reserve_uin",
             "tkp_items.customer", "tkp_items.general_contractor",
             "tkp_items.procedure_name", "tkp_sources.file_name",
         )
@@ -500,6 +556,19 @@ def _tkp_item_record(row: sqlite3.Row) -> TkpItemRecord:
         winner_block_uin=str(row["winner_block_uin"]),
         winner_block_total_vat=row["winner_block_total_vat"],
         winner_block_reason=str(row["winner_block_reason"]),
+        reserve_unit_price_no_vat=row["reserve_unit_price_no_vat"],
+        reserve_line_total_no_vat=row["reserve_line_total_no_vat"],
+        reserve_name=str(row["reserve_name"]),
+        reserve_inn=str(row["reserve_inn"]),
+        reserve_uin=str(row["reserve_uin"]),
+        reserve_group_index=int(row["reserve_group_index"]),
+        reserve_start_col=int(row["reserve_start_col"]),
+        reserve_start_col_letter=str(row["reserve_start_col_letter"]),
+        reserve_unit_header=str(row["reserve_unit_header"]),
+        reserve_total_header=str(row["reserve_total_header"]),
+        reserve_method=str(row["reserve_method"]),
+        wor_schema=str(row["wor_schema"]),
+        quality_flags=str(row["quality_flags"]),
     )
 
 

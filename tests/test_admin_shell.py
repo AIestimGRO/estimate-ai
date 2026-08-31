@@ -44,3 +44,26 @@ def test_index_links_to_admin(tmp_path) -> None:
 
     assert response.status_code == 200
     assert 'href="/admin"' in response.text
+
+
+def test_admin_settings_can_add_manual_section_mapping(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/section-mappings/add",
+            data={
+                "code": "\u0413\u042d\u0421\u041d20-06-021-01",
+                "section_code": "11",
+                "comment": "manual",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+        page = client.get("/admin/settings")
+
+    assert page.status_code == 200
+    assert "\u0413\u042d\u0421\u041d20-06-021-01" in page.text
+    assert "11" in page.text

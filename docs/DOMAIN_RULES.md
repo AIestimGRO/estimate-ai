@@ -187,12 +187,22 @@ not an afterthought.
 These are presentation/workflow details, not pure matching logic, but they
 encode business rules that must be preserved:
 
-- **Section code** (`ResolveSectionCode`, Module3): derived from the GESN
-  prefix via a hardcoded prefix→section lookup table. A small set of
-  prefixes (`ГЭСН09, ГЭСН27, ГЭСН28, ГЭСН46, ГЭСНР67`) are
-  "demolition-priority": if the row IS demolition, section is forced to
-  `08` regardless of the table; if NOT demolition, the table's non-`08`
-  entry is preferred if one exists, else falls back to `08`.
+- **Section code** (`ResolveSectionCode`, 2026-08 rule): resolved in two
+  stages. First, the full normalized `ГЭСН/ФЕР/ТЕР` code is converted to a
+  canonical `ГЭСН...` form and looked up in the read-only third-level EKR
+  map (`core/data/ekr_third_level_sections.json`, generated from
+  `увязывание ГЭСНов с 3-м уровнем ЕКР для Собственных сил.xlsx`). If a
+  full-code match is found, its `ЕКРxx` section wins. If not found and
+  the code is a commissioning volume (`ГЭСНп` / canonicalized `ФЕРп` /
+  `ТЕРп`), section `17` is assigned before the old fallback is checked.
+  Otherwise, the resolver falls back to the previous GESN-prefix mapping
+  from `ЕКР - ГЭСН увязка с доработкой от СМУ.xlsx`: when one GESN
+  volume is linked to several sections and one of them is the demolition
+  section, demolition rows prefer the demolition section while
+  non-demolition rows prefer the non-demolition section. Section-code
+  cells resolved by the exact third-level map are filled light green in
+  the output workbook so reviewers can distinguish exact-map hits from
+  fallback or commissioning-rule assignments.
 - **`/КР` suffix** is appended to the code column for any row that ended up
   with at least one analog. It is added only if not already present, after
   stripping CR/LF/tab/nbsp from the base code. **(2026-07 change)** For a

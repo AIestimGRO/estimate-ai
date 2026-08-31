@@ -13,7 +13,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from app.services.catalog_source import CatalogNotAvailableError, load_catalog_for_run
+from app.services.catalog_source import ALL_SOURCE_NAME, CatalogNotAvailableError, load_catalog_for_run
 from app.services.read_estimate import METHOD_TEMPLATE, EstimateData, load_estimate
 from app.services.run_matching import EstimateRowResult, MatchingRunResult, run_matching
 from core.excel_io import Settings
@@ -36,6 +36,7 @@ from core.storage import (
     count_tkp_items,
     list_tkp_items,
     load_gesn_exceptions,
+    load_manual_section_map,
     persist_flagged_risks,
 )
 from core.tkp_matching import TkpCatalogEntry, build_tkp_catalog_index
@@ -69,7 +70,7 @@ class EstimatePreview:
     Read-only: resolves the sheet and the regional coefficient/region exactly
     the way `run_and_write` will, but does not touch the catalog or run any
     matching. Used by the web UI's confirmation screen (2026-07 rule:
-    "защита от дурака" -- the detected region/coefficient must be shown and
+    "Р·Р°С‰РёС‚Р° РѕС‚ РґСѓСЂР°РєР°" -- the detected region/coefficient must be shown and
     editable before processing, not silently applied).
     """
 
@@ -118,7 +119,7 @@ def run_and_write(
     output_path: str | Path | None = None,
     *,
     settings: Settings | None = None,
-    catalog_source_name: str = "main",
+    catalog_source_name: str = ALL_SOURCE_NAME,
     database_path: str | Path | None = None,
     selected_sheet_title: str | None = None,
     name_exclusion_rules: list[NameExclusionRule] | None = None,
@@ -131,6 +132,7 @@ def run_and_write(
     target_region: str | None = None,
     layout_config: LayoutConfig | None = None,
     use_tkp_analogs: bool = False,
+    manual_section_mappings: dict[str, str] | None = None,
 ) -> RunAndWriteResult:
     """Run matching over the files and write the result into a `WA` copy."""
     active_settings = Settings() if settings is None else settings
@@ -147,6 +149,10 @@ def run_and_write(
     )
 
     resolved_exceptions = _resolve_gesn_exceptions(gesn_exceptions, database_path)
+    resolved_manual_sections = _resolve_manual_section_mappings(
+        manual_section_mappings,
+        database_path,
+    )
 
     catalog = load_catalog_for_run(
         catalog_path,
@@ -182,6 +188,7 @@ def run_and_write(
         regional_coefficient=coefficient,
         tkp_catalog_index=tkp_catalog_index,
         use_tkp_analogs=use_tkp_analogs,
+        manual_section_mappings=resolved_manual_sections,
     )
 
     _persist_risk_log(
@@ -259,7 +266,7 @@ def _resolve_macro_settings(
     macro = load_default_macro_settings()
     rules = macro.name_exclusion_rules if name_exclusion_rules is None else name_exclusion_rules
     colors = macro.task_color_entries if task_color_entries is None else task_color_entries
-    macro_path = macro.workbook_path if (name_exclusion_rules is None or task_color_entries is None) else None
+    macro_path = macro.workbook_path if name_exclusion_rules is None else None
     return rules, colors, macro_path
 
 
@@ -334,6 +341,23 @@ def _resolve_output_path(
 
     source = Path(estimate_path)
     return source.with_name(f"{source.stem}{WA_SUFFIX}{source.suffix}")
+
+
+def _resolve_manual_section_mappings(
+    manual_section_mappings: dict[str, str] | None,
+    database_path: str | Path | None,
+) -> dict[str, str]:
+    if manual_section_mappings is not None:
+        return manual_section_mappings
+    if not database_is_available(database_path):
+        return {}
+
+    connection = connect(database_path)
+    try:
+        init_database(connection)
+        return load_manual_section_map(connection)
+    finally:
+        connection.close()
 
 
 def _resolve_gesn_exceptions(

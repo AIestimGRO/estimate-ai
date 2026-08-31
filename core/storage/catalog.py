@@ -351,6 +351,23 @@ def list_catalog_rows(
     return [_row_to_catalog_row(row) for row in rows]
 
 
+def list_all_catalog_rows(connection: sqlite3.Connection) -> list[CatalogRow]:
+    """Return all RNMC catalog rows across every catalog source."""
+    rows = connection.execute(
+        """
+        SELECT
+            task_id, region, code, unit, quantity, work_name, price,
+            price_original, price_zlvl, added_date,
+            total_price, labor_unit, labor_total,
+            machine_labor_unit, machine_labor_total, regional_coefficient,
+            lsr_quarter, planned_start, planned_finish, source_filename
+        FROM catalog_items
+        ORDER BY id
+        """
+    ).fetchall()
+    return [_row_to_catalog_row(row) for row in rows]
+
+
 def count_catalog_rows(
     connection: sqlite3.Connection,
     *,
@@ -364,6 +381,16 @@ def count_catalog_rows(
         WHERE catalog_sources.name = ?
         """,
         (source_name,),
+    ).fetchone()
+    return 0 if row is None else int(row["row_count"])
+
+
+def count_all_catalog_rows(connection: sqlite3.Connection) -> int:
+    row = connection.execute(
+        """
+        SELECT COUNT(*) AS row_count
+        FROM catalog_items
+        """
     ).fetchone()
     return 0 if row is None else int(row["row_count"])
 

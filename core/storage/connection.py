@@ -94,6 +94,25 @@ def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "tkp_items", "winner_block_uin", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "tkp_items", "winner_block_total_vat", "REAL")
     _ensure_column(connection, "tkp_items", "winner_block_reason", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_sources", "reserve_name", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_sources", "reserve_inn", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_sources", "reserve_uin", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_sources", "reserve_total_no_vat", "REAL")
+    _ensure_column(connection, "tkp_sources", "reserve_total_vat", "REAL")
+    _ensure_column(connection, "tkp_sources", "reserve_method", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "reserve_unit_price_no_vat", "REAL")
+    _ensure_column(connection, "tkp_items", "reserve_line_total_no_vat", "REAL")
+    _ensure_column(connection, "tkp_items", "reserve_name", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "reserve_inn", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "reserve_uin", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "reserve_group_index", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(connection, "tkp_items", "reserve_start_col", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(connection, "tkp_items", "reserve_start_col_letter", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "reserve_unit_header", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "reserve_total_header", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "reserve_method", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "wor_schema", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "tkp_items", "quality_flags", "TEXT NOT NULL DEFAULT ''")
     connection.execute("UPDATE catalog_items SET price_original = price WHERE price_original IS NULL")
     connection.execute("UPDATE catalog_items SET price_zlvl = price WHERE price_zlvl IS NULL")
     connection.execute(
@@ -104,7 +123,52 @@ def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
         "UPDATE imported_files SET filename_key = lower(filename) "
         "WHERE filename_key = ''"
     )
+    _ensure_manual_section_mappings_table(connection)
     _seed_default_highlight_reasons(connection)
+    _seed_default_manual_section_mappings(connection)
+
+
+def _ensure_manual_section_mappings_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS manual_section_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            code_norm TEXT NOT NULL UNIQUE,
+            section_code TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            comment TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_manual_section_mappings_enabled
+        ON manual_section_mappings(enabled)
+        """
+    )
+
+
+def _seed_default_manual_section_mappings(connection: sqlite3.Connection) -> None:
+    from core.sections import CanonicalGesnCode, GESN
+
+    code = f"{GESN}20-06-021-01"
+    code_norm = CanonicalGesnCode(code)
+    existing = connection.execute(
+        "SELECT 1 FROM manual_section_mappings WHERE code_norm = ?",
+        (code_norm,),
+    ).fetchone()
+    if existing is not None:
+        return
+    connection.execute(
+        """
+        INSERT INTO manual_section_mappings (
+            code, code_norm, section_code, enabled, comment
+        ) VALUES (?, ?, ?, 1, ?)
+        """,
+        (code, code_norm, "11", "Initial manual EKR section mapping"),
+    )
 
 
 def _seed_default_highlight_reasons(connection: sqlite3.Connection) -> None:

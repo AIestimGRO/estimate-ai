@@ -8,6 +8,7 @@ import pytest
 from openpyxl import Workbook
 
 from app.services.catalog_source import (
+    ALL_SOURCE_NAME,
     CatalogNotAvailableError,
     database_has_catalog,
     load_catalog_for_run,
@@ -60,6 +61,57 @@ def test_load_catalog_from_database_when_no_path(tmp_path: Path) -> None:
     assert result.row_count == 1
     assert result.source_label == "database:main"
     assert result.rows[0].code == CODE
+
+
+
+
+def test_load_all_catalog_sources_for_matching(tmp_path: Path) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    main_catalog = tmp_path / "main_catalog.xlsx"
+    zip_catalog = tmp_path / "zip_catalog.xlsx"
+    _write_catalog_workbook(main_catalog)
+    _write_catalog_workbook(zip_catalog)
+
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        import_catalog_from_excel(connection, main_catalog, source_name="main")
+        import_catalog_from_excel(connection, zip_catalog, source_name="rnmc_zip_upload")
+    finally:
+        connection.close()
+
+    result = load_catalog_for_run(
+        None,
+        database_path=db_path,
+        source_name=ALL_SOURCE_NAME,
+    )
+
+    assert result.row_count == 2
+    assert result.source_label == "database:all"
+    assert [row.code for row in result.rows] == [CODE, CODE]
+
+
+def test_database_has_all_catalog_sources(tmp_path: Path) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    catalog_path = tmp_path / "catalog.xlsx"
+    _write_catalog_workbook(catalog_path)
+
+    assert database_has_catalog(
+        database_path=db_path,
+        source_name=ALL_SOURCE_NAME,
+    ) is False
+
+    connection = connect(db_path)
+    try:
+        init_database(connection)
+        import_catalog_from_excel(connection, catalog_path, source_name="rnmc_zip_upload")
+    finally:
+        connection.close()
+
+    assert database_has_catalog(
+        database_path=db_path,
+        source_name=ALL_SOURCE_NAME,
+    ) is True
 
 
 def test_excel_upload_overrides_database(tmp_path: Path) -> None:

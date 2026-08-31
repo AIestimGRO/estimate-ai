@@ -36,7 +36,7 @@ from core.risk import (
     build_dem_key,
     build_gesn_exception_key,
 )
-from core.sections import ResolveSectionCode
+from core.sections import ResolveSectionCodeWithSource
 from core.tkp_matching import (
     TkpCatalogEntry,
     TkpMatch,
@@ -66,6 +66,7 @@ class EstimateRowResult:
     kr_code: str | None
     exception_key: str
     status: str
+    section_source: str = ""
     tkp_match: TkpMatch | None = None
 
     @property
@@ -103,6 +104,7 @@ def run_matching(
     regional_coefficient: float = 1.0,
     tkp_catalog_index: list[TkpCatalogEntry] | None = None,
     use_tkp_analogs: bool = False,
+    manual_section_mappings: dict[str, str] | None = None,
 ) -> MatchingRunResult:
     """Run matching for pre-read structured rows (no Excel I/O here)."""
     rules = [] if name_exclusion_rules is None else name_exclusion_rules
@@ -128,6 +130,7 @@ def run_matching(
             regional_coefficient,
             tkp_index,
             use_tkp_analogs,
+            manual_section_mappings,
         )
         row_results.append(row_result)
 
@@ -159,6 +162,7 @@ def run_matching_from_files(
     regional_coefficient: float = 1.0,
     tkp_catalog_index: list[TkpCatalogEntry] | None = None,
     use_tkp_analogs: bool = False,
+    manual_section_mappings: dict[str, str] | None = None,
 ) -> MatchingRunResult:
     """Read catalog/estimate workbooks, then run matching over their rows."""
     catalog_rows = read_catalog_rows(catalog_path, settings)
@@ -174,6 +178,7 @@ def run_matching_from_files(
         regional_coefficient=regional_coefficient,
         tkp_catalog_index=tkp_catalog_index,
         use_tkp_analogs=use_tkp_analogs,
+        manual_section_mappings=manual_section_mappings,
     )
 
 
@@ -188,6 +193,7 @@ def _match_one_row(
     regional_coefficient: float,
     tkp_catalog_index: list[TkpCatalogEntry],
     use_tkp_analogs: bool,
+    manual_section_mappings: dict[str, str] | None,
 ) -> EstimateRowResult:
     norm_code = NormCode(estimate_row.code)
     norm_unit = NormUnit(estimate_row.unit)
@@ -215,8 +221,13 @@ def _match_one_row(
     )
 
     section_code = ""
+    section_source = ""
     if norm_code != "":
-        section_code = ResolveSectionCode(estimate_row.code, is_demolition)
+        section_code, section_source = ResolveSectionCodeWithSource(
+            estimate_row.code,
+            is_demolition,
+            manual_section_mappings=manual_section_mappings,
+        )
 
     tkp_match: TkpMatch | None = None
     if use_tkp_analogs and tkp_catalog_index:
@@ -257,6 +268,7 @@ def _match_one_row(
         kr_code=kr_code,
         exception_key=exception_key,
         status=match_result.reason,
+        section_source=section_source,
         tkp_match=tkp_match,
     )
 

@@ -7,9 +7,17 @@ from pathlib import Path
 
 from core.catalog import CatalogRow
 from core.excel_io import Settings, read_catalog_rows
-from core.storage import connect, count_catalog_rows, init_database, list_catalog_rows
+from core.storage import (
+    connect,
+    count_all_catalog_rows,
+    count_catalog_rows,
+    init_database,
+    list_all_catalog_rows,
+    list_catalog_rows,
+)
 
 DEFAULT_SOURCE_NAME = "main"
+ALL_SOURCE_NAME = "__all__"
 
 
 class CatalogNotAvailableError(Exception):
@@ -34,6 +42,8 @@ def database_has_catalog(
     connection = connect(database_path)
     try:
         init_database(connection)
+        if source_name == ALL_SOURCE_NAME:
+            return count_all_catalog_rows(connection) > 0
         return count_catalog_rows(connection, source_name=source_name) > 0
     except OSError:
         return False
@@ -80,18 +90,24 @@ def load_catalog_for_run(
     connection = connect(database_path)
     try:
         init_database(connection)
-        row_count = count_catalog_rows(connection, source_name=source_name)
+        if source_name == ALL_SOURCE_NAME:
+            row_count = count_all_catalog_rows(connection)
+            rows = list_all_catalog_rows(connection) if row_count > 0 else []
+            source_label = "database:all"
+        else:
+            row_count = count_catalog_rows(connection, source_name=source_name)
+            rows = list_catalog_rows(connection, source_name=source_name) if row_count > 0 else []
+            source_label = f"database:{source_name}"
         if row_count <= 0:
             raise CatalogNotAvailableError(
                 f"catalog source {source_name!r} is empty; upload Excel or run import-catalog"
             )
-        rows = list_catalog_rows(connection, source_name=source_name)
     finally:
         connection.close()
 
     return CatalogLoadResult(
         rows=rows,
-        source_label=f"database:{source_name}",
+        source_label=source_label,
         row_count=row_count,
     )
 

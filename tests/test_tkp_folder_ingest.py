@@ -83,6 +83,11 @@ def _source_bytes(*, winner_price: float = 90.0) -> bytes:
     sheet["E83"] = "=O17"
     sheet["G83"] = "=P42"
     sheet["H83"] = "\u041b\u0443\u0447\u0448\u0430\u044f \u0446\u0435\u043d\u0430"
+    sheet["A84"] = "10.2."
+    sheet["B84"] = "\u0420\u0435\u0437\u0435\u0440\u0432\u043d\u044b\u0439 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044c \u041a\u041f"
+    sheet["E84"] = "=K17"
+    sheet["G84"] = "=L42"
+    sheet["H84"] = "\u0420\u0435\u0437\u0435\u0440\u0432"
 
     buffer = BytesIO()
     workbook.save(buffer)
@@ -112,6 +117,87 @@ def test_original_kl_parser_finds_structural_sheet_and_winner(tmp_path) -> None:
     assert item.winner_start_col == 15
     assert item.winner_unit_price_no_vat == 90.0
     assert item.rnmc_unit_price_no_vat == 95.0
+    assert item.reserve_name == OTHER
+    assert item.reserve_method == "block10_reserve"
+    assert item.reserve_start_col == 11
+    assert item.reserve_unit_price_no_vat == 100.0
+
+
+
+
+def test_original_kl_parser_reads_lot_schema_unit_prices(tmp_path) -> None:
+    source = tmp_path / "lot-schema.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = KL_SHEET
+    sheet["B1"] = "Монтаж объекта"
+    for row, code, label, value in (
+        (6, "1.1.", "Дата", datetime(2026, 7, 1)),
+        (7, "1.2.", "Версия", 1),
+        (8, "1.3.", "Номер задачи", 12345),
+    ):
+        sheet.cell(row, 1, code)
+        sheet.cell(row, 2, label)
+        sheet.cell(row, 13, value)
+        sheet.cell(row, 25, value)
+    sheet["A17"] = "2.2."
+    sheet["B17"] = "Наименование"
+    sheet["M17"] = WINNER
+    sheet["Y17"] = OTHER
+    sheet["A18"] = "2.3."
+    sheet["B18"] = "ИНН"
+    sheet["M18"] = "2222222222"
+    sheet["Y18"] = "1111111111"
+    sheet["A37"] = 4
+    sheet["B37"] = "Блок ВОР и Цена"
+    sheet["I37"] = "цена за ед., без НДС"
+    sheet["J37"] = "ед.изм."
+    sheet["K37"] = "кол-во"
+    sheet["L37"] = "Ст-ть всего, без НДС"
+    sheet["M37"] = "цена за ед., без НДС"
+    sheet["N37"] = "Ст-ть всего, без НДС"
+    sheet["Y37"] = "цена за ед., без НДС"
+    sheet["Z37"] = "Ст-ть всего, без НДС"
+    sheet["A38"] = "4.1.1"
+    sheet["B38"] = ITEM
+    sheet["C38"] = "шт"
+    sheet["D38"] = 10
+    sheet["I38"] = 95
+    sheet["J38"] = "шт"
+    sheet["K38"] = 10
+    sheet["L38"] = 950
+    sheet["M38"] = 90
+    sheet["N38"] = 900
+    sheet["Y38"] = 100
+    sheet["Z38"] = 1000
+    sheet["A39"] = "4.3."
+    sheet["B39"] = "Итоговая сумма предложения, руб без НДС"
+    sheet["N39"] = 900
+    sheet["Z39"] = 1000
+    sheet["A83"] = "10.1."
+    sheet["B83"] = "Рекомендуемый победитель КП"
+    sheet["E83"] = "=M17"
+    sheet["A84"] = "10.2."
+    sheet["B84"] = "Резервный победитель КП"
+    sheet["E84"] = "=Y17"
+    workbook.save(source)
+    workbook.close()
+
+    result = parse_tkp_source_workbook(source)
+
+    assert result.files[0].parse_status == "OK"
+    assert result.files[0].reserve_name == OTHER
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.wor_schema == "rnmc_lot_i_l"
+    assert item.unit == "шт"
+    assert item.qty == 10.0
+    assert item.rnmc_unit_price_no_vat == 95.0
+    assert item.rnmc_line_total_no_vat == 950.0
+    assert item.winner_start_col == 13
+    assert item.winner_unit_price_no_vat == 90.0
+    assert item.reserve_start_col == 25
+    assert item.reserve_unit_price_no_vat == 100.0
 
 
 def test_content_revision_skips_unchanged_and_updates_changed_file(tmp_path) -> None:

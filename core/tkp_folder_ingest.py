@@ -74,6 +74,19 @@ class _Participant:
     index: int
     start_col: int
     name: str
+    name_col: int = 0
+
+
+@dataclass(frozen=True)
+class _WorLayout:
+    schema_name: str
+    code_col: int
+    item_name_col: int
+    unit_col: int
+    qty_col: int
+    rnmc_unit_price_col: int
+    rnmc_line_total_col: int
+    first_participant_col: int
 
 
 class _WorkbookPair:
@@ -183,12 +196,22 @@ def parse_tkp_source_workbook(
         reader = _SheetReader(formula_sheet, value_sheet)
         start_row = _find_wor_start(reader)
         end_row, end_method = _find_wor_end(reader, start_row)
-        participants = _find_participants(reader, start_row, end_row)
+        layout = _detect_wor_layout(reader, start_row)
+        participants = _find_participants(reader, start_row, end_row, layout)
         winner, winner_method = _determine_winner(
             reader,
             participants,
             start_row,
             end_row,
+            layout,
+        )
+        reserve, reserve_method = _determine_reserve(
+            reader,
+            participants,
+            winner,
+            start_row,
+            end_row,
+            layout,
         )
 
         problems: list[str] = []
@@ -215,7 +238,8 @@ def parse_tkp_source_workbook(
         general_contractor = reader.text_at_code("1.7", metadata_col)
         procedure_name = _first_nonblank(reader.text(1, 2), reader.text(2, 2))
 
-        recommended = _recommended_fields(reader)
+        recommended = _recommended_fields(reader, (("10.1", "block10"), ("8.1", "block8")))
+        reserve_recommended = _recommended_fields(reader, (("10.2", "block10_reserve"), ("8.2", "block8_reserve")))
         winner_name = winner.name if winner is not None else ""
         winner_inn = (
             reader.text_at_code("2.3", winner.start_col)
@@ -228,25 +252,36 @@ def parse_tkp_source_workbook(
         )
         total_no_vat_row = _find_total_row(reader, start_row + 1, no_vat=True)
         total_vat_row = _find_total_row(reader, start_row + 1, no_vat=False)
-        winner_total_no_vat = (
-            reader.number(total_no_vat_row, winner.start_col + 1)
-            if winner is not None and total_no_vat_row
-            else None
+        winner_total_no_vat = _participant_total_no_vat(
+            reader, winner, total_no_vat_row, start_row, end_row, layout
         )
-        if winner is not None and winner_total_no_vat is None:
-            winner_total_no_vat = _sum_wor_totals(
-                reader,
-                start_row,
-                end_row,
-                winner.start_col,
-            )
         winner_total_vat = (
             reader.number(total_vat_row, winner.start_col + 1)
             if winner is not None and total_vat_row
             else None
         )
+        reserve_total_no_vat = _participant_total_no_vat(
+            reader, reserve, total_no_vat_row, start_row, end_row, layout
+        )
+        reserve_total_vat = (
+            reader.number(total_vat_row, reserve.start_col + 1)
+            if reserve is not None and total_vat_row
+            else None
+        )
         rnmc_total_no_vat = (
-            reader.number(total_no_vat_row, 10) if total_no_vat_row else None
+            reader.number(total_no_vat_row, layout.rnmc_line_total_col)
+            if total_no_vat_row
+            else None
+        )
+        reserve_name = reserve.name if reserve is not None else ""
+        reserve_inn = (
+            _participant_text_at_code(reader, "2.3", reserve)
+            if reserve is not None
+            else ""
+        )
+        reserve_uin = _first_nonblank(
+            _text(reserve_recommended["uin"]),
+            _participant_text_at_code(reader, "1.4", reserve) if reserve is not None else "",
         )
 
         parsed_items: list[TkpItem] = []
@@ -273,6 +308,11 @@ def parse_tkp_source_workbook(
                 general_contractor=general_contractor,
                 procedure_name=procedure_name,
                 recommended=recommended,
+                reserve=reserve,
+                reserve_method=reserve_method,
+                reserve_inn=reserve_inn,
+                reserve_uin=reserve_uin,
+                layout=layout,
             )
             if not parsed_items:
                 problems.append("No WOR positions found.")
@@ -298,6 +338,12 @@ def parse_tkp_source_workbook(
             winner_total_no_vat=winner_total_no_vat,
             winner_total_vat=winner_total_vat,
             rnmc_total_no_vat=rnmc_total_no_vat,
+            reserve_name=reserve_name,
+            reserve_inn=reserve_inn,
+            reserve_uin=reserve_uin,
+            reserve_total_no_vat=reserve_total_no_vat,
+            reserve_total_vat=reserve_total_vat,
+            reserve_method=reserve_method,
         )
         return TkpCatalogParseResult(
             run_ids=(run_id,),
@@ -521,35 +567,139 @@ def _find_total_row(reader: _SheetReader, from_row: int, *, no_vat: bool) -> int
     return 0
 
 
+def _detect_wor_layout(reader: _SheetReader, start_row: int) -> _WorLayout:
+    code_col = 1
+    item_name_col = 2
+    unit_col = 3
+    qty_col = 4
+    if (
+        start_row > 0
+        and _looks_like_price_header(reader.raw(start_row, 9))
+        and _looks_like_unit_header(reader.raw(start_row, 10))
+        and _looks_like_qty_header(reader.raw(start_row, 11))
+        and _looks_like_total_header(reader.raw(start_row, 12))
+    ):
+        return _WorLayout(
+            schema_name="rnmc_lot_i_l",
+            code_col=code_col,
+            item_name_col=item_name_col,
+            unit_col=unit_col,
+            qty_col=qty_col,
+            rnmc_unit_price_col=9,
+            rnmc_line_total_col=12,
+            first_participant_col=13,
+        )
+    if (
+        start_row > 0
+        and _looks_like_price_header(reader.raw(start_row, 9))
+        and _looks_like_total_header(reader.raw(start_row, 10))
+    ):
+        return _WorLayout(
+            schema_name="rnmc_i_j",
+            code_col=code_col,
+            item_name_col=item_name_col,
+            unit_col=unit_col,
+            qty_col=qty_col,
+            rnmc_unit_price_col=9,
+            rnmc_line_total_col=10,
+            first_participant_col=11,
+        )
+    if (
+        start_row > 0
+        and _looks_like_price_header(reader.raw(start_row, 11))
+        and _looks_like_total_header(reader.raw(start_row, 12))
+        and _has_numeric_pair(reader, start_row, 9, 10)
+    ):
+        return _WorLayout(
+            schema_name="rnmc_i_j_inferred",
+            code_col=code_col,
+            item_name_col=item_name_col,
+            unit_col=unit_col,
+            qty_col=qty_col,
+            rnmc_unit_price_col=9,
+            rnmc_line_total_col=10,
+            first_participant_col=11,
+        )
+    for col in range(5, min(reader.max_col, 80)):
+        if (
+            _looks_like_price_header(reader.raw(start_row, col))
+            and _looks_like_total_header(reader.raw(start_row, col + 1))
+        ):
+            return _WorLayout(
+                schema_name="detected_adjacent",
+                code_col=code_col,
+                item_name_col=item_name_col,
+                unit_col=unit_col,
+                qty_col=qty_col,
+                rnmc_unit_price_col=col,
+                rnmc_line_total_col=col + 1,
+                first_participant_col=col + 2,
+            )
+    return _WorLayout(
+        schema_name="legacy_default",
+        code_col=code_col,
+        item_name_col=item_name_col,
+        unit_col=unit_col,
+        qty_col=qty_col,
+        rnmc_unit_price_col=9,
+        rnmc_line_total_col=10,
+        first_participant_col=11,
+    )
+
+
+def _has_numeric_pair(
+    reader: _SheetReader,
+    start_row: int,
+    unit_col: int,
+    total_col: int,
+) -> bool:
+    for row in range(start_row + 1, min(reader.max_row, start_row + 80) + 1):
+        if reader.number(row, unit_col) is not None and reader.number(row, total_col) is not None:
+            return True
+    return False
+
+
 def _find_participants(
     reader: _SheetReader,
     start_row: int,
     end_row: int,
+    layout: _WorLayout,
 ) -> list[_Participant]:
+    if start_row <= 0:
+        return []
     name_row = reader.find_code_row("2.2")
     participants: list[_Participant] = []
-    for start_col in range(11, reader.max_col + 1, 4):
-        name = reader.text(name_row, start_col) if name_row else ""
-        header_pair = (
-            start_row > 0
-            and _looks_like_price_header(reader.raw(start_row, start_col))
+    last_name = ""
+    last_name_col = 0
+    for start_col in range(layout.first_participant_col, reader.max_col):
+        if not (
+            _looks_like_price_header(reader.raw(start_row, start_col))
             and _looks_like_total_header(reader.raw(start_row, start_col + 1))
-        )
+        ):
+            continue
+        if start_col in {layout.rnmc_unit_price_col, layout.rnmc_line_total_col}:
+            continue
         has_price = (
-            start_row > 0
-            and end_row > start_row
+            end_row > start_row
             and any(
                 reader.number(row, start_col) is not None
                 or reader.number(row, start_col + 1) is not None
                 for row in range(start_row + 1, end_row)
+                if _row_type(reader, row, layout) == "Position"
             )
         )
-        if name or (header_pair and has_price):
+        direct_name = reader.text(name_row, start_col) if name_row else ""
+        if direct_name:
+            last_name = direct_name
+            last_name_col = start_col
+        name = direct_name or last_name
+        if name or has_price:
             participants.append(
                 _Participant(
                     index=len(participants) + 1,
                     start_col=start_col,
                     name=name or f"ParticipantGroup_{len(participants) + 1}",
+                    name_col=start_col if direct_name else last_name_col,
                 )
             )
     return participants
@@ -560,6 +710,7 @@ def _determine_winner(
     participants: list[_Participant],
     start_row: int,
     end_row: int,
+    layout: _WorLayout,
 ) -> tuple[_Participant | None, str]:
     for code, method in (("10.1", "block10_recommended"), ("8.1", "block8_recommended")):
         row = reader.find_code_row(code)
@@ -586,9 +737,50 @@ def _determine_winner(
             start_row,
             end_row,
             participant.start_col,
+            layout,
         ),
     )
     return (winner, "min_wor_sum") if winner is not None else (None, "")
+
+
+def _determine_reserve(
+    reader: _SheetReader,
+    participants: list[_Participant],
+    winner: _Participant | None,
+    start_row: int,
+    end_row: int,
+    layout: _WorLayout,
+) -> tuple[_Participant | None, str]:
+    for code, method in (("10.2", "block10_reserve"), ("8.2", "block8_reserve")):
+        row = reader.find_code_row(code)
+        reserve = _winner_from_recommended_row(reader, row, participants)
+        if reserve is not None and reserve != winner:
+            return reserve, method
+    candidates = [participant for participant in participants if participant != winner]
+    if not candidates:
+        return None, ""
+
+    total_row = _find_total_row(reader, start_row + 1, no_vat=True)
+    reserve = _minimum_participant(
+        candidates,
+        lambda participant: reader.number(total_row, participant.start_col + 1)
+        if total_row
+        else None,
+    )
+    if reserve is not None:
+        return reserve, "inferred_second_min_total"
+
+    reserve = _minimum_participant(
+        candidates,
+        lambda participant: _sum_wor_totals(
+            reader,
+            start_row,
+            end_row,
+            participant.start_col,
+            layout,
+        ),
+    )
+    return (reserve, "inferred_second_min_wor_sum") if reserve is not None else (None, "")
 
 
 def _winner_from_recommended_row(
@@ -601,13 +793,6 @@ def _winner_from_recommended_row(
     recommended_name = reader.text(row, 5)
     row_text = _norm(reader.row_text(row))
     for participant in participants:
-        name = _norm(participant.name)
-        if name and (
-            _contains_either(_norm(recommended_name), name)
-            or _contains_either(row_text, name)
-        ):
-            return participant
-
         group_text = _norm(
             reader.row_text(
                 row,
@@ -616,6 +801,14 @@ def _winner_from_recommended_row(
             )
         )
         if _is_winner_marker(group_text):
+            return participant
+
+    for participant in participants:
+        name = _norm(participant.name)
+        if name and (
+            _contains_either(_norm(recommended_name), name)
+            or _contains_either(row_text, name)
+        ):
             return participant
 
     populated = [
@@ -648,13 +841,14 @@ def _sum_wor_totals(
     start_row: int,
     end_row: int,
     start_col: int,
+    layout: _WorLayout,
 ) -> float | None:
     if start_row <= 0 or end_row <= start_row:
         return None
     total = 0.0
     found = False
     for row in range(start_row + 1, end_row):
-        if _row_type(reader, row) != "Position":
+        if _row_type(reader, row, layout) != "Position":
             continue
         value = reader.number(row, start_col + 1)
         if value is not None:
@@ -663,8 +857,11 @@ def _sum_wor_totals(
     return total if found else None
 
 
-def _recommended_fields(reader: _SheetReader) -> dict[str, object]:
-    for code, source in (("10.1", "block10"), ("8.1", "block8")):
+def _recommended_fields(
+    reader: _SheetReader,
+    code_sources: tuple[tuple[str, str], ...],
+) -> dict[str, object]:
+    for code, source in code_sources:
         row = reader.find_code_row(code)
         if row <= 0:
             continue
@@ -705,13 +902,18 @@ def _parse_wor_items(
     general_contractor: str,
     procedure_name: str,
     recommended: dict[str, object],
+    reserve: _Participant | None,
+    reserve_method: str,
+    reserve_inn: str,
+    reserve_uin: str,
+    layout: _WorLayout,
 ) -> list[TkpItem]:
     section_code = ""
     section_name = ""
     subsection_name = ""
     items: list[TkpItem] = []
     for row in range(start_row + 1, end_row):
-        row_type = _row_type(reader, row)
+        row_type = _row_type(reader, row, layout)
         if row_type == "Section":
             code = reader.text(row, 1)
             if code:
@@ -723,7 +925,8 @@ def _parse_wor_items(
             continue
         if row_type != "Position":
             continue
-        qty_raw = reader.value(row, 4)
+        qty_raw = reader.value(row, layout.qty_col)
+        quality_flags = _quality_flags(reader, row, layout, winner, reserve)
         items.append(
             TkpItem(
                 run_id=run_id,
@@ -734,13 +937,13 @@ def _parse_wor_items(
                 section_code=section_code,
                 section_name=section_name,
                 subsection_name=subsection_name,
-                item_code=reader.text(row, 1),
-                item_name=reader.text(row, 2),
-                unit=reader.text(row, 3),
+                item_code=reader.text(row, layout.code_col),
+                item_name=reader.text(row, layout.item_name_col),
+                unit=reader.text(row, layout.unit_col),
                 qty=_as_float(qty_raw),
                 qty_source_text=_text(qty_raw),
-                rnmc_unit_price_no_vat=reader.number(row, 9),
-                rnmc_line_total_no_vat=reader.number(row, 10),
+                rnmc_unit_price_no_vat=reader.number(row, layout.rnmc_unit_price_col),
+                rnmc_line_total_no_vat=reader.number(row, layout.rnmc_line_total_col),
                 winner_unit_price_no_vat=reader.number(row, winner.start_col),
                 winner_line_total_no_vat=reader.number(row, winner.start_col + 1),
                 winner_name=winner.name,
@@ -762,20 +965,102 @@ def _parse_wor_items(
                 winner_block_uin=_text(recommended["uin"]),
                 winner_block_total_vat=_as_float(recommended["total_vat"]),
                 winner_block_reason=_text(recommended["reason"]),
+                reserve_unit_price_no_vat=(
+                    reader.number(row, reserve.start_col) if reserve is not None else None
+                ),
+                reserve_line_total_no_vat=(
+                    reader.number(row, reserve.start_col + 1) if reserve is not None else None
+                ),
+                reserve_name=reserve.name if reserve is not None else "",
+                reserve_inn=reserve_inn,
+                reserve_uin=reserve_uin,
+                reserve_group_index=reserve.index if reserve is not None else 0,
+                reserve_start_col=reserve.start_col if reserve is not None else 0,
+                reserve_start_col_letter=(
+                    get_column_letter(reserve.start_col) if reserve is not None else ""
+                ),
+                reserve_unit_header=(
+                    reader.text(start_row, reserve.start_col) if reserve is not None else ""
+                ),
+                reserve_total_header=(
+                    reader.text(start_row, reserve.start_col + 1) if reserve is not None else ""
+                ),
+                reserve_method=reserve_method,
+                wor_schema=layout.schema_name,
+                quality_flags=quality_flags,
             )
         )
     return items
 
 
-def _row_type(reader: _SheetReader, row: int) -> str:
-    item_name = reader.text(row, 2)
-    unit = reader.text(row, 3)
-    qty = reader.text(row, 4)
-    if not item_name and not unit and not qty:
+def _row_type(reader: _SheetReader, row: int, layout: _WorLayout) -> str:
+    item_code = _code_norm(reader.text(row, layout.code_col))
+    item_name = reader.text(row, layout.item_name_col)
+    unit = reader.text(row, layout.unit_col)
+    qty = reader.text(row, layout.qty_col)
+    rnmc_price = reader.number(row, layout.rnmc_unit_price_col)
+    rnmc_total = reader.number(row, layout.rnmc_line_total_col)
+    if not item_name and not unit and not qty and rnmc_price is None and rnmc_total is None:
         return "Blank"
-    if item_name and (unit or qty):
+    if item_code.endswith("."):
+        return "Section"
+    if item_name and (unit or qty or rnmc_price is not None or rnmc_total is not None):
         return "Position"
     return "Section"
+
+
+def _quality_flags(
+    reader: _SheetReader,
+    row: int,
+    layout: _WorLayout,
+    winner: _Participant,
+    reserve: _Participant | None,
+) -> str:
+    flags: list[str] = []
+    if not reader.text(row, layout.unit_col):
+        flags.append("missing_unit")
+    if reader.number(row, layout.qty_col) is None:
+        flags.append("missing_qty")
+    if reader.number(row, layout.rnmc_unit_price_col) is None:
+        flags.append("missing_rnmc_unit_price")
+    if reader.number(row, winner.start_col) is None:
+        flags.append("missing_winner_unit_price")
+    if reserve is not None and reader.number(row, reserve.start_col) is None:
+        flags.append("missing_reserve_unit_price")
+    return ";".join(flags)
+
+
+def _participant_total_no_vat(
+    reader: _SheetReader,
+    participant: _Participant | None,
+    total_row: int,
+    start_row: int,
+    end_row: int,
+    layout: _WorLayout,
+) -> float | None:
+    if participant is None:
+        return None
+    value = reader.number(total_row, participant.start_col + 1) if total_row else None
+    if value is not None:
+        return value
+    return _sum_wor_totals(reader, start_row, end_row, participant.start_col, layout)
+
+
+def _participant_text_at_code(
+    reader: _SheetReader,
+    code: str,
+    participant: _Participant | None,
+) -> str:
+    if participant is None:
+        return ""
+    row = reader.find_code_row(code)
+    if row <= 0:
+        return ""
+    for col in (participant.start_col, participant.name_col):
+        value = reader.text(row, col) if col else ""
+        if value:
+            return value
+    return reader.text_at_code(code, participant.start_col)
 
 
 def _empty_source(
@@ -874,6 +1159,16 @@ def _looks_like_price_header(value: object) -> bool:
 def _looks_like_total_header(value: object) -> bool:
     text = _norm(value)
     return _TOTAL in text or _COST in text
+
+
+def _looks_like_unit_header(value: object) -> bool:
+    text = _norm(value)
+    return _UNIT in text and _PRICE not in text
+
+
+def _looks_like_qty_header(value: object) -> bool:
+    text = _norm(value)
+    return "КОЛ" in text and "ВО" in text
 
 
 def _contains_either(left: str, right: str) -> bool:
