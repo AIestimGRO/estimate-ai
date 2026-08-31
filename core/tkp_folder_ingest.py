@@ -210,7 +210,25 @@ def parse_tkp_source_workbook(
                 status="Skipped",
                 message="KL worksheet not found by name or structure.",
             )
-            return TkpCatalogParseResult(run_ids=(run_id,), files=[source], items=[])
+            diagnostics = TkpSourceDiagnostics(
+                file_path=source_path,
+                file_name=file_name,
+                sheet_name="",
+                blocks=(
+                    TkpBlockDiagnostic(
+                        code="KL",
+                        label="KL worksheet",
+                        found=False,
+                        value="KL worksheet not found by name or structure.",
+                    ),
+                ),
+            )
+            return TkpCatalogParseResult(
+                run_ids=(run_id,),
+                files=[source],
+                items=[],
+                diagnostics=[diagnostics],
+            )
 
         formula_sheet = pair.formulas[sheet_name]
         value_sheet = pair.values[sheet_name]
@@ -253,14 +271,22 @@ def parse_tkp_source_workbook(
             else 11
         )
         task_no = reader.text_at_code("1.3", metadata_col)
+        if not task_no:
+            problems.append("Task number not found.")
         request_date = _as_datetime(reader.value_at_code("1.1", metadata_col))
         version = reader.text_at_code("1.2", metadata_col)
         customer = reader.text_at_code("1.5", metadata_col)
         general_contractor = reader.text_at_code("1.7", metadata_col)
         procedure_name = _first_nonblank(reader.text(1, 2), reader.text(2, 2))
 
-        recommended = _recommended_fields(reader, (("10.1", "block10"), ("8.1", "block8")))
-        reserve_recommended = _recommended_fields(reader, (("10.2", "block10_reserve"), ("8.2", "block8_reserve")))
+        winner_block_10 = _recommended_fields(reader, (("10.1", "block10"),))
+        winner_block_8 = _recommended_fields(reader, (("8.1", "block8"),))
+        reserve_block_10 = _recommended_fields(reader, (("10.2", "block10_reserve"),))
+        reserve_block_8 = _recommended_fields(reader, (("8.2", "block8_reserve"),))
+        recommended = winner_block_10 if winner_block_10["source"] else winner_block_8
+        reserve_recommended = (
+            reserve_block_10 if reserve_block_10["source"] else reserve_block_8
+        )
         winner_name = winner.name if winner is not None else ""
         winner_inn = (
             reader.text_at_code("2.3", winner.start_col)
@@ -366,13 +392,72 @@ def parse_tkp_source_workbook(
             reserve_total_vat=reserve_total_vat,
             reserve_method=reserve_method,
         )
+        usable_rows = sum(tkp_item_has_usable_unit_price(item) for item in parsed_items)
+        diagnostics = TkpSourceDiagnostics(
+            file_path=source_path,
+            file_name=file_name,
+            sheet_name=sheet_name,
+            wor_start_row=start_row,
+            wor_end_row=end_row,
+            wor_end_method=end_method,
+            wor_schema=layout.schema_name,
+            participant_count=len(participants),
+            rows_found=len(parsed_items),
+            rows_with_usable_price=usable_rows,
+            rows_rejected_missing_prices=len(parsed_items) - usable_rows,
+            blocks=(
+                _block_diagnostic(reader, "1.1", "Request date", reader.text_at_code("1.1", metadata_col)),
+                _block_diagnostic(reader, "1.2", "Version", version),
+                _block_diagnostic(reader, "1.3", "Task number", task_no),
+                _block_diagnostic(reader, "1.5", "Customer", customer),
+                _block_diagnostic(reader, "1.7", "General contractor", general_contractor),
+                _block_diagnostic(
+                    reader,
+                    "2.2",
+                    "Participants",
+                    ", ".join(participant.name for participant in participants),
+                ),
+                TkpBlockDiagnostic(
+                    code="4",
+                    label="WOR and Price",
+                    found=start_row > 0,
+                    value=(
+                        f"row {start_row}; end {end_row}; schema {layout.schema_name}"
+                        if start_row > 0
+                        else ""
+                    ),
+                    row=start_row,
+                ),
+                _block_diagnostic(reader, "8.1", "Preliminary winner", _text(winner_block_8["name"])),
+                _block_diagnostic(reader, "8.2", "Preliminary reserve", _text(reserve_block_8["name"])),
+                _block_diagnostic(reader, "10.1", "Recommended winner", _text(winner_block_10["name"])),
+                _block_diagnostic(reader, "10.2", "Reserve winner", _text(reserve_block_10["name"])),
+            ),
+        )
         return TkpCatalogParseResult(
             run_ids=(run_id,),
             files=[source],
             items=parsed_items,
+            diagnostics=[diagnostics],
         )
     finally:
         pair.close()
+
+
+def _block_diagnostic(
+    reader: "_SheetReader",
+    code: str,
+    label: str,
+    value: str,
+) -> TkpBlockDiagnostic:
+    row = reader.find_code_row(code)
+    return TkpBlockDiagnostic(
+        code=code,
+        label=label,
+        found=row > 0,
+        value=value,
+        row=row,
+    )
 
 
 class _SheetReader:
