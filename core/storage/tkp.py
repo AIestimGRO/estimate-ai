@@ -21,9 +21,10 @@ from core.tkp_ingest import (
     TkpItem,
     TkpSourceFile,
     parse_tkp_catalog_workbook,
+    tkp_item_has_usable_unit_price,
 )
 
-TKP_DETAILS_VERSION = 2
+TKP_DETAILS_VERSION = 3
 
 TKP_SORT_COLUMNS = {
     "item_name": "tkp_items.item_name",
@@ -161,6 +162,10 @@ def import_tkp_parse_result(
     """Insert a parsed aggregate workbook or direct folder-upload result."""
     items_by_file_path: dict[str, list[TkpItem]] = {}
     for item in result.items:
+        if not tkp_item_has_usable_unit_price(item):
+            continue
+        if not item.task_no.strip():
+            continue
         items_by_file_path.setdefault(item.file_path, []).append(item)
 
     files_imported = 0
