@@ -266,9 +266,8 @@ def test_skipped_source_file_has_no_items(tmp_path: Path) -> None:
         result = import_tkp_catalog_workbook(connection, workbook_path)
 
         assert result.items_imported == 0
-        sources = list_tkp_sources(connection)
-        assert sources[0].parse_status == "Skipped"
-        assert sources[0].item_count == 0
+        assert result.files_skipped == 1
+        assert list_tkp_sources(connection) == []
     finally:
         connection.close()
 
