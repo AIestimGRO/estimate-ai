@@ -124,6 +124,10 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - Stage direct KL folder uploads before database writes: show a file-level
   macro preview with detected/missing blocks and values, provide a separate
   row-level preview, and allow opening the temporary source workbook.
+- Classify mixed Excel folders before TKP import so RNMC/OS lookalikes are
+  shown as `NOT_KL` and skipped instead of being persisted; keep an explicit
+  per-file manual exclusion control in the staged preview for templates and
+  edge cases.
 - Enforce TKP import quality at storage: every stored row must have a task
   number and at least one explicit positive participant unit price (winner or
   reserve). Rows with neither unit price are rejected and unit prices are never
@@ -177,6 +181,9 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 - [x] TKP staged import quality gate: macro/file preview, row preview, source
   workbook inspection, manual task-number recovery, and rejection of rows with
   neither winner nor reserve unit price.
+- [x] Mixed-folder TKP classifier and per-file exclusion: strict structural
+  fallback prevents RNMC/OS files from entering the TKP database while keeping
+  suspicious files visible in preview.
 - [x] User exclusions during RNMC preview with durable processed-file history.
 - [x] Resizable main analog-catalog columns with browser-local persistence/reset.
 - [x] Isolated TKP shadow prototype with strict safety filters and optional
