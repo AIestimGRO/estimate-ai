@@ -2538,10 +2538,12 @@ def render_admin_tkp_stage_macro(
     result: TkpCatalogParseResult,
     *,
     ignored_files: int = 0,
+    excluded_paths: set[str] | None = None,
     error: str = "",
 ) -> str:
     """Render the file-level TKP inspection step before any DB write."""
     diagnostics = {item.file_path: item for item in result.diagnostics}
+    excluded = set(excluded_paths or ())
     total_rows = len(result.items)
     usable_rows = sum(tkp_item_has_usable_unit_price(item) for item in result.items)
     rejected_rows = total_rows - usable_rows
@@ -2550,14 +2552,20 @@ def render_admin_tkp_stage_macro(
         for item in result.items
         if tkp_item_has_usable_unit_price(item)
     }
+    not_kl_count = sum(source.parse_status == "Skipped" for source in result.files)
     missing_task_count = sum(
-        source.file_path in usable_paths and not source.task_no.strip()
+        source.parse_status != "Skipped"
+        and source.file_path not in excluded
+        and source.file_path in usable_paths
+        and not source.task_no.strip()
         for source in result.files
     )
 
     summary = (
         '<dl class="stats">'
         f'<div><dt>Файлов разобрано</dt><dd>{len(result.files)}</dd></div>'
+        f'<div><dt>Не являются КЛ</dt><dd>{not_kl_count}</dd></div>'
+        f'<div><dt>Исключено вручную</dt><dd>{len(excluded)}</dd></div>'
         f'<div><dt>Строк ВОР найдено</dt><dd>{total_rows}</dd></div>'
         f'<div><dt>Строк с хотя бы одной ценой</dt><dd>{usable_rows}</dd></div>'
         f'<div><dt>Без обеих цен</dt><dd>{rejected_rows}</dd></div>'
@@ -2568,12 +2576,15 @@ def render_admin_tkp_stage_macro(
     notice = (
         '<p class="catalog-warning"><strong>Предпросмотр:</strong> '
         'на этом шаге ничего не записано в базу ТКП. '
-        'Строка будет допущена только если у победителя или резервного победителя '
+        'Файлы, не подтвержденные как КЛ, автоматически пропускаются. '
+        'Строка КЛ будет допущена только если у победителя или резервного победителя '
         'есть явная положительная цена за единицу. Итоговая стоимость и количество '
         'не используются для восстановления отсутствующей цены.</p>'
     )
 
-    rows = []
+    ready_rows_html: list[str] = []
+    review_rows_html: list[str] = []
+    skipped_rows_html: list[str] = []
     details = []
     for index, source in enumerate(result.files):
         diag = diagnostics.get(source.file_path)
@@ -2585,28 +2596,57 @@ def render_admin_tkp_stage_macro(
             for item in result.items
         )
         rejected = max(0, rows_found - ready_rows)
-        if ready_rows > 0 and not source.task_no.strip():
+
+        if source.parse_status == "Skipped":
+            category = "NOT_KL — SKIPPED"
+            stage_status = "NOT_KL"
+            status_class = "warn"
+        elif source.file_path in excluded:
+            category = "KL — EXCLUDED"
+            stage_status = "EXCLUDED"
+            status_class = "warn"
+        elif ready_rows > 0 and not source.task_no.strip():
+            category = "KL — NEEDS REVIEW"
             stage_status = "NEEDS_TASK_NUMBER"
             status_class = "warn"
         elif rows_found > 0 and ready_rows == 0:
+            category = "KL — NEEDS REVIEW"
             stage_status = "NO_VALID_PRICE_ROWS"
             status_class = "warn"
-        else:
+        elif source.parse_status == "Needs review":
+            category = "KL — NEEDS REVIEW"
             stage_status = source.parse_status
-            status_class = "ok" if source.parse_status == "OK" else "warn"
+            status_class = "warn"
+        else:
+            category = "KL — READY"
+            stage_status = source.parse_status
+            status_class = "ok"
 
         task_value = html.escape(source.task_no, quote=True)
-        rows.append(
+        if source.parse_status == "Skipped":
+            task_control = '<span class="muted">не требуется</span>'
+            exclude_control = '<span class="muted">авто</span>'
+        else:
+            checked = " checked" if source.file_path in excluded else ""
+            task_control = (
+                f'<input type="text" name="task_no__{index}" value="{task_value}" '
+                'placeholder="введите № задачи" '
+                'title="Можно исправить или вручную заполнить номер задачи перед импортом">'
+            )
+            exclude_control = (
+                f'<input type="checkbox" name="exclude__{index}" value="1"{checked} '
+                'title="Не записывать этот файл и его строки в базу">'
+            )
+
+        row_html = (
             '<tr>'
+            f'<td>{html.escape(category)}</td>'
             f'<td class="path">{html.escape(source.file_name)}</td>'
             f'<td>{html.escape(source.sheet_name)}</td>'
             f'<td><span class="status-pill {status_class}">{html.escape(stage_status)}</span>'
             f'<br><span class="muted">{html.escape(source.parse_message)}</span></td>'
-            '<td>'
-            f'<input type="text" name="task_no__{index}" value="{task_value}" '
-            'placeholder="введите № задачи" '
-            'title="Можно исправить или вручную заполнить номер задачи перед импортом">'
-            '</td>'
+            f'<td>{task_control}</td>'
+            f'<td>{exclude_control}</td>'
             f'<td>{rows_found}</td>'
             f'<td>{ready_rows}</td>'
             f'<td>{rejected}</td>'
@@ -2617,29 +2657,45 @@ def render_admin_tkp_stage_macro(
             'Открыть исходный файл</a></td>'
             '</tr>'
         )
+
+        if source.parse_status == "Skipped":
+            skipped_rows_html.append(row_html)
+        elif category == "KL — READY":
+            ready_rows_html.append(row_html)
+        else:
+            review_rows_html.append(row_html)
         details.append(_render_tkp_stage_file_diagnostics(index, source, diag))
 
-    file_table = (
-        '<div class="preview-wide"><table class="preview"><thead><tr>'
-        '<th>Файл</th><th>Лист КЛ</th><th>Статус</th><th>№ задачи перед импортом</th>'
-        '<th>Строк найдено</th><th>Допущено по цене</th><th>Без обеих цен</th>'
-        '<th>Победитель</th><th>Резервный</th><th>Исходник</th>'
-        '</tr></thead><tbody>'
-        + "".join(rows)
-        + '</tbody></table></div>'
+    groups = (
+        _render_tkp_stage_file_group(
+            "КЛ — готовы",
+            ready_rows_html,
+            open_by_default=True,
+        )
+        + _render_tkp_stage_file_group(
+            "КЛ — требуют проверки / исключены вручную",
+            review_rows_html,
+            open_by_default=True,
+        )
+        + _render_tkp_stage_file_group(
+            "Не КЛ — автоматически пропущены",
+            skipped_rows_html,
+            open_by_default=False,
+        )
     )
 
     content = (
         '<section class="admin-panel">'
         '<h2 class="section">Макропредпросмотр ТКП</h2>'
-        '<p>Проверьте найденные блоки и метаданные каждого КЛ. '
+        '<p>Сначала приложение отделяет КЛ от посторонних РНМЦ/ОС и других Excel. '
+        'Затем проверьте найденные блоки и метаданные КЛ. '
         'Если номер задачи не обнаружен, откройте исходный Excel, найдите номер '
         'и впишите его в поле перед подтверждением.</p>'
         f'{_render_admin_message(error, "")}'
         f'{notice}{summary}'
         f'<form id="tkp-stage-commit-form" method="post" '
         f'action="/admin/tkp/stage/{html.escape(stage_id, quote=True)}/commit">'
-        f'{file_table}'
+        f'{groups}'
         + "".join(details)
         + '<div class="choices">'
         f'<a class="choice" target="_blank" rel="noopener" '
@@ -2657,9 +2713,37 @@ def render_admin_tkp_stage_macro(
     return render(
         "admin.html",
         title="Предпросмотр ТКП",
-        subtitle="Контроль метаданных и качества перед записью в базу.",
+        subtitle="Контроль типа файла, метаданных и качества перед записью в базу.",
         admin_nav=_render_admin_nav(active_slug="tkp"),
         content=content,
+    )
+
+
+def _render_tkp_stage_file_group(
+    title: str,
+    rows: list[str],
+    *,
+    open_by_default: bool,
+) -> str:
+    open_attr = " open" if open_by_default else ""
+    if not rows:
+        body = '<p class="muted">Файлов в этой группе нет.</p>'
+    else:
+        body = (
+            '<div class="preview-wide"><table class="preview"><thead><tr>'
+            '<th>Категория</th><th>Файл</th><th>Лист КЛ</th><th>Статус</th>'
+            '<th>№ задачи перед импортом</th><th>Исключить</th>'
+            '<th>Строк найдено</th><th>Допущено по цене</th><th>Без обеих цен</th>'
+            '<th>Победитель</th><th>Резервный</th><th>Исходник</th>'
+            '</tr></thead><tbody>'
+            + "".join(rows)
+            + '</tbody></table></div>'
+        )
+    return (
+        f'<details class="maintenance-tools"{open_attr}>'
+        f'<summary>{html.escape(title)}: {len(rows)}</summary>'
+        f'<div class="maintenance-tools-body">{body}</div>'
+        '</details>'
     )
 
 
@@ -2719,9 +2803,11 @@ def render_admin_tkp_stage_rows(
     result: TkpCatalogParseResult,
     *,
     show: str = "all",
+    excluded_paths: set[str] | None = None,
 ) -> str:
     """Render row-level TKP preview with accepted/rejected price status."""
     normalized_show = show if show in {"all", "ready", "rejected"} else "all"
+    excluded = set(excluded_paths or ())
     rows = []
     visible_count = 0
     for item in result.items:
@@ -2739,7 +2825,9 @@ def render_admin_tkp_stage_rows(
         )
         status_class = "ok" if usable else "warn"
         db_status = (
-            "да"
+            "исключен вручную"
+            if item.file_path in excluded
+            else "да"
             if usable and item.task_no.strip()
             else "после ввода № задачи"
             if usable
