@@ -314,6 +314,16 @@ encode business rules that must be preserved:
   SQLite. The user first receives a file-level macro preview, can open the
   separate row-level preview, and explicitly confirms the import only after
   inspection.
+- File classification runs before TKP row acceptance. A worksheet whose title
+  explicitly looks like a KL sheet (for example `KL 2.0` or `KL 4`) is kept
+  eligible so incomplete KL files can still reach `Needs review`. A worksheet
+  with an unrelated title is treated as KL only when several independent KL
+  markers agree: participant metadata, the WOR/price block, an adjacent
+  participant unit-price/line-total header pair, an offer-total row, and a
+  winner recommendation block (`8.1` or `10.1`). Partial lookalikes such as
+  RNMC or estimate/OS workbooks are classified as `NOT_KL / Skipped`.
+- Sources classified as `Skipped` are visible in the staged preview for audit
+  but are not written to `tkp_sources` and contribute no `tkp_items`.
 - The macro preview reports, per source file, the detected KL sheet, WOR
   start/end/schema, participant count, winner/reserve identity, accepted and
   rejected row counts, and block diagnostics for `1.1`, `1.2`, `1.3`,
@@ -326,6 +336,11 @@ encode business rules that must be preserved:
   inspect the workbook, enter the task number manually for that file, and then
   confirm. The manual value is applied to the source record and all accepted
   rows from that workbook.
+- Every KL row in the file-level preview also has an explicit manual
+  `Exclude file` control. Excluded files bypass task-number validation and
+  neither the source nor any of its parsed rows is passed to database import.
+  This is a safety valve for templates, test files, or classifier edge cases
+  without requiring the user to reorganize the original folder.
 - The separate row preview shows source file/Excel row, task number, item/unit/
   quantity, winner and reserve names, both participant unit prices, and whether
   the row is ready for DB storage. Rows with neither usable participant unit
