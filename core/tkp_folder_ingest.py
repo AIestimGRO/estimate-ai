@@ -649,20 +649,21 @@ def _kl_structural_evidence(worksheet: Worksheet) -> dict[str, object]:
     for row in range(1, max_row + 1):
         code = _code_norm(worksheet.cell(row, 1).value)
         label = _norm(worksheet.cell(row, 2).value)
-        row_text = " ".join(
-            _text(worksheet.cell(row, col).value)
-            for col in range(1, max_col + 1)
-            if _text(worksheet.cell(row, col).value)
+        marker_text = _norm(
+            " ".join(
+                _text(worksheet.cell(row, col).value)
+                for col in range(1, min(max_col, 8) + 1)
+                if _text(worksheet.cell(row, col).value)
+            )
         )
-        normalized_row = _norm(row_text)
 
         if code == "2.2" and _NAME in label:
             participant_row = participant_row or row
         if code == "2.3":
             participant_identity_row = participant_identity_row or row
-        if _WOR_BLOCK in normalized_row:
+        if _WOR_BLOCK in marker_text:
             wor_row = wor_row or row
-        if _TOTAL_OFFER in normalized_row:
+        if _TOTAL_OFFER in marker_text:
             total_offer_row = total_offer_row or row
         if code in {"8.1", "10.1"}:
             recommendation_row = recommendation_row or row
