@@ -188,6 +188,7 @@ class TkpImportStage:
     parsed: TkpCatalogParseResult
     source_paths: dict[str, Path]
     ignored_files: int = 0
+    excluded_paths: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -1529,6 +1530,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 stage_id,
                 stage.parsed,
                 ignored_files=stage.ignored_files,
+                excluded_paths=stage.excluded_paths,
                 error=error,
             )
         )
@@ -1549,6 +1551,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 stage_id,
                 stage.parsed,
                 show=show,
+                excluded_paths=stage.excluded_paths,
             )
         )
 
@@ -1598,6 +1601,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
 
         form = await request.form()
         task_overrides: dict[str, str] = {}
+        excluded_paths: set[str] = set()
         missing_task_files: list[str] = []
         usable_paths = {
             item.file_path
@@ -1607,29 +1611,36 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         for index, source in enumerate(stage.parsed.files):
             task_no = str(form.get(f"task_no__{index}") or source.task_no).strip()
             task_overrides[source.file_path] = task_no
-            if source.file_path in usable_paths and not task_no:
+            if form.get(f"exclude__{index}") is not None:
+                excluded_paths.add(source.file_path)
+                continue
+            if (
+                source.parse_status != "Skipped"
+                and source.file_path in usable_paths
+                and not task_no
+            ):
                 missing_task_files.append(source.file_name)
 
-        prepared_files = [
+        staged_files = [
             _tkp_source_with_task_override(
                 source,
                 task_overrides.get(source.file_path, source.task_no),
             )
             for source in stage.parsed.files
         ]
-        prepared_items = [
+        staged_items = [
             replace(
                 item,
                 task_no=task_overrides.get(item.file_path, item.task_no).strip(),
             )
             for item in stage.parsed.items
         ]
-        prepared = replace(
+        stage.parsed = replace(
             stage.parsed,
-            files=prepared_files,
-            items=prepared_items,
+            files=staged_files,
+            items=staged_items,
         )
-        stage.parsed = prepared
+        stage.excluded_paths = excluded_paths
 
         if missing_task_files:
             return HTMLResponse(
@@ -1637,6 +1648,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     stage_id,
                     stage.parsed,
                     ignored_files=stage.ignored_files,
+                    excluded_paths=stage.excluded_paths,
                     error=(
                         "Номер задачи обязателен перед записью в БД. "
                         "Заполните его для файлов: "
@@ -1645,6 +1657,22 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 ),
                 status_code=400,
             )
+
+        prepared_files = [
+            source
+            for source in staged_files
+            if source.file_path not in excluded_paths
+        ]
+        prepared_items = [
+            item
+            for item in staged_items
+            if item.file_path not in excluded_paths
+        ]
+        prepared = replace(
+            stage.parsed,
+            files=prepared_files,
+            items=prepared_items,
+        )
 
         accepted_rows = sum(
             tkp_item_has_usable_unit_price(item) and bool(item.task_no.strip())
@@ -1662,6 +1690,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             source.parse_status == "Skipped"
             for source in prepared_files
         )
+        manually_excluded = len(excluded_paths)
 
         connection = connect(default_database_path())
         try:
@@ -1677,6 +1706,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             f"новых {result.files_imported}, обновлено {result.files_updated}, "
             f"без изменений {result.files_skipped}, требуют проверки "
             f"{needs_review}, не распознаны как КЛ {not_kl}, "
+            f"исключено вручную {manually_excluded}, "
             f"проигнорировано файлов {stage.ignored_files}, "
             f"допущено строк {accepted_rows}, без обеих цен отклонено "
             f"{rejected_price_rows}. Всего позиций в базе: {result.items_imported}."
