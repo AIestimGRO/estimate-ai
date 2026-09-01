@@ -39,7 +39,7 @@ from core.tkp_ingest import (
 )
 
 SUPPORTED_SOURCE_SUFFIXES = frozenset({".xlsx", ".xlsm"})
-PARSER_VERSION = "tkp-folder-v1"
+PARSER_VERSION = "tkp-folder-v2"
 
 _WOR_BLOCK = "\u0411\u041b\u041e\u041a \u0412\u041e\u0420 \u0418 \u0426\u0415\u041d\u0410"
 _ADVANCE_LIMIT = (
@@ -208,7 +208,7 @@ def parse_tkp_source_workbook(
                 file_path=source_path,
                 file_name=file_name,
                 status="Skipped",
-                message="KL worksheet not found by name or structure.",
+                message="KL worksheet not found by name or strict KL structure.",
             )
             diagnostics = TkpSourceDiagnostics(
                 file_path=source_path,
@@ -219,7 +219,7 @@ def parse_tkp_source_workbook(
                         code="KL",
                         label="KL worksheet",
                         found=False,
-                        value="KL worksheet not found by name or structure.",
+                        value="KL worksheet not found by name or strict KL structure.",
                     ),
                 ),
             )
@@ -608,37 +608,100 @@ class _SheetReader:
 
 
 def _find_kl_sheet_name(workbook) -> str | None:
-    exact: list[str] = []
+    """Return a KL worksheet without mistaking RNMC/estimate sheets for KL.
+
+    A sheet whose title explicitly looks like a KL sheet remains eligible so
+    incomplete KL workbooks can still reach the Needs review stage. A sheet
+    with an unrelated title is accepted only when several independent KL
+    structures agree: participant metadata, WOR block, participant price
+    headers, offer total, and a recommendation block.
+    """
+    named: list[str] = []
     structural: list[tuple[int, str]] = []
     for worksheet in workbook.worksheets:
         normalized = _norm_sheet_name(worksheet.title)
-        if normalized in {"\u041a\u041b20", "\u041a\u041b2"}:
-            exact.append(worksheet.title)
+        if re.fullmatch(r"\u041a\u041b\d+", normalized):
+            named.append(worksheet.title)
             continue
-        max_row = min(worksheet.max_row or 1, 500)
-        max_col = min(worksheet.max_column or 1, 120)
-        score = 0
-        for row in range(1, max_row + 1):
-            code = _code_norm(worksheet.cell(row, 1).value)
-            label = _norm(worksheet.cell(row, 2).value)
-            if code == "2.2" and _NAME in label:
-                score += 4
-            if _WOR_BLOCK in label:
-                score += 8
-                if _looks_like_price_header(worksheet.cell(row, 11).value):
-                    score += 3
-                if _looks_like_total_header(worksheet.cell(row, 12).value):
-                    score += 3
-            if score >= 12:
-                break
-        if score:
-            structural.append((score, worksheet.title))
-    if exact:
-        return exact[0]
+
+        evidence = _kl_structural_evidence(worksheet)
+        if evidence["strict_match"]:
+            structural.append((int(evidence["score"]), worksheet.title))
+
+    if named:
+        return named[0]
     if not structural:
         return None
     structural.sort(key=lambda item: (-item[0], workbook.sheetnames.index(item[1])))
-    return structural[0][1] if structural[0][0] >= 12 else None
+    return structural[0][1]
+
+
+def _kl_structural_evidence(worksheet: Worksheet) -> dict[str, object]:
+    """Collect independent KL markers for a nonstandard worksheet title."""
+    max_row = min(worksheet.max_row or 1, 500)
+    max_col = min(worksheet.max_column or 1, 120)
+    participant_row = 0
+    wor_row = 0
+    total_offer_row = 0
+    recommendation_row = 0
+    participant_identity_row = 0
+
+    for row in range(1, max_row + 1):
+        code = _code_norm(worksheet.cell(row, 1).value)
+        label = _norm(worksheet.cell(row, 2).value)
+        row_text = " ".join(
+            _text(worksheet.cell(row, col).value)
+            for col in range(1, max_col + 1)
+            if _text(worksheet.cell(row, col).value)
+        )
+        normalized_row = _norm(row_text)
+
+        if code == "2.2" and _NAME in label:
+            participant_row = participant_row or row
+        if code == "2.3":
+            participant_identity_row = participant_identity_row or row
+        if _WOR_BLOCK in normalized_row:
+            wor_row = wor_row or row
+        if _TOTAL_OFFER in normalized_row:
+            total_offer_row = total_offer_row or row
+        if code in {"8.1", "10.1"}:
+            recommendation_row = recommendation_row or row
+
+    price_pair = False
+    if wor_row:
+        for col in range(1, max_col):
+            if (
+                _looks_like_price_header(worksheet.cell(wor_row, col).value)
+                and _looks_like_total_header(worksheet.cell(wor_row, col + 1).value)
+            ):
+                price_pair = True
+                break
+
+    score = (
+        (4 if participant_row else 0)
+        + (2 if participant_identity_row else 0)
+        + (8 if wor_row else 0)
+        + (4 if price_pair else 0)
+        + (4 if total_offer_row else 0)
+        + (6 if recommendation_row else 0)
+    )
+    strict_match = bool(
+        participant_row
+        and wor_row
+        and price_pair
+        and total_offer_row
+        and recommendation_row
+    )
+    return {
+        "strict_match": strict_match,
+        "score": score,
+        "participant_row": participant_row,
+        "participant_identity_row": participant_identity_row,
+        "wor_row": wor_row,
+        "price_pair": price_pair,
+        "total_offer_row": total_offer_row,
+        "recommendation_row": recommendation_row,
+    }
 
 
 def _find_wor_start(reader: _SheetReader) -> int:
