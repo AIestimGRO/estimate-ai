@@ -174,6 +174,9 @@ def import_tkp_parse_result(
     items_imported = 0
 
     for source_file in result.files:
+        if source_file.parse_status == "Skipped":
+            files_skipped += 1
+            continue
         outcome = _upsert_source_file(
             connection,
             source_file,
