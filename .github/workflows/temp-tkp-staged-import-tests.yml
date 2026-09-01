@@ -31,6 +31,7 @@ jobs:
             core/tkp_folder_ingest.py
             core/storage/tkp.py
             tests/test_tkp_folder_ingest.py
+            tests/test_storage_tkp.py
             docs/DOMAIN_RULES.md
             docs/ROADMAP.md
           if-no-files-found: error
