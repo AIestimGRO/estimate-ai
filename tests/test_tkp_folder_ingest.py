@@ -116,6 +116,30 @@ def _write_source(path: Path, **kwargs) -> None:
     path.write_bytes(_source_bytes(**kwargs))
 
 
+def _rnmc_like_bytes() -> bytes:
+    """Build a non-KL workbook that used to satisfy the loose structural score."""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "OS"
+    sheet["A17"] = "2.2."
+    sheet["B17"] = "Наименование"
+    sheet["K17"] = "Поставщик"
+    sheet["A37"] = 4
+    sheet["B37"] = "Блок ВОР и Цена"
+    sheet["K37"] = "цена за ед., без НДС"
+    sheet["L37"] = "Ст-ть всего, без НДС"
+    sheet["A39"] = "4.1.1."
+    sheet["B39"] = "Посторонняя строка РНМЦ"
+    sheet["C39"] = "шт"
+    sheet["D39"] = 2
+    sheet["K39"] = 50
+    sheet["L39"] = 100
+    buffer = BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+    return buffer.getvalue()
+
+
 def test_original_kl_parser_finds_structural_sheet_and_winner(tmp_path) -> None:
     source = tmp_path / "sample.xlsx"
     _write_source(source)
@@ -226,6 +250,28 @@ def test_original_kl_parser_reads_lot_schema_unit_prices(tmp_path) -> None:
     assert item.reserve_start_col == 25
     assert item.reserve_unit_price_no_vat == 100.0
 
+
+
+def test_rnmc_like_workbook_is_not_classified_as_kl(tmp_path) -> None:
+    source = tmp_path / "rnmc-like.xlsx"
+    source.write_bytes(_rnmc_like_bytes())
+
+    parsed = parse_tkp_source_workbook(source)
+
+    assert len(parsed.files) == 1
+    assert parsed.files[0].parse_status == "Skipped"
+    assert parsed.files[0].sheet_name == ""
+    assert parsed.items == []
+
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        result = import_tkp_parse_result(connection, parsed)
+        assert result.files_skipped == 1
+        assert count_tkp_items(connection) == 0
+        assert list_tkp_sources(connection) == []
+    finally:
+        connection.close()
 
 
 def test_import_accepts_either_unit_price_and_rejects_rows_with_neither(tmp_path) -> None:
@@ -396,6 +442,94 @@ def test_admin_uploads_original_kl_folder_through_staged_preview(tmp_path, monke
         assert sources[0].file_name == "sample.xlsx"
         assert sources[0].winner_name == WINNER
         assert sources[0].task_no == "12345"
+    finally:
+        connection.close()
+
+
+def test_admin_mixed_folder_skips_non_kl_files(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/tkp/import-folder",
+            files=[
+                ("tkp_files", ("mixed/valid-kl.xlsx", _source_bytes(), XLSX_MIME)),
+                ("tkp_files", ("mixed/rnmc.xlsx", _rnmc_like_bytes(), XLSX_MIME)),
+            ],
+            follow_redirects=False,
+        )
+        stage_url = response.headers["location"]
+
+        preview = client.get(stage_url)
+        assert preview.status_code == 200
+        assert "КЛ — готовы" in preview.text
+        assert "Не КЛ — автоматически пропущены" in preview.text
+        assert "NOT_KL" in preview.text
+        assert "rnmc.xlsx" in preview.text
+
+        commit = client.post(
+            stage_url + "/commit",
+            data={"task_no__0": "12345"},
+            follow_redirects=False,
+        )
+        assert commit.status_code == 303
+
+    connection = connect(db_path)
+    try:
+        rows = list_tkp_items(connection, limit=10)
+        assert len(rows) == 1
+        assert rows[0].source_file_name == "valid-kl.xlsx"
+        sources = list_tkp_sources(connection)
+        assert len(sources) == 1
+        assert sources[0].file_name == "valid-kl.xlsx"
+    finally:
+        connection.close()
+
+
+def test_admin_can_manually_exclude_kl_file_before_commit(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        response = client.post(
+            "/admin/tkp/import-folder",
+            files=[
+                ("tkp_files", ("mixed/keep.xlsx", _source_bytes(), XLSX_MIME)),
+                (
+                    "tkp_files",
+                    ("mixed/exclude.xlsx", _source_bytes(task_no=None), XLSX_MIME),
+                ),
+            ],
+            follow_redirects=False,
+        )
+        stage_url = response.headers["location"]
+
+        preview = client.get(stage_url)
+        assert preview.status_code == 200
+        assert 'name="exclude__0"' in preview.text
+        assert 'name="exclude__1"' in preview.text
+        assert "NEEDS_TASK_NUMBER" in preview.text
+
+        commit = client.post(
+            stage_url + "/commit",
+            data={
+                "task_no__0": "12345",
+                "task_no__1": "",
+                "exclude__1": "1",
+            },
+            follow_redirects=False,
+        )
+        assert commit.status_code == 303
+
+    connection = connect(db_path)
+    try:
+        rows = list_tkp_items(connection, limit=10)
+        assert len(rows) == 1
+        assert rows[0].source_file_name == "keep.xlsx"
+        sources = list_tkp_sources(connection)
+        assert len(sources) == 1
+        assert sources[0].file_name == "keep.xlsx"
     finally:
         connection.close()
 
