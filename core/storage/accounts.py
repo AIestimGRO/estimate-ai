@@ -107,7 +107,10 @@ def authenticate_user(
     login: str,
     password: str,
 ) -> UserRecord | None:
-    normalized_login = normalize_login(login)
+    try:
+        normalized_login = normalize_login(login)
+    except ValueError:
+        return None
     row = connection.execute(
         """
         SELECT id, full_name, login, password_hash, role, is_active,
