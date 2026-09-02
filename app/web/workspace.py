@@ -495,10 +495,15 @@ def install_workspace_routes(app: FastAPI) -> None:
                 )
         finally:
             connection.close()
+        media_type = (
+            "application/vnd.ms-excel.sheet.macroEnabled.12"
+            if Path(final_path).suffix.lower() == ".xlsm"
+            else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
         return FileResponse(
             final_path,
             filename=Path(final_path).name,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            media_type=media_type,
         )
 
     @app.get("/admin/audit", response_class=HTMLResponse)
