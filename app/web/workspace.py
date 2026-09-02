@@ -38,10 +38,12 @@ from core.storage.workspace import (
     get_change_request,
     get_processing_job,
     get_user_preference,
+    list_activity_events,
     list_cell_overrides,
     list_change_requests,
     list_processing_jobs,
     list_processing_rows,
+    record_activity_event,
     review_change_request,
     save_cell_override,
     save_user_preference,
@@ -68,6 +70,7 @@ TEXT = {
     "users": "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438",
     "requests": "\u0417\u0430\u043f\u0440\u043e\u0441\u044b \u0441\u043f\u0435\u0446\u0438\u0430\u043b\u0438\u0441\u0442\u043e\u0432",
     "my_requests": "\u041c\u043e\u0438 \u0437\u0430\u043f\u0440\u043e\u0441\u044b",
+    "audit": "\u0416\u0443\u0440\u043d\u0430\u043b \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439",
     "restore_original": "\u0412\u0435\u0440\u043d\u0443\u0442\u044c \u0438\u0441\u0445\u043e\u0434\u043d\u043e\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435",
     "logout": "\u0412\u044b\u0439\u0442\u0438",
     "download": "\u0421\u043a\u0430\u0447\u0430\u0442\u044c Excel",
@@ -457,6 +460,15 @@ def install_workspace_routes(app: FastAPI) -> None:
                 )
             try:
                 final_path = build_postprocessed_workbook(connection, job.id)
+                record_activity_event(
+                    connection,
+                    actor_user_id=user.id,
+                    event_type="excel_downloaded",
+                    entity_type="processing_job",
+                    entity_id=job.id,
+                    job_id=job.id,
+                    details=Path(final_path).name,
+                )
             except (FileNotFoundError, ValueError) as error:
                 return HTMLResponse(
                     _render_message(
@@ -473,6 +485,16 @@ def install_workspace_routes(app: FastAPI) -> None:
             filename=Path(final_path).name,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+    @app.get("/admin/audit", response_class=HTMLResponse)
+    def admin_audit_page(request: Request):
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            events = list_activity_events(connection, limit=5000)
+        finally:
+            connection.close()
+        return HTMLResponse(_render_audit(events, request.state.user))
 
     @app.get("/admin/users", response_class=HTMLResponse)
     def admin_users_page(request: Request, message: str = "", error: str = ""):
@@ -734,6 +756,7 @@ def _nav(user) -> str:
             f'<a href="/admin">{_escape("Admin")}</a>'
             f'<a href="/admin/users">{_escape(TEXT["users"])}</a>'
             f'<a href="/admin/change-requests">{_escape(TEXT["requests"])}</a>'
+            f'<a href="/admin/audit">{_escape(TEXT["audit"])}</a>'
         )
     else:
         admin_links = f'<a href="/requests">{_escape(TEXT["my_requests"])}</a>'
@@ -1364,6 +1387,49 @@ loadData().catch(()=>{{saveState.textContent='Grid load failed';saveState.classL
 }})();
 </script>"""
     return _page(job.estimate_filename, body, user, script=script)
+
+
+def _render_audit(events, user) -> str:
+    labels = {
+        "processing_created": "\u0421\u043e\u0437\u0434\u0430\u043b \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u043a\u0443",
+        "cell_edited": "\u0418\u0437\u043c\u0435\u043d\u0438\u043b \u044f\u0447\u0435\u0439\u043a\u0443",
+        "change_request_submitted": "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u043b \u0437\u0430\u043f\u0440\u043e\u0441",
+        "change_request_approved": "\u041e\u0434\u043e\u0431\u0440\u0438\u043b \u0437\u0430\u043f\u0440\u043e\u0441",
+        "change_request_rejected": "\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u043b \u0437\u0430\u043f\u0440\u043e\u0441",
+        "excel_downloaded": "\u0421\u043a\u0430\u0447\u0430\u043b Excel",
+    }
+    rows = []
+    for event in events:
+        details = _activity_details(event.event_type, event.details)
+        rows.append(
+            f"""<tr>
+<td>{_escape(event.created_at)}</td>
+<td><strong>{_escape(event.actor_name or "-")}</strong></td>
+<td>{_escape(labels.get(event.event_type, event.event_type))}</td>
+<td>{_escape(event.estimate_filename or "-")}</td>
+<td>{_escape(details)}</td>
+</tr>"""
+        )
+    body = f"""<main>
+<div class="page-head"><div><h1>{_escape(TEXT["audit"])}</h1><p>Processing, edits, requests, approvals, and Excel downloads.</p></div></div>
+<div class="card"><table class="simple-table"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>File</th><th>Details</th></tr></thead>
+<tbody>{''.join(rows) or '<tr><td colspan="5">No activity yet.</td></tr>'}</tbody></table></div>
+</main>"""
+    return _page(TEXT["audit"], body, user)
+
+
+def _activity_details(event_type: str, details: str) -> str:
+    if event_type != "cell_edited":
+        return str(details or "")
+    try:
+        payload = json.loads(str(details or "{}"))
+    except (TypeError, ValueError):
+        return str(details or "")
+    row = payload.get("excel_row")
+    column = payload.get("column")
+    old = payload.get("old")
+    new = payload.get("new")
+    return f"row {row}, column {column}: {old!s} -> {new!s}"
 
 
 def _render_my_requests(requests, user) -> str:
