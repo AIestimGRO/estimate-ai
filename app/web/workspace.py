@@ -67,6 +67,8 @@ TEXT = {
     "new_run": "\u041d\u043e\u0432\u044b\u0439 \u043f\u043e\u0434\u0431\u043e\u0440",
     "users": "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438",
     "requests": "\u0417\u0430\u043f\u0440\u043e\u0441\u044b \u0441\u043f\u0435\u0446\u0438\u0430\u043b\u0438\u0441\u0442\u043e\u0432",
+    "my_requests": "\u041c\u043e\u0438 \u0437\u0430\u043f\u0440\u043e\u0441\u044b",
+    "restore_original": "\u0412\u0435\u0440\u043d\u0443\u0442\u044c \u0438\u0441\u0445\u043e\u0434\u043d\u043e\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435",
     "logout": "\u0412\u044b\u0439\u0442\u0438",
     "download": "\u0421\u043a\u0430\u0447\u0430\u0442\u044c Excel",
     "search": "\u041f\u043e\u0438\u0441\u043a \u043f\u043e \u0442\u0430\u0431\u043b\u0438\u0446\u0435",
@@ -225,6 +227,21 @@ def install_workspace_routes(app: FastAPI) -> None:
         finally:
             connection.close()
         return HTMLResponse(_render_jobs(jobs, user))
+
+    @app.get("/requests", response_class=HTMLResponse)
+    def my_requests_page(request: Request) -> HTMLResponse:
+        user = request.state.user
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            requests = list_change_requests(
+                connection,
+                submitted_by=user.id,
+                limit=5000,
+            )
+        finally:
+            connection.close()
+        return HTMLResponse(_render_my_requests(requests, user))
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
     def workspace_page(request: Request, job_id: str) -> HTMLResponse:
@@ -718,6 +735,8 @@ def _nav(user) -> str:
             f'<a href="/admin/users">{_escape(TEXT["users"])}</a>'
             f'<a href="/admin/change-requests">{_escape(TEXT["requests"])}</a>'
         )
+    else:
+        admin_links = f'<a href="/requests">{_escape(TEXT["my_requests"])}</a>'
     return (
         '<nav class="top-nav">'
         '<a class="brand" href="/">Estimate AI</a>'
@@ -878,7 +897,7 @@ def _render_workspace(job, user) -> str:
     body = f"""<main style="max-width:none">
 <div class="page-head">
 <div><h1>{_escape(job.estimate_filename)}</h1><p>{_escape(job.owner_name)} &middot; {_escape(job.sheet_title)} &middot; {_escape(job.region)}</p></div>
-<div class="actions"><a class="button ghost" href="/jobs">{_escape(TEXT["jobs"])}</a><a class="button" href="/jobs/{_escape(job.id)}/download">{_escape(TEXT["download"])}</a></div>
+<div class="actions"><a class="button ghost" href="/jobs">{_escape(TEXT["jobs"])}</a><button class="button" id="downloadButton" type="button">{_escape(TEXT["download"])}</button></div>
 </div>
 <div class="metrics">
 <div class="metric"><strong>{job.total_rows}</strong><span>Rows</span></div>
@@ -901,6 +920,7 @@ def _render_workspace(job, user) -> str:
 <div id="contextMenu" class="context-menu">
 <button type="button" data-action="change"></button>
 <button type="button" data-action="blue"></button>
+<button type="button" data-action="restore"></button>
 </div>
 <div id="requestModal" class="modal-backdrop"><div class="modal">
 <h2 id="requestTitle"></h2>
@@ -990,8 +1010,9 @@ async function loadData() {{
   state.rows = data.rows || [];
   state.baseRows = state.rows;
   (data.overrides || []).forEach(item => {{
-    state.overrides.set(key(item.row_id, item.column_index), item);
-    state.changed.add(key(item.row_id, item.column_index));
+    const editKey=key(item.row_id, item.column_index);
+    state.overrides.set(editKey, item);
+    if (JSON.stringify(item.current_value) !== JSON.stringify(item.original_value)) state.changed.add(editKey);
     setCellValue(item.row_id, item.column_index, item.current_value);
   }});
   (data.requests || []).forEach(item => {{
@@ -1172,7 +1193,10 @@ function makeRow(row, columns) {{
     const td = document.createElement('td');
     const k = key(row.id, column.index);
     td.textContent = asText(cellValue(row,column));
-    td.title = rawText(cellValue(row,column));
+    const savedOverride=state.overrides.get(k);
+    td.title = savedOverride
+      ? ('Original: '+asText(savedOverride.original_value)+' | '+savedOverride.editor_name+' | '+savedOverride.updated_at)
+      : rawText(cellValue(row,column));
     td.dataset.rowId = row.id; td.dataset.columnIndex = column.index;
     if (state.changed.has(k)) td.classList.add('changed');
     if (state.queue.some(item => item.row_id===row.id && item.column_index===column.index)) td.classList.add('pending');
@@ -1220,9 +1244,14 @@ function startEdit(td,row,column) {{
   input.addEventListener('blur', () => close(true));
 }}
 function queueEdit(row,column,newValue) {{
+  const editKey=key(row.id,column.index);
+  const pending=state.queue.find(item=>item.row_id===row.id && item.column_index===column.index);
+  const saved=state.overrides.get(editKey);
+  const originalValue=pending ? pending.original_value : (saved ? saved.original_value : cellValue(row,column));
   setCellValue(row.id,column.index,newValue);
-  state.changed.add(key(row.id,column.index));
-  const item={{client_change_id:uuid(),row_id:row.id,column_index:column.index,new_value:newValue}};
+  if (JSON.stringify(newValue) === JSON.stringify(originalValue)) state.changed.delete(editKey);
+  else state.changed.add(editKey);
+  const item={{client_change_id:uuid(),row_id:row.id,column_index:column.index,new_value:newValue,original_value:originalValue}};
   state.queue.push(item); saveQueue(); renderGrid(); flushQueue();
 }}
 let flushing=false;
@@ -1238,7 +1267,10 @@ async function flushQueue() {{
       if (response.status===401) {{ location.href='/login'; return; }}
       if (!response.ok) throw new Error('save_failed');
       const data=await response.json();
-      state.overrides.set(key(item.row_id,item.column_index),data.override);
+      const editKey=key(item.row_id,item.column_index);
+      state.overrides.set(editKey,data.override);
+      if (JSON.stringify(data.override.current_value) === JSON.stringify(data.override.original_value)) state.changed.delete(editKey);
+      else state.changed.add(editKey);
       state.queue.shift(); saveQueue();
     }}
   }} catch (_) {{
@@ -1252,19 +1284,49 @@ function openContext(event,row,column) {{
   state.selected={{row,column}};
   const change=contextMenu.querySelector('[data-action=change]');
   const blue=contextMenu.querySelector('[data-action=blue]');
+  const restore=contextMenu.querySelector('[data-action=restore]');
   change.textContent=T.request_change;
   blue.textContent=T.request_blue;
+  restore.textContent=T.restore_original;
   blue.style.display=column.task_number?'block':'none';
+  restore.style.display=state.changed.has(key(row.id,column.index))?'block':'none';
   contextMenu.style.left=Math.min(event.clientX,window.innerWidth-330)+'px';
   contextMenu.style.top=Math.min(event.clientY,window.innerHeight-120)+'px';
   contextMenu.style.display='block';
+}}
+function restoreSelected() {{
+  contextMenu.style.display='none';
+  if (!state.selected) return;
+  const {{row,column}}=state.selected;
+  const editKey=key(row.id,column.index);
+  const saved=state.overrides.get(editKey);
+  const pending=state.queue.filter(item=>item.row_id===row.id && item.column_index===column.index);
+  const original=saved ? saved.original_value : (pending.length ? pending[0].original_value : undefined);
+  if (original === undefined) return;
+  state.queue=state.queue.filter(item=>!(item.row_id===row.id && item.column_index===column.index));
+  setCellValue(row.id,column.index,original);
+  state.changed.delete(editKey);
+  saveQueue();
+  if (saved && JSON.stringify(saved.current_value)!==JSON.stringify(original)) {{
+    queueEdit(row,column,original);
+  }} else {{
+    renderGrid();
+  }}
+}}
+async function downloadReviewed() {{
+  await flushQueue();
+  if (state.queue.length) {{
+    alert(T.offline);
+    return;
+  }}
+  window.location.href='/jobs/'+JOB_ID+'/download';
 }}
 function openRequest(type) {{
   contextMenu.style.display='none';
   if (!state.selected) return;
   state.requestType=type; const {{row,column}}=state.selected;
   requestTitle.textContent=type==='blue_task'?T.request_blue:T.request_change;
-  requestMeta.textContent='Excel row '+row.excel_row_number+' &middot; '+column.label+(column.task_number?' &middot; '+column.task_number:'');
+  requestMeta.textContent='Excel row '+row.excel_row_number+' - '+column.label+(column.task_number?' - '+column.task_number:'');
   requestComment.value=''; modal.style.display='flex'; requestComment.focus();
 }}
 async function sendRequest() {{
@@ -1284,6 +1346,8 @@ async function sendRequest() {{
 }}
 contextMenu.querySelector('[data-action=change]').addEventListener('click',()=>openRequest('analog_change'));
 contextMenu.querySelector('[data-action=blue]').addEventListener('click',()=>openRequest('blue_task'));
+contextMenu.querySelector('[data-action=restore]').addEventListener('click',restoreSelected);
+document.getElementById('downloadButton').addEventListener('click',downloadReviewed);
 document.getElementById('requestCancel').addEventListener('click',()=>modal.style.display='none');
 document.getElementById('requestSend').addEventListener('click',sendRequest);
 document.addEventListener('click',event=>{{if(!contextMenu.contains(event.target))contextMenu.style.display='none'}});
@@ -1300,6 +1364,27 @@ loadData().catch(()=>{{saveState.textContent='Grid load failed';saveState.classL
 }})();
 </script>"""
     return _page(job.estimate_filename, body, user, script=script)
+
+
+def _render_my_requests(requests, user) -> str:
+    rows = []
+    for item in requests:
+        rows.append(
+            f"""<tr>
+<td>#{item.id}<div class="muted">{_escape(item.submitted_at)}</div></td>
+<td><strong>{_escape(item.estimate_filename)}</strong><div class="muted">row {item.excel_row_number or '-'} / col {item.column_index or '-'}</div></td>
+<td>{_escape(item.request_type)}<div class="muted">{_escape(item.task_number)}</div></td>
+<td>{_escape(item.comment)}</td>
+<td><span class="status {_escape(item.status)}">{_escape(item.status)}</span><div class="muted">{_escape(item.review_comment)}</div></td>
+</tr>"""
+        )
+    body = f"""<main>
+<div class="page-head"><div><h1>{_escape(TEXT["my_requests"])}</h1><p>Requests sent from reviewed estimate files.</p></div>
+<div class="actions"><a class="button ghost" href="/jobs">{_escape(TEXT["jobs"])}</a></div></div>
+<div class="card"><table class="simple-table"><thead><tr><th>ID</th><th>File</th><th>Type</th><th>Comment</th><th>Status</th></tr></thead>
+<tbody>{''.join(rows) or '<tr><td colspan="5">No requests yet.</td></tr>'}</tbody></table></div>
+</main>"""
+    return _page(TEXT["my_requests"], body, user)
 
 
 def _render_users(users, current_user, message: str, error: str) -> str:
