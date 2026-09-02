@@ -58,6 +58,7 @@ class ProcessingRow:
     row_index: int
     excel_row_number: int
     values: list[object]
+    metadata: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -195,7 +196,7 @@ def upsert_processing_job(
 def replace_processing_rows(
     connection: sqlite3.Connection,
     job_id: str,
-    rows: list[tuple[int, int, list[object]]],
+    rows: list[tuple[int, int, list[object], dict[str, object]]],
 ) -> None:
     with connection:
         connection.execute(
@@ -205,8 +206,8 @@ def replace_processing_rows(
         connection.executemany(
             """
             INSERT INTO processing_rows(
-                job_id, row_index, excel_row_number, values_json
-            ) VALUES (?, ?, ?, ?)
+                job_id, row_index, excel_row_number, values_json, metadata_json
+            ) VALUES (?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -214,8 +215,9 @@ def replace_processing_rows(
                     int(row_index),
                     int(excel_row_number),
                     json.dumps(values, ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
                 )
-                for row_index, excel_row_number, values in rows
+                for row_index, excel_row_number, values, metadata in rows
             ],
         )
 
@@ -268,7 +270,7 @@ def list_processing_rows(
 ) -> list[ProcessingRow]:
     rows = connection.execute(
         """
-        SELECT id, job_id, row_index, excel_row_number, values_json
+        SELECT id, job_id, row_index, excel_row_number, values_json, metadata_json
         FROM processing_rows
         WHERE job_id = ?
         ORDER BY row_index
@@ -807,6 +809,7 @@ def _processing_row(row: sqlite3.Row) -> ProcessingRow:
         row_index=int(row["row_index"]),
         excel_row_number=int(row["excel_row_number"]),
         values=list(json.loads(str(row["values_json"]) or "[]")),
+        metadata=dict(json.loads(str(row["metadata_json"]) or "{}")),
     )
 
 
