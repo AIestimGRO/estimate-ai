@@ -78,6 +78,8 @@ TEXT = {
     "columns": "\u041a\u043e\u043b\u043e\u043d\u043a\u0438",
     "changed_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043d\u044b\u0435",
     "flagged_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0441 \u0437\u0430\u043f\u0440\u043e\u0441\u0430\u043c\u0438",
+    "risk_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0440\u0438\u0441\u043a\u0438",
+    "no_analog_only": "\u0411\u0435\u0437 \u0430\u043d\u0430\u043b\u043e\u0433\u0430",
     "saved": "\u0412\u0441\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b",
     "saving": "\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435...",
     "offline": "\u041d\u0435\u0442 \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u044f. \u0418\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u043e\u0441\u0442\u0430\u043b\u0438\u0441\u044c \u0432 \u043e\u0447\u0435\u0440\u0435\u0434\u0438.",
@@ -313,6 +315,7 @@ def install_workspace_routes(app: FastAPI) -> None:
                         "row_index": row.row_index,
                         "excel_row_number": row.excel_row_number,
                         "values": row.values,
+                        "metadata": row.metadata,
                     }
                     for row in rows
                 ],
@@ -932,7 +935,9 @@ def _render_workspace(job, user) -> str:
 <input id="globalSearch" type="search" placeholder="{_escape(TEXT["search"])}">
 <button class="ghost" id="columnsButton" type="button">{_escape(TEXT["columns"])}</button>
 <label><input type="checkbox" id="changedOnly"> {_escape(TEXT["changed_only"])}</label>
-<label><input type="checkbox" id="flaggedOnly"> {_escape(TEXT["flagged_only"])}</label>
+<label><input type="checkbox" id="requestedOnly"> {_escape(TEXT["flagged_only"])}</label>
+<label><input type="checkbox" id="riskOnly"> {_escape(TEXT["risk_only"])}</label>
+<label><input type="checkbox" id="noAnalogOnly"> {_escape(TEXT["no_analog_only"])}</label>
 <span class="muted">Double click a cell to edit. Right click for a request.</span>
 <span id="saveState" class="save-state">{_escape(TEXT["saved"])}</span>
 </div>
@@ -973,7 +978,9 @@ const scroll = document.getElementById('gridScroll');
 const saveState = document.getElementById('saveState');
 const globalSearch = document.getElementById('globalSearch');
 const changedOnly = document.getElementById('changedOnly');
-const flaggedOnly = document.getElementById('flaggedOnly');
+const requestedOnly = document.getElementById('requestedOnly');
+const riskOnly = document.getElementById('riskOnly');
+const noAnalogOnly = document.getElementById('noAnalogOnly');
 const panel = document.getElementById('columnPanel');
 const contextMenu = document.getElementById('contextMenu');
 const modal = document.getElementById('requestModal');
@@ -1102,10 +1109,12 @@ function applyFilters(focusColumn = null) {{
       const hasChanged = state.columns.some(col => state.changed.has(key(row.id, col.index)));
       if (!hasChanged) return false;
     }}
-    if (flaggedOnly.checked) {{
+    if (requestedOnly.checked) {{
       const hasRequested = state.columns.some(col => state.requested.has(key(row.id, col.index)));
       if (!hasRequested) return false;
     }}
+    if (riskOnly.checked && !(row.metadata && row.metadata.risk)) return false;
+    if (noAnalogOnly.checked && row.metadata && row.metadata.has_analogs) return false;
     return true;
   }});
   if (state.sortColumn) {{
@@ -1377,7 +1386,9 @@ document.addEventListener('click',event=>{{if(!contextMenu.contains(event.target
 document.getElementById('columnsButton').addEventListener('click',()=>{{panel.hidden=!panel.hidden}});
 globalSearch.addEventListener('input',()=>applyFilters());
 changedOnly.addEventListener('change',()=>applyFilters());
-flaggedOnly.addEventListener('change',()=>applyFilters());
+requestedOnly.addEventListener('change',()=>applyFilters());
+riskOnly.addEventListener('change',()=>applyFilters());
+noAnalogOnly.addEventListener('change',()=>applyFilters());
 scroll.addEventListener('scroll',()=>requestAnimationFrame(renderGrid));
 window.addEventListener('online',flushQueue);
 window.addEventListener('offline',updateSaveState);
