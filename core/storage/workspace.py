@@ -75,6 +75,20 @@ class CellOverride:
 
 
 @dataclass(frozen=True)
+class ActivityEvent:
+    id: int
+    actor_user_id: int | None
+    actor_name: str
+    event_type: str
+    entity_type: str
+    entity_id: str
+    job_id: str
+    estimate_filename: str
+    details: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class ChangeRequest:
     id: int
     job_id: str
@@ -116,6 +130,10 @@ def upsert_processing_job(
     column_schema: list[dict[str, object]],
 ) -> None:
     payload = json.dumps(column_schema, ensure_ascii=False, separators=(",", ":"))
+    existing = connection.execute(
+        "SELECT id FROM processing_jobs WHERE id = ?",
+        (str(job_id),),
+    ).fetchone()
     with connection:
         connection.execute(
             """
@@ -162,6 +180,16 @@ def upsert_processing_job(
                 payload,
             ),
         )
+        if existing is None:
+            _insert_audit(
+                connection,
+                actor_user_id=int(owner_user_id),
+                event_type="processing_created",
+                entity_type="processing_job",
+                entity_id=str(job_id),
+                job_id=str(job_id),
+                details=str(estimate_filename),
+            )
 
 
 def replace_processing_rows(
@@ -385,6 +413,25 @@ def save_cell_override(
                 change_id,
             ),
         )
+        _insert_audit(
+            connection,
+            actor_user_id=int(editor_user_id),
+            event_type="cell_edited",
+            entity_type="processing_cell",
+            entity_id=f"{int(row_id)}:{column}",
+            job_id=str(job_id),
+            details=json.dumps(
+                {
+                    "excel_row": int(row.excel_row_number),
+                    "column": column,
+                    "old": old_value,
+                    "new": new_value,
+                    "revision": next_revision,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        )
         connection.execute(
             """
             UPDATE processing_jobs
@@ -518,6 +565,11 @@ def review_change_request(
     normalized_status = str(status or "").strip()
     if normalized_status not in {REQUEST_APPROVED, REQUEST_REJECTED}:
         raise ValueError("Unsupported review status")
+    request_row = connection.execute(
+        "SELECT job_id FROM specialist_change_requests WHERE id = ?",
+        (int(request_id),),
+    ).fetchone()
+    request_job_id = "" if request_row is None else str(request_row["job_id"])
     with connection:
         cursor = connection.execute(
             """
@@ -541,7 +593,7 @@ def review_change_request(
                 event_type=f"change_request_{normalized_status}",
                 entity_type="change_request",
                 entity_id=str(int(request_id)),
-                job_id="",
+                job_id=request_job_id,
                 details=str(review_comment or "").strip(),
             )
     return cursor.rowcount > 0
@@ -596,6 +648,46 @@ def save_user_preference(
             """,
             (int(user_id), normalized_key, _json_dump(value)),
         )
+
+
+def list_activity_events(
+    connection: sqlite3.Connection,
+    *,
+    limit: int = 1000,
+) -> list[ActivityEvent]:
+    rows = connection.execute(
+        """
+        SELECT a.id, a.actor_user_id, COALESCE(u.full_name, '') AS actor_name,
+               a.event_type, a.entity_type, a.entity_id, a.job_id,
+               COALESCE(j.estimate_filename, '') AS estimate_filename,
+               a.details, a.created_at
+        FROM audit_events a
+        LEFT JOIN app_users u ON u.id = a.actor_user_id
+        LEFT JOIN processing_jobs j ON j.id = a.job_id
+        ORDER BY a.id DESC
+        LIMIT ?
+        """,
+        (max(1, min(10_000, int(limit))),),
+    ).fetchall()
+    return [
+        ActivityEvent(
+            id=int(row["id"]),
+            actor_user_id=(
+                int(row["actor_user_id"])
+                if row["actor_user_id"] is not None
+                else None
+            ),
+            actor_name=str(row["actor_name"]),
+            event_type=str(row["event_type"]),
+            entity_type=str(row["entity_type"]),
+            entity_id=str(row["entity_id"]),
+            job_id=str(row["job_id"]),
+            estimate_filename=str(row["estimate_filename"]),
+            details=str(row["details"]),
+            created_at=str(row["created_at"]),
+        )
+        for row in rows
+    ]
 
 
 def get_user_preference(
