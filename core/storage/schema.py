@@ -329,6 +329,7 @@ CREATE TABLE IF NOT EXISTS processing_rows (
     row_index INTEGER NOT NULL,
     excel_row_number INTEGER NOT NULL,
     values_json TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(job_id, row_index)
 );
 
