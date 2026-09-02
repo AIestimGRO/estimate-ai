@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 DDL = """
 PRAGMA foreign_keys = ON;
