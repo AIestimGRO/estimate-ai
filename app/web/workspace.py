@@ -72,7 +72,7 @@ TEXT = {
     "search": "\u041f\u043e\u0438\u0441\u043a \u043f\u043e \u0442\u0430\u0431\u043b\u0438\u0446\u0435",
     "columns": "\u041a\u043e\u043b\u043e\u043d\u043a\u0438",
     "changed_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043d\u044b\u0435",
-    "flagged_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0441\u043f\u043e\u0440\u043d\u044b\u0435",
+    "flagged_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0441 \u0437\u0430\u043f\u0440\u043e\u0441\u0430\u043c\u0438",
     "saved": "\u0412\u0441\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b",
     "saving": "\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435...",
     "offline": "\u041d\u0435\u0442 \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u044f. \u0418\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u043e\u0441\u0442\u0430\u043b\u0438\u0441\u044c \u0432 \u043e\u0447\u0435\u0440\u0435\u0434\u0438.",
@@ -144,6 +144,7 @@ def install_workspace_routes(app: FastAPI) -> None:
 
     @app.post("/setup")
     def setup_submit(
+        request: Request,
         full_name: str = Form(...),
         login: str = Form(...),
         password: str = Form(...),
@@ -167,7 +168,7 @@ def install_workspace_routes(app: FastAPI) -> None:
         finally:
             connection.close()
         response = RedirectResponse("/admin/users", status_code=303)
-        _set_session_cookie(response, token)
+        _set_session_cookie(response, token, secure=request.url.scheme == "https")
         return response
 
     @app.get("/login", response_class=HTMLResponse)
@@ -876,7 +877,7 @@ def _render_workspace(job, user) -> str:
     job_id = json.dumps(job.id)
     body = f"""<main style="max-width:none">
 <div class="page-head">
-<div><h1>{_escape(job.estimate_filename)}</h1><p>{_escape(job.owner_name)} · {_escape(job.sheet_title)} · {_escape(job.region)}</p></div>
+<div><h1>{_escape(job.estimate_filename)}</h1><p>{_escape(job.owner_name)} &middot; {_escape(job.sheet_title)} &middot; {_escape(job.region)}</p></div>
 <div class="actions"><a class="button ghost" href="/jobs">{_escape(TEXT["jobs"])}</a><a class="button" href="/jobs/{_escape(job.id)}/download">{_escape(TEXT["download"])}</a></div>
 </div>
 <div class="metrics">
@@ -1035,11 +1036,11 @@ function rebuildColumnPanel() {{
       persistPreference(); renderGrid();
     }});
     const span = document.createElement('span');
-    span.textContent = column.label + (column.sublabel ? ' · ' + column.sublabel : '');
+    span.textContent = column.label + (column.sublabel ? ' &middot; ' + column.sublabel : '');
     label.append(input, span); panel.appendChild(label);
   }});
 }}
-function applyFilters() {{
+function applyFilters(focusColumn = null) {{
   const query = globalSearch.value.trim().toLocaleLowerCase('ru-RU');
   const filters = state.columnFilters;
   let rows = state.baseRows.filter(row => {{
@@ -1078,6 +1079,14 @@ function applyFilters() {{
   state.rows = rows;
   scroll.scrollTop = 0;
   renderGrid();
+  if (focusColumn !== null) {{
+    const current = grid.querySelector('input[data-filter-column="' + focusColumn + '"]');
+    if (current) {{
+      current.focus();
+      const end = current.value.length;
+      current.setSelectionRange(end, end);
+    }}
+  }}
 }}
 function visibleColumns() {{
   return state.columns.filter(column => !state.hidden.has(column.index));
@@ -1100,8 +1109,9 @@ function makeHeader(columns) {{
     const head = document.createElement('span'); head.className = 'head-label'; head.textContent = column.label;
     const sub = document.createElement('span'); sub.className = 'head-sub'; sub.textContent = column.sublabel || column.letter;
     const filter = document.createElement('input'); filter.placeholder = 'filter'; filter.value = state.columnFilters[column.index] || '';
+    filter.dataset.filterColumn = column.index;
     filter.addEventListener('click', event => event.stopPropagation());
-    filter.addEventListener('input', () => {{ state.columnFilters[column.index] = filter.value; applyFilters(); }});
+    filter.addEventListener('input', () => {{ state.columnFilters[column.index] = filter.value; applyFilters(column.index); }});
     head.addEventListener('click', () => {{
       if (state.sortColumn && state.sortColumn.index === column.index) state.sortDirection *= -1;
       else {{ state.sortColumn = column; state.sortDirection = 1; }}
@@ -1254,7 +1264,7 @@ function openRequest(type) {{
   if (!state.selected) return;
   state.requestType=type; const {{row,column}}=state.selected;
   requestTitle.textContent=type==='blue_task'?T.request_blue:T.request_change;
-  requestMeta.textContent='Excel row '+row.excel_row_number+' · '+column.label+(column.task_number?' · '+column.task_number:'');
+  requestMeta.textContent='Excel row '+row.excel_row_number+' &middot; '+column.label+(column.task_number?' &middot; '+column.task_number:'');
   requestComment.value=''; modal.style.display='flex'; requestComment.focus();
 }}
 async function sendRequest() {{
@@ -1334,7 +1344,7 @@ def _render_requests(requests, user, selected_status: str, message: str, error: 
 </div>"""
         rows.append(
             f"""<tr><td>#{item.id}<div class="muted">{_escape(item.submitted_at)}</div></td>
-<td><strong>{_escape(item.estimate_filename)}</strong><div class="muted">row {item.excel_row_number or '-'} · col {item.column_index or '-'}</div></td>
+<td><strong>{_escape(item.estimate_filename)}</strong><div class="muted">row {item.excel_row_number or '-'} &middot; col {item.column_index or '-'}</div></td>
 <td>{_escape(item.submitted_by_name)}</td><td>{_escape(item.request_type)}<div class="muted">{_escape(item.task_number)}</div></td>
 <td>{_escape(item.comment)}</td><td><span class="status {_escape(item.status)}">{_escape(item.status)}</span><div class="muted">{_escape(item.review_comment)}</div></td><td>{actions}</td></tr>"""
         )
