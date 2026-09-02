@@ -91,6 +91,18 @@ TEXT = {
     "approved": "\u041e\u0434\u043e\u0431\u0440\u0435\u043d\u043e",
     "rejected": "\u041e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u043e",
     "pending": "\u041d\u0430 \u0441\u043e\u0433\u043b\u0430\u0441\u043e\u0432\u0430\u043d\u0438\u0438",
+    "admin": "\u0410\u0434\u043c\u0438\u043d\u043a\u0430",
+    "file": "\u0424\u0430\u0439\u043b",
+    "owner": "\u0421\u043f\u0435\u0446\u0438\u0430\u043b\u0438\u0441\u0442",
+    "rows": "\u0421\u0442\u0440\u043e\u043a\u0438",
+    "matched": "\u041f\u043e\u0434\u043e\u0431\u0440\u0430\u043d\u043e",
+    "risks": "\u0420\u0438\u0441\u043a\u0438",
+    "status": "\u0421\u0442\u0430\u0442\u0443\u0441",
+    "open": "\u041e\u0442\u043a\u0440\u044b\u0442\u044c",
+    "help_edit": "\u0414\u0432\u043e\u0439\u043d\u043e\u0439 \u043a\u043b\u0438\u043a \u2014 \u0438\u0437\u043c\u0435\u043d\u0438\u0442\u044c. \u041f\u0440\u0430\u0432\u0430\u044f \u043a\u043d\u043e\u043f\u043a\u0430 \u2014 \u0437\u0430\u043f\u0440\u043e\u0441 \u0438\u043b\u0438 \u0432\u043e\u0437\u0432\u0440\u0430\u0442.",
+    "restore_confirm": "\u0412\u0435\u0440\u043d\u0443\u0442\u044c \u044d\u0442\u0443 \u044f\u0447\u0435\u0439\u043a\u0443 \u043a \u0438\u0441\u0445\u043e\u0434\u043d\u043e\u043c\u0443 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044e?",
+    "approve_confirm": "\u041e\u0434\u043e\u0431\u0440\u0438\u0442\u044c \u044d\u0442\u043e\u0442 \u0437\u0430\u043f\u0440\u043e\u0441 \u0438 \u043f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u043e\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0435?",
+    "deactivate_confirm": "\u0417\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u044d\u0442\u043e\u0433\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f?",
 }
 
 
@@ -756,7 +768,7 @@ def _nav(user) -> str:
     admin_links = ""
     if user.role == ROLE_ADMIN:
         admin_links = (
-            f'<a href="/admin">{_escape("Admin")}</a>'
+            f'<a href="/admin">{_escape(TEXT["admin"])}</a>'
             f'<a href="/admin/users">{_escape(TEXT["users"])}</a>'
             f'<a href="/admin/change-requests">{_escape(TEXT["requests"])}</a>'
             f'<a href="/admin/audit">{_escape(TEXT["audit"])}</a>'
@@ -902,7 +914,7 @@ def _render_jobs(jobs, user) -> str:
 <td>{_escape(job.owner_name)}</td>
 <td>{job.total_rows}</td><td>{job.matched_rows}</td><td>{job.flagged_rows}</td>
 <td><span class="status">{_escape(job.status)}</span></td>
-<td><a class="button ghost" href="/jobs/{_escape(job.id)}">Open</a></td>
+<td><a class="button ghost" href="/jobs/{_escape(job.id)}">{_escape(TEXT["open"])}</a></td>
 </tr>"""
         for job in jobs
     )
@@ -911,7 +923,7 @@ def _render_jobs(jobs, user) -> str:
 <div class="page-head"><div><h1>{_escape(title)}</h1><p>Saved processing workspaces and manual review history.</p></div>
 <div class="actions"><a class="button" href="/">{_escape(TEXT["new_run"])}</a></div></div>
 <div class="card"><table class="simple-table"><thead><tr>
-<th>File</th><th>Owner</th><th>Rows</th><th>Matched</th><th>Risk</th><th>Status</th><th></th>
+<th>{_escape(TEXT["file"])}</th><th>{_escape(TEXT["owner"])}</th><th>{_escape(TEXT["rows"])}</th><th>{_escape(TEXT["matched"])}</th><th>{_escape(TEXT["risks"])}</th><th>{_escape(TEXT["status"])}</th><th></th>
 </tr></thead><tbody>{rows or '<tr><td colspan="7">No processing jobs yet.</td></tr>'}</tbody></table></div>
 </main>"""
     return _page(title, body, user)
@@ -926,9 +938,9 @@ def _render_workspace(job, user) -> str:
 <div class="actions"><a class="button ghost" href="/jobs">{_escape(TEXT["jobs"])}</a><button class="button" id="downloadButton" type="button">{_escape(TEXT["download"])}</button></div>
 </div>
 <div class="metrics">
-<div class="metric"><strong>{job.total_rows}</strong><span>Rows</span></div>
-<div class="metric"><strong>{job.matched_rows}</strong><span>Matched</span></div>
-<div class="metric"><strong>{job.flagged_rows}</strong><span>Risk</span></div>
+<div class="metric"><strong>{job.total_rows}</strong><span>{_escape(TEXT["rows"])}</span></div>
+<div class="metric"><strong>{job.matched_rows}</strong><span>{_escape(TEXT["matched"])}</span></div>
+<div class="metric"><strong>{job.flagged_rows}</strong><span>{_escape(TEXT["risks"])}</span></div>
 <div class="metric"><strong>{job.tkp_matched_rows}</strong><span>TKP</span></div>
 </div>
 <div class="toolbar">
@@ -938,7 +950,7 @@ def _render_workspace(job, user) -> str:
 <label><input type="checkbox" id="requestedOnly"> {_escape(TEXT["flagged_only"])}</label>
 <label><input type="checkbox" id="riskOnly"> {_escape(TEXT["risk_only"])}</label>
 <label><input type="checkbox" id="noAnalogOnly"> {_escape(TEXT["no_analog_only"])}</label>
-<span class="muted">Double click a cell to edit. Right click for a request.</span>
+<span class="muted">{_escape(TEXT["help_edit"])}</span>
 <span id="saveState" class="save-state">{_escape(TEXT["saved"])}</span>
 </div>
 <div class="grid-shell">
@@ -1329,6 +1341,7 @@ function openContext(event,row,column) {{
 function restoreSelected() {{
   contextMenu.style.display='none';
   if (!state.selected) return;
+  if (!window.confirm(T.restore_confirm)) return;
   const {{row,column}}=state.selected;
   const editKey=key(row.id,column.index);
   const saved=state.overrides.get(editKey);
@@ -1475,7 +1488,7 @@ def _render_users(users, current_user, message: str, error: str) -> str:
             f"""<tr><td><strong>{_escape(user.full_name)}</strong></td><td>{_escape(user.login)}</td>
 <td>{_escape(user.role)}</td><td>{'active' if user.is_active else 'blocked'}</td><td>
 <div class="inline">
-<form method="post" action="/admin/users/toggle"><input type="hidden" name="user_id" value="{user.id}"><input type="hidden" name="is_active" value="{next_active}"><button class="ghost" type="submit">{toggle_label}</button></form>
+<form method="post" action="/admin/users/toggle" {'onsubmit="return confirm(\'' + _escape(TEXT["deactivate_confirm"]) + '\')"' if user.is_active else ''}><input type="hidden" name="user_id" value="{user.id}"><input type="hidden" name="is_active" value="{next_active}"><button class="ghost" type="submit">{toggle_label}</button></form>
 <form method="post" action="/admin/users/password"><input type="hidden" name="user_id" value="{user.id}"><input name="password" type="password" minlength="8" placeholder="New password" required><button class="ghost" type="submit">Reset</button></form>
 </div></td></tr>"""
         )
@@ -1501,7 +1514,7 @@ def _render_requests(requests, user, selected_status: str, message: str, error: 
         actions = ""
         if item.status == REQUEST_PENDING:
             actions = f"""<div class="inline">
-<form method="post" action="/admin/change-requests/approve"><input type="hidden" name="request_id" value="{item.id}"><input name="review_comment" placeholder="Comment"><button class="success" type="submit">Approve</button></form>
+<form method="post" action="/admin/change-requests/approve" onsubmit="return confirm('{_escape(TEXT["approve_confirm"])}')"><input type="hidden" name="request_id" value="{item.id}"><input name="review_comment" placeholder="Comment"><button class="success" type="submit">Approve</button></form>
 <form method="post" action="/admin/change-requests/reject"><input type="hidden" name="request_id" value="{item.id}"><input name="review_comment" placeholder="Reason" required><button class="danger" type="submit">Reject</button></form>
 </div>"""
         rows.append(
