@@ -961,7 +961,7 @@ const T = {labels};
 const ROW_HEIGHT = 36;
 const BUFFER = 20;
 const queueKey = 'estimate-ai-edit-queue:' + JOB_ID;
-const localPrefKey = 'estimate-ai-grid-pref-v1';
+const localPrefKey = 'estimate-ai-grid-pref-v1:{int(user.id)}';
 const state = {{
   columns: [], rows: [], baseRows: [], visibleColumns: [], overrides: new Map(),
   changed: new Set(), requested: new Set(), queue: [], sortColumn: null,
@@ -1012,7 +1012,7 @@ function saveQueue() {{
   updateSaveState();
 }}
 function uuid() {{
-  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
 }}
 function updateSaveState() {{
@@ -1080,7 +1080,7 @@ function rebuildColumnPanel() {{
       persistPreference(); renderGrid();
     }});
     const span = document.createElement('span');
-    span.textContent = column.label + (column.sublabel ? ' &middot; ' + column.sublabel : '');
+    span.textContent = column.label + (column.sublabel ? ' - ' + column.sublabel : '');
     label.append(input, span); panel.appendChild(label);
   }});
 }}
@@ -1375,9 +1375,9 @@ document.getElementById('requestCancel').addEventListener('click',()=>modal.styl
 document.getElementById('requestSend').addEventListener('click',sendRequest);
 document.addEventListener('click',event=>{{if(!contextMenu.contains(event.target))contextMenu.style.display='none'}});
 document.getElementById('columnsButton').addEventListener('click',()=>{{panel.hidden=!panel.hidden}});
-globalSearch.addEventListener('input',applyFilters);
-changedOnly.addEventListener('change',applyFilters);
-flaggedOnly.addEventListener('change',applyFilters);
+globalSearch.addEventListener('input',()=>applyFilters());
+changedOnly.addEventListener('change',()=>applyFilters());
+flaggedOnly.addEventListener('change',()=>applyFilters());
 scroll.addEventListener('scroll',()=>requestAnimationFrame(renderGrid));
 window.addEventListener('online',flushQueue);
 window.addEventListener('offline',updateSaveState);
