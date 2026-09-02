@@ -7,10 +7,13 @@ from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app.services.write_result import RunAndWriteResult
 from core.ooxml_preservation import preserve_workbook_package_features
+from core.exclusions import LEGACY_REASON_COLOR, is_task_marked, resolve_task_highlight
+from core.storage.rules import list_task_color_entries, list_task_highlight_reasons
 from core.storage.workspace import (
     STATUS_READY,
     get_processing_job,
@@ -115,6 +118,13 @@ def build_postprocessed_workbook(connection, job_id: str) -> Path:
                 row=int(row.excel_row_number),
                 column=int(override.column_index),
             ).value = override.current_value
+
+        _apply_current_task_highlights(
+            connection,
+            worksheet,
+            job,
+            list(rows_by_id.values()),
+        )
         _request_full_recalculation(workbook)
         workbook.save(final_path)
         preserve_workbook_package_features(
@@ -127,6 +137,53 @@ def build_postprocessed_workbook(connection, job_id: str) -> Path:
 
     set_job_final_output(connection, job.id, str(final_path))
     return final_path
+
+
+def _apply_current_task_highlights(
+    connection,
+    worksheet,
+    job,
+    rows,
+) -> None:
+    """Apply task highlighting that may have been approved after the run."""
+    color_entries = list_task_color_entries(connection)
+    reasons = list_task_highlight_reasons(connection)
+    if not color_entries:
+        return
+
+    for column in job.column_schema:
+        if str(column.get("kind") or "") != "analog":
+            continue
+        task_number = str(column.get("task_number") or "").strip()
+        if not task_number or not is_task_marked(color_entries, task_number):
+            continue
+
+        highlight = resolve_task_highlight(color_entries, reasons, task_number)
+        if highlight is None:
+            color_hex = LEGACY_REASON_COLOR
+            label = ""
+        else:
+            color_hex = highlight.color_hex
+            label = highlight.label
+
+        fill = PatternFill(
+            start_color=f"FF{color_hex}",
+            end_color=f"FF{color_hex}",
+            fill_type="solid",
+        )
+        column_index = int(column["index"])
+        for row in rows:
+            worksheet.cell(
+                row=int(row.excel_row_number),
+                column=column_index,
+            ).fill = fill
+
+        reason_row = int(job.header_row) - 1
+        if reason_row > 0 and label:
+            cell = worksheet.cell(row=reason_row, column=column_index)
+            cell.value = label
+            cell.font = Font(bold=True, size=8, italic=True)
+            cell.fill = fill
 
 
 def _max_output_column(outcome: RunAndWriteResult, worksheet_max: int) -> int:
