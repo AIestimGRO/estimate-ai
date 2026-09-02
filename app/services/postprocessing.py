@@ -48,7 +48,7 @@ def persist_processing_job(
             max_column,
             outcome,
         )
-        rows: list[tuple[int, int, list[object]]] = []
+        rows: list[tuple[int, int, list[object], dict[str, object]]] = []
         for row_index, (excel_row, result_row) in enumerate(
             zip(outcome.row_numbers, outcome.result.rows),
             start=1,
@@ -62,7 +62,20 @@ def persist_processing_job(
             average_column = int(outcome.write_report.average_column)
             if 0 < average_column <= len(values):
                 values[average_column - 1] = result_row.recommended_price
-            rows.append((row_index, int(excel_row), values))
+            rows.append(
+                (
+                    row_index,
+                    int(excel_row),
+                    values,
+                    {
+                        "has_analogs": bool(result_row.has_analogs),
+                        "risk": bool(result_row.risk_result.is_flagged),
+                        "has_tkp": bool(result_row.has_tkp_analog),
+                        "status": str(result_row.status),
+                        "reason": str(result_row.match_result.reason),
+                    },
+                )
+            )
     finally:
         workbook.close()
 
