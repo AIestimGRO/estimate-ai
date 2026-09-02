@@ -91,7 +91,24 @@ def _seed_job(connection, tmp_path: Path, owner_user_id: int) -> str:
             }
         ],
     )
-    replace_processing_rows(connection, job_id, [(1, 2, [10.0])])
+    replace_processing_rows(
+        connection,
+        job_id,
+        [
+            (
+                1,
+                2,
+                [10.0],
+                {
+                    "has_analogs": True,
+                    "risk": False,
+                    "has_tkp": False,
+                    "status": "matched",
+                    "reason": "matched",
+                },
+            )
+        ],
+    )
     return job_id
 
 
