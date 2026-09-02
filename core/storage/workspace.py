@@ -286,7 +286,7 @@ def get_processing_row(
 ) -> ProcessingRow | None:
     row = connection.execute(
         """
-        SELECT id, job_id, row_index, excel_row_number, values_json
+        SELECT id, job_id, row_index, excel_row_number, values_json, metadata_json
         FROM processing_rows
         WHERE id = ?
         """,
