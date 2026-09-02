@@ -1484,11 +1484,18 @@ def _render_users(users, current_user, message: str, error: str) -> str:
     for user in users:
         next_active = "0" if user.is_active else "1"
         toggle_label = "Deactivate" if user.is_active else "Activate"
+        toggle_confirm = ""
+        if user.is_active:
+            toggle_confirm = (
+                ' onsubmit="return confirm(\''
+                + _escape(TEXT["deactivate_confirm"])
+                + '\')"'
+            )
         rows.append(
             f"""<tr><td><strong>{_escape(user.full_name)}</strong></td><td>{_escape(user.login)}</td>
 <td>{_escape(user.role)}</td><td>{'active' if user.is_active else 'blocked'}</td><td>
 <div class="inline">
-<form method="post" action="/admin/users/toggle" {'onsubmit="return confirm(\'' + _escape(TEXT["deactivate_confirm"]) + '\')"' if user.is_active else ''}><input type="hidden" name="user_id" value="{user.id}"><input type="hidden" name="is_active" value="{next_active}"><button class="ghost" type="submit">{toggle_label}</button></form>
+<form method="post" action="/admin/users/toggle"{toggle_confirm}><input type="hidden" name="user_id" value="{user.id}"><input type="hidden" name="is_active" value="{next_active}"><button class="ghost" type="submit">{toggle_label}</button></form>
 <form method="post" action="/admin/users/password"><input type="hidden" name="user_id" value="{user.id}"><input name="password" type="password" minlength="8" placeholder="New password" required><button class="ghost" type="submit">Reset</button></form>
 </div></td></tr>"""
         )
