@@ -856,7 +856,9 @@ main{{padding:24px;max-width:1600px;margin:0 auto}}
 .sticky-cell{{position:sticky!important;z-index:8!important;background:#fff!important}}
 .review-grid th.sticky-cell{{z-index:20!important;background:#f8fafc!important}}
 .column-panel{{position:absolute;right:12px;top:48px;width:320px;max-height:430px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px;box-shadow:var(--shadow);z-index:40}}
-.column-panel label{{display:flex;gap:8px;align-items:center;padding:5px}}
+.column-panel .column-row{{display:flex;gap:6px;align-items:center;padding:4px}}
+.column-panel .column-row label{{display:flex;gap:8px;align-items:center;flex:1;padding:2px}}
+.column-panel .column-row button{{padding:3px 7px;border-radius:6px;background:#eef2f7;color:#334155}}
 .context-menu{{position:fixed;display:none;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);padding:6px;z-index:100}}
 .context-menu button{{display:block;width:100%;text-align:left;background:#fff;color:#334155;padding:8px 10px}}
 .context-menu button:hover{{background:#f1f5f9}}
@@ -983,7 +985,7 @@ const state = {{
   columns: [], rows: [], baseRows: [], visibleColumns: [], overrides: new Map(),
   changed: new Set(), requested: new Set(), queue: [], sortColumn: null,
   sortDirection: 1, columnFilters: {{}}, hidden: new Set(), widths: {{}},
-  selected: null, requestType: null
+  order: [], selected: null, requestType: null
 }};
 const grid = document.getElementById('grid');
 const scroll = document.getElementById('gridScroll');
@@ -1075,10 +1077,14 @@ function applyPreference(pref) {{
   const merged = Object.assign({{}}, pref || {{}}, local || {{}});
   state.hidden = new Set(Array.isArray(merged.hidden) ? merged.hidden.map(Number) : []);
   state.widths = merged.widths && typeof merged.widths === 'object' ? merged.widths : {{}};
+  const known = state.columns.map(column => Number(column.index));
+  const savedOrder = Array.isArray(merged.order) ? merged.order.map(Number) : [];
+  state.order = savedOrder.filter(index => known.includes(index));
+  known.forEach(index => {{ if (!state.order.includes(index)) state.order.push(index); }});
 }}
 let prefTimer = null;
 function persistPreference() {{
-  const payload = {{hidden:[...state.hidden], widths:state.widths}};
+  const payload = {{hidden:[...state.hidden], widths:state.widths, order:state.order}};
   localStorage.setItem(localPrefKey, JSON.stringify(payload));
   clearTimeout(prefTimer);
   prefTimer = setTimeout(() => {{
@@ -1087,9 +1093,27 @@ function persistPreference() {{
     }}).catch(() => {{}});
   }}, 400);
 }}
+function orderedColumns() {{
+  const byIndex = new Map(state.columns.map(column => [Number(column.index), column]));
+  const ordered = state.order.map(index => byIndex.get(Number(index))).filter(Boolean);
+  state.columns.forEach(column => {{
+    if (!ordered.some(item => Number(item.index) === Number(column.index))) ordered.push(column);
+  }});
+  return ordered;
+}}
+function moveColumn(columnIndex, delta) {{
+  const index = state.order.indexOf(Number(columnIndex));
+  const target = index + delta;
+  if (index < 0 || target < 0 || target >= state.order.length) return;
+  const copy = state.order.slice();
+  [copy[index], copy[target]] = [copy[target], copy[index]];
+  state.order = copy;
+  rebuildColumnPanel(); renderGrid(); persistPreference();
+}}
 function rebuildColumnPanel() {{
   panel.innerHTML = '';
-  state.columns.forEach(column => {{
+  orderedColumns().forEach(column => {{
+    const row = document.createElement('div'); row.className='column-row';
     const label = document.createElement('label');
     const input = document.createElement('input');
     input.type = 'checkbox';
@@ -1100,7 +1124,11 @@ function rebuildColumnPanel() {{
     }});
     const span = document.createElement('span');
     span.textContent = column.label + (column.sublabel ? ' - ' + column.sublabel : '');
-    label.append(input, span); panel.appendChild(label);
+    const up=document.createElement('button'); up.type='button'; up.textContent='up';
+    const down=document.createElement('button'); down.type='button'; down.textContent='down';
+    up.addEventListener('click',()=>moveColumn(column.index,-1));
+    down.addEventListener('click',()=>moveColumn(column.index,1));
+    label.append(input, span); row.append(label,up,down); panel.appendChild(row);
   }});
 }}
 function applyFilters(focusColumn = null) {{
@@ -1154,7 +1182,7 @@ function applyFilters(focusColumn = null) {{
   }}
 }}
 function visibleColumns() {{
-  return state.columns.filter(column => !state.hidden.has(column.index));
+  return orderedColumns().filter(column => !state.hidden.has(column.index));
 }}
 function makeColGroup(columns) {{
   const group = document.createElement('colgroup');
