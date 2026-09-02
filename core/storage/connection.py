@@ -94,6 +94,7 @@ def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "tkp_items", "winner_block_uin", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "tkp_items", "winner_block_total_vat", "REAL")
     _ensure_column(connection, "tkp_items", "winner_block_reason", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(connection, "processing_rows", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
     connection.execute("UPDATE catalog_items SET price_original = price WHERE price_original IS NULL")
     connection.execute("UPDATE catalog_items SET price_zlvl = price WHERE price_zlvl IS NULL")
     connection.execute(
