@@ -187,7 +187,7 @@ def install_workspace_routes(app: FastAPI) -> None:
         finally:
             connection.close()
         response = RedirectResponse("/admin/users", status_code=303)
-        _set_session_cookie(response, token, secure=request.url.scheme == "https")
+        _set_session_cookie(response, token, secure=_request_is_secure(request))
         return response
 
     @app.get("/login", response_class=HTMLResponse)
@@ -215,7 +215,7 @@ def install_workspace_routes(app: FastAPI) -> None:
             connection.close()
         destination = _safe_next(next) or ("/admin" if user.role == ROLE_ADMIN else "/jobs")
         response = RedirectResponse(destination, status_code=303)
-        _set_session_cookie(response, token, secure=request.url.scheme == "https")
+        _set_session_cookie(response, token, secure=_request_is_secure(request))
         return response
 
     @app.post("/logout")
@@ -725,6 +725,11 @@ def _accessible_job(connection, job_id: str, user):
     if user.role == ROLE_ADMIN or int(job.owner_user_id) == int(user.id):
         return job
     return None
+
+
+def _request_is_secure(request: Request) -> bool:
+    forwarded = str(request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
+    return request.url.scheme == "https" or forwarded == "https"
 
 
 def _set_session_cookie(response, token: str, *, secure: bool = False) -> None:
