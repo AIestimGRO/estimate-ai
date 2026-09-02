@@ -60,6 +60,7 @@ class RunAndWriteResult:
     catalog_row_count: int = 0
     tkp_enabled: bool = False
     tkp_catalog_row_count: int = 0
+    row_numbers: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,7 @@ def run_and_write(
         catalog_row_count=catalog.row_count,
         tkp_enabled=use_tkp_analogs,
         tkp_catalog_row_count=len(tkp_catalog_index),
+        row_numbers=tuple(row_numbers),
     )
 
 
