@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -266,4 +266,151 @@ CREATE TABLE IF NOT EXISTS catalog_correction_events (
 
 CREATE INDEX IF NOT EXISTS idx_catalog_correction_events_request
     ON catalog_correction_events(correction_id, id);
+
+CREATE TABLE IF NOT EXISTS app_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    login TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_users_role
+    ON app_users(role, is_active);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user
+    ON user_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_expiry
+    ON user_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS processing_jobs (
+    id TEXT PRIMARY KEY,
+    owner_user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE RESTRICT,
+    estimate_filename TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    output_path TEXT NOT NULL,
+    final_output_path TEXT NOT NULL DEFAULT '',
+    sheet_title TEXT NOT NULL DEFAULT '',
+    header_row INTEGER NOT NULL DEFAULT 0,
+    coefficient REAL NOT NULL DEFAULT 1.0,
+    region TEXT NOT NULL DEFAULT '',
+    use_tkp_analogs INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ready',
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    matched_rows INTEGER NOT NULL DEFAULT 0,
+    flagged_rows INTEGER NOT NULL DEFAULT 0,
+    tkp_matched_rows INTEGER NOT NULL DEFAULT 0,
+    column_schema_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_opened_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_jobs_owner
+    ON processing_jobs(owner_user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_processing_jobs_status
+    ON processing_jobs(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS processing_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL REFERENCES processing_jobs(id) ON DELETE CASCADE,
+    row_index INTEGER NOT NULL,
+    excel_row_number INTEGER NOT NULL,
+    values_json TEXT NOT NULL,
+    UNIQUE(job_id, row_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_rows_job
+    ON processing_rows(job_id, row_index);
+
+CREATE TABLE IF NOT EXISTS processing_cell_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL REFERENCES processing_jobs(id) ON DELETE CASCADE,
+    row_id INTEGER NOT NULL REFERENCES processing_rows(id) ON DELETE CASCADE,
+    column_index INTEGER NOT NULL,
+    original_value_json TEXT,
+    current_value_json TEXT,
+    editor_user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE RESTRICT,
+    revision INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(job_id, row_id, column_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_cell_overrides_job
+    ON processing_cell_overrides(job_id, row_id, column_index);
+
+CREATE TABLE IF NOT EXISTS processing_edit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    override_id INTEGER NOT NULL
+        REFERENCES processing_cell_overrides(id) ON DELETE CASCADE,
+    job_id TEXT NOT NULL REFERENCES processing_jobs(id) ON DELETE CASCADE,
+    row_id INTEGER NOT NULL REFERENCES processing_rows(id) ON DELETE CASCADE,
+    column_index INTEGER NOT NULL,
+    old_value_json TEXT,
+    new_value_json TEXT,
+    actor_user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE RESTRICT,
+    client_change_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_edit_events_job
+    ON processing_edit_events(job_id, created_at);
+
+CREATE TABLE IF NOT EXISTS specialist_change_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL REFERENCES processing_jobs(id) ON DELETE CASCADE,
+    row_id INTEGER REFERENCES processing_rows(id) ON DELETE SET NULL,
+    excel_row_number INTEGER,
+    column_index INTEGER,
+    request_type TEXT NOT NULL,
+    task_number TEXT NOT NULL DEFAULT '',
+    comment TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    submitted_by INTEGER NOT NULL REFERENCES app_users(id) ON DELETE RESTRICT,
+    submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_by INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+    reviewed_at TEXT,
+    review_comment TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_specialist_change_requests_status
+    ON specialist_change_requests(status, submitted_at);
+CREATE INDEX IF NOT EXISTS idx_specialist_change_requests_job
+    ON specialist_change_requests(job_id, submitted_at);
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    preference_key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY(user_id, preference_key)
+);
+
+CREATE TABLE IF NOT EXISTS audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_user_id INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL DEFAULT '',
+    job_id TEXT NOT NULL DEFAULT '',
+    details TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_job
+    ON audit_events(job_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor
+    ON audit_events(actor_user_id, created_at);
 """
