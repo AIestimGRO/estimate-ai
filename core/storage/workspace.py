@@ -710,6 +710,28 @@ def get_user_preference(
     return _json_load(row["value_json"])
 
 
+def record_activity_event(
+    connection: sqlite3.Connection,
+    *,
+    actor_user_id: int,
+    event_type: str,
+    entity_type: str,
+    entity_id: str = "",
+    job_id: str = "",
+    details: str = "",
+) -> None:
+    with connection:
+        _insert_audit(
+            connection,
+            actor_user_id=int(actor_user_id),
+            event_type=event_type,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            job_id=job_id,
+            details=details,
+        )
+
+
 def _insert_audit(
     connection: sqlite3.Connection,
     *,
