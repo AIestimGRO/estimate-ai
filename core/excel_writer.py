@@ -88,6 +88,8 @@ class WriteReport:
     analog_start_column: int
     analog_column_count: int
     tkp_start_column: int | None = None
+    header_row: int = 0
+    analog_columns: tuple["AnalogColumnDef", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -248,6 +250,8 @@ def write_run_result(
         analog_start_column=analog_start_column,
         analog_column_count=len(analog_plan.columns),
         tkp_start_column=tkp_start_column,
+        header_row=header_row,
+        analog_columns=analog_plan.columns,
     )
 
 
