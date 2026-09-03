@@ -41,6 +41,7 @@ from app.services.read_estimate import (
     MultipleSheetsError,
 )
 from app.services.write_result import preview_estimate_context, run_and_write
+from app.services.postprocessing import persist_processing_job
 from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_import_log
 from app.services.rnmc_excel import analyze_rnmc_zip_row_preview, import_rnmc_zip_catalog_rows
 from app.services.tkp_shadow import (
@@ -124,6 +125,7 @@ from core.storage.rules import (
 )
 from core.storage.connection import connect, default_database_path, init_database
 from core.excel_io import read_catalog_rows_with_positions
+from app.web.workspace import install_workspace_routes
 from app.web.rendering import (
     ADMIN_SECTION_SLUGS,
     XLSX_MIME,
@@ -171,6 +173,7 @@ class UploadRecord:
     use_database_catalog: bool = False
     output_path: Path | None = None
     output_name: str = ""
+    owner_user_id: int | None = None
 
 
 @dataclass
@@ -248,12 +251,13 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
     resolved_base = (
         Path(base_dir)
         if base_dir is not None
-        else Path(tempfile.gettempdir()) / "estimate_ai_web"
+        else default_database_path().parent / "workspaces"
     )
     resolved_base.mkdir(parents=True, exist_ok=True)
 
     app = FastAPI(title="Estimate AI", docs_url=None, redoc_url=None)
     app.state.app_state = AppState(base_dir=resolved_base)
+    install_workspace_routes(app)
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
@@ -2059,10 +2063,12 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
 
     @app.post("/run", response_class=HTMLResponse)
     async def run(
+        request: Request,
         catalog: UploadFile | None = File(None),
         estimate: UploadFile | None = File(None),
     ) -> HTMLResponse:
         state: AppState = app.state.app_state
+        current_user = getattr(request.state, "user", None)
 
         if estimate is None:
             return HTMLResponse(
@@ -2110,11 +2116,12 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             estimate_path=estimate_path,
             estimate_name=estimate_name,
             use_database_catalog=use_database_catalog,
+            owner_user_id=(int(current_user.id) if current_user is not None else None),
         )
         return _preview(state, token, selected_sheet=None)
 
     @app.get("/run", response_class=HTMLResponse)
-    def run_sheet(token: str, sheet: str | None = None) -> HTMLResponse:
+    def run_sheet(request: Request, token: str, sheet: str | None = None) -> HTMLResponse:
         state: AppState = app.state.app_state
         if token not in state.store:
             return HTMLResponse(
@@ -2124,10 +2131,16 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 ),
                 status_code=404,
             )
+        if not _upload_record_access_allowed(
+            state.store[token],
+            getattr(request.state, "user", None),
+        ):
+            return HTMLResponse(render_error("Access denied", "This processing session belongs to another user."), status_code=403)
         return _preview(state, token, selected_sheet=sheet)
 
     @app.post("/confirm", response_class=HTMLResponse)
     def confirm(
+        request: Request,
         token: str = Form(...),
         sheet: str = Form(...),
         region: str = Form(""),
@@ -2143,6 +2156,11 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                 ),
                 status_code=404,
             )
+        if not _upload_record_access_allowed(
+            state.store[token],
+            getattr(request.state, "user", None),
+        ):
+            return HTMLResponse(render_error("Access denied", "This processing session belongs to another user."), status_code=403)
 
         coef = _parse_coefficient(coefficient)
         if coef is _INVALID or coef is None:
@@ -2167,9 +2185,14 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         return _process(state, token, selected_sheet=sheet)
 
     @app.get("/download")
-    def download(token: str):
+    def download(request: Request, token: str):
         state: AppState = app.state.app_state
         record = state.store.get(token)
+        if record is not None and not _upload_record_access_allowed(
+            record,
+            getattr(request.state, "user", None),
+        ):
+            return HTMLResponse(render_error("Access denied", "This processing session belongs to another user."), status_code=403)
         if record is None or record.output_path is None or not record.output_path.exists():
             return HTMLResponse(
                 render_error(
@@ -2359,7 +2382,43 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
 
     record.output_path = outcome.output_path
     record.output_name = _wa_name(record.estimate_name)
+
+    if record.owner_user_id is not None:
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            persist_processing_job(
+                connection,
+                job_id=token,
+                owner_user_id=record.owner_user_id,
+                estimate_filename=record.estimate_name,
+                source_path=record.estimate_path,
+                outcome=outcome,
+                region=record.target_region or "",
+                use_tkp_analogs=record.use_tkp_analogs,
+            )
+        except (OSError, ValueError) as error:
+            return HTMLResponse(
+                render_error(
+                    "Could not save processing workspace",
+                    str(error),
+                ),
+                status_code=500,
+            )
+        finally:
+            connection.close()
+        return RedirectResponse(f"/jobs/{token}", status_code=303)
+
     return HTMLResponse(render_result(token, record.output_name, outcome))
+
+
+
+def _upload_record_access_allowed(record: UploadRecord, user) -> bool:
+    if record.owner_user_id is None:
+        return True
+    if user is None:
+        return False
+    return str(getattr(user, "role", "")) == "admin" or int(user.id) == int(record.owner_user_id)
 
 
 
