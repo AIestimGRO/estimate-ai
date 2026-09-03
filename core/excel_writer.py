@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import column_index_from_string, get_column_letter, range_boundaries
 from openpyxl.worksheet.worksheet import Worksheet
@@ -38,6 +39,7 @@ from core.sections import (
     SECTION_SOURCE_MANUAL,
     SECTION_SOURCE_THIRD_LEVEL,
 )
+from core.tkp_matching import PRICE_SOURCE_RESERVE, PRICE_SOURCE_WINNER
 
 # Module4_updated.bas RGB fills
 HEADER_FILL = PatternFill(start_color="FFD9E1F2", end_color="FFD9E1F2", fill_type="solid")
@@ -55,10 +57,11 @@ AVG_FONT = Font(bold=True)
 # Header labels for columns inserted when absent (synonyms live in layout.json).
 KR_HEADER_LABEL = "/\u041a\u0420"
 SECTION_HEADER_LABEL = "\u041a\u043e\u0434 \u0440\u0430\u0437\u0434\u0435\u043b\u0430"
-TKP_PRICE_HEADER_LABEL = "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
-TKP_NAME_HEADER_LABEL = "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0438\u0437 \u0422\u041a\u041f"
-TKP_TASK_HEADER_LABEL = "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 \u0422\u041a\u041f"
-TKP_COLUMN_COUNT = 3
+TKP_WINNER_HEADER_LABEL = "\u0410\u043d\u0430\u043b\u043e\u0433 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f"
+TKP_RESERVE_HEADER_LABEL = "\u0410\u043d\u0430\u043b\u043e\u0433 \u0440\u0435\u0437\u0435\u0440\u0432\u043d\u043e\u0433\u043e \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f"
+TKP_COLUMN_FILL = PatternFill(start_color="FFD9D9D9", end_color="FFD9D9D9", fill_type="solid")
+TKP_WINNER_FILL = PatternFill(start_color="FFC6EFCE", end_color="FFC6EFCE", fill_type="solid")
+TKP_RESERVE_FILL = PatternFill(start_color="FFDDEBF7", end_color="FFDDEBF7", fill_type="solid")
 
 
 @dataclass(frozen=True)
@@ -89,19 +92,23 @@ class WriteReport:
 
 @dataclass(frozen=True)
 class AnalogColumnDef:
-    """One global analog output column (task header + region sub-header)."""
+    """One RNMC column and optional adjacent winner/reserve TKP columns."""
 
     column: int
     task_id: str
     price_position: int
     region: str
+    tkp_winner_column: int | None = None
+    tkp_reserve_column: int | None = None
 
 
 @dataclass(frozen=True)
 class GlobalAnalogPlan:
-    """Stable (task_id, price_position) -> column map for the whole run."""
+    """Stable RNMC/TKP participant column map for the whole run."""
 
     by_key: dict[tuple[str, int], int]
+    tkp_winner_by_key: dict[tuple[str, int], int]
+    tkp_reserve_by_key: dict[tuple[str, int], int]
     columns: tuple[AnalogColumnDef, ...]
     last_column: int
 
@@ -168,29 +175,20 @@ def write_run_result(
         output_columns = _plan_output_columns(layout_columns, placement, analog_start_base)
 
         header_row = _effective_header_row(layout_columns, row_numbers)
-        tkp_start_column = (
-            output_columns.analog_start
-            if use_tkp_analogs
-            else None
-        )
-        analog_start_column = (
-            output_columns.analog_start + TKP_COLUMN_COUNT
-            if tkp_start_column is not None
-            else output_columns.analog_start
-        )
+        analog_start_column = output_columns.analog_start
         analog_plan = _build_global_analog_plan(
-            result, analog_start_column, target_region
+            result,
+            analog_start_column,
+            target_region,
+            include_tkp_pairs=use_tkp_analogs,
         )
-        last_output_column = max(
-            analog_plan.last_column,
-            (
-                tkp_start_column + TKP_COLUMN_COUNT - 1
-                if tkp_start_column is not None
-                else analog_plan.last_column
-            ),
+        tkp_columns = list(analog_plan.tkp_winner_by_key.values()) + list(
+            analog_plan.tkp_reserve_by_key.values()
         )
+        tkp_start_column = min(tkp_columns) if tkp_columns else None
+        last_output_column = analog_plan.last_column
         last_data_row = max(row_numbers) if row_numbers else output_columns.analog_start
-        if analog_plan.columns or tkp_start_column is not None:
+        if analog_plan.columns:
             _clear_analog_block(
                 worksheet,
                 header_row or output_columns.analog_start,
@@ -198,7 +196,6 @@ def write_run_result(
                 output_columns.analog_start,
                 max(last_output_column, worksheet.max_column),
             )
-        if analog_plan.columns:
             _write_analog_headers(
                 worksheet,
                 header_row,
@@ -207,8 +204,13 @@ def write_run_result(
                 task_colors,
                 reasons,
             )
-        if tkp_start_column is not None:
-            _write_tkp_headers(worksheet, header_row, tkp_start_column)
+            if use_tkp_analogs:
+                _write_paired_tkp_headers(
+                    worksheet,
+                    header_row,
+                    analog_plan,
+                    last_data_row,
+                )
 
         _extend_auto_filter(worksheet, last_output_column)
 
@@ -223,7 +225,6 @@ def write_run_result(
                 regional_coefficient,
                 task_colors,
                 reasons,
-                tkp_start_column,
             ):
                 written_rows += 1
 
@@ -557,6 +558,8 @@ def _build_global_analog_plan(
     result: MatchingRunResult,
     analog_start: int,
     target_region: str | None = None,
+    *,
+    include_tkp_pairs: bool = False,
 ) -> GlobalAnalogPlan:
     """Assign one worksheet column per (task_id, price_position) pair (Module4 step 2).
 
@@ -583,27 +586,62 @@ def _build_global_analog_plan(
             task_region.setdefault(task_id, analog.entry.region)
 
     ordered_tasks = _order_tasks_by_region(task_order, task_region, target_region)
+    winner_tkp_keys = {
+        (paired.task_id, paired.price_position)
+        for row in result.rows
+        for paired in row.tkp_analogs
+        if paired.match.winner_price is not None
+    }
+    reserve_tkp_keys = {
+        (paired.task_id, paired.price_position)
+        for row in result.rows
+        for paired in row.tkp_analogs
+        if paired.match.reserve_price is not None
+    }
 
     by_key: dict[tuple[str, int], int] = {}
+    tkp_winner_by_key: dict[tuple[str, int], int] = {}
+    tkp_reserve_by_key: dict[tuple[str, int], int] = {}
     column_defs: list[AnalogColumnDef] = []
     next_column = analog_start
 
     for task_id in ordered_tasks:
         for price_position in range(1, task_max_pi[task_id] + 1):
             key = (task_id, price_position)
-            by_key[key] = next_column
+            rnmc_column = next_column
+            by_key[key] = rnmc_column
+            next_column += 1
+
+            winner_column = None
+            reserve_column = None
+            if include_tkp_pairs and key in winner_tkp_keys:
+                winner_column = next_column
+                tkp_winner_by_key[key] = winner_column
+                next_column += 1
+            if include_tkp_pairs and key in reserve_tkp_keys:
+                reserve_column = next_column
+                tkp_reserve_by_key[key] = reserve_column
+                next_column += 1
+
             column_defs.append(
                 AnalogColumnDef(
-                    column=next_column,
+                    column=rnmc_column,
                     task_id=task_id,
                     price_position=price_position,
                     region=region_by_key.get(key, ""),
+                    tkp_winner_column=winner_column,
+                    tkp_reserve_column=reserve_column,
                 )
             )
-            next_column += 1
 
     last_column = next_column - 1 if column_defs else analog_start - 1
-    return GlobalAnalogPlan(by_key=by_key, columns=tuple(column_defs), last_column=last_column)
+    return GlobalAnalogPlan(
+        by_key=by_key,
+        tkp_winner_by_key=tkp_winner_by_key,
+        tkp_reserve_by_key=tkp_reserve_by_key,
+        columns=tuple(column_defs),
+        last_column=last_column,
+    )
 
 
 def _order_tasks_by_region(
@@ -799,24 +837,26 @@ def _write_analog_headers(
                 reason_cell.fill = fill
 
 
-def _write_tkp_headers(
+def _write_paired_tkp_headers(
     worksheet: Worksheet,
     header_row: int,
-    start_column: int,
+    plan: GlobalAnalogPlan,
+    last_data_row: int,
 ) -> None:
     if header_row <= 0:
         return
-
-    labels = (
-        TKP_PRICE_HEADER_LABEL,
-        TKP_NAME_HEADER_LABEL,
-        TKP_TASK_HEADER_LABEL,
-    )
-    for offset, label in enumerate(labels):
-        cell = worksheet.cell(row=header_row, column=start_column + offset)
-        cell.value = label
-        cell.font = HEADER_FONT
-        cell.fill = HEADER_FILL
+    for column_def in plan.columns:
+        for column, label in (
+            (column_def.tkp_winner_column, TKP_WINNER_HEADER_LABEL),
+            (column_def.tkp_reserve_column, TKP_RESERVE_HEADER_LABEL),
+        ):
+            if column is None:
+                continue
+            for row in range(header_row, last_data_row + 1):
+                worksheet.cell(row=row, column=column).fill = TKP_COLUMN_FILL
+            header = worksheet.cell(row=header_row, column=column)
+            header.value = label
+            header.font = HEADER_FONT
 
 
 def _write_row(
@@ -828,7 +868,6 @@ def _write_row(
     coefficient: float,
     task_colors: list[TaskColorEntry],
     reasons: list[TaskHighlightReason],
-    tkp_start_column: int | None,
 ) -> bool:
     if columns.section is not None and row.section_code:
         section_cell = worksheet.cell(row=row_number, column=columns.section)
@@ -842,7 +881,6 @@ def _write_row(
         row_number,
         columns,
         plan,
-        tkp_start_column,
     )
 
     if row.kr_code is not None:
@@ -857,13 +895,24 @@ def _write_row(
         price_cell.number_format = PRICE_NUMBER_FORMAT
         _apply_cell_colour(price_cell, row, analog, task_colors, reasons)
 
-    if tkp_start_column is not None and row.tkp_match is not None:
-        entry = row.tkp_match.entry
-        price_cell = worksheet.cell(row=row_number, column=tkp_start_column)
-        price_cell.value = round(float(entry.winner_unit_price_no_vat), 2)
-        price_cell.number_format = PRICE_NUMBER_FORMAT
-        worksheet.cell(row=row_number, column=tkp_start_column + 1).value = entry.item_name
-        worksheet.cell(row=row_number, column=tkp_start_column + 2).value = entry.task_no
+        key = (analog.task_id, analog.price_position)
+        tkp_match = row.tkp_match_for(*key)
+        if tkp_match is not None:
+            winner_column = plan.tkp_winner_by_key.get(key)
+            if winner_column is not None and tkp_match.winner_price is not None:
+                winner_cell = worksheet.cell(row=row_number, column=winner_column)
+                winner_cell.value = round(float(tkp_match.winner_price), 2)
+                winner_cell.number_format = PRICE_NUMBER_FORMAT
+                winner_cell.fill = TKP_WINNER_FILL
+                winner_cell.comment = _tkp_match_comment(tkp_match, PRICE_SOURCE_WINNER)
+
+            reserve_column = plan.tkp_reserve_by_key.get(key)
+            if reserve_column is not None and tkp_match.reserve_price is not None:
+                reserve_cell = worksheet.cell(row=row_number, column=reserve_column)
+                reserve_cell.value = round(float(tkp_match.reserve_price), 2)
+                reserve_cell.number_format = PRICE_NUMBER_FORMAT
+                reserve_cell.fill = TKP_RESERVE_FILL
+                reserve_cell.comment = _tkp_match_comment(tkp_match, PRICE_SOURCE_RESERVE)
 
     return row.has_analogs or row.has_tkp_analog
 
@@ -873,25 +922,43 @@ def _write_average_formula(
     row_number: int,
     columns: _OutputColumns,
     plan: GlobalAnalogPlan,
-    tkp_start_column: int | None,
 ) -> None:
     avg_cell = worksheet.cell(row=row_number, column=columns.average)
-    last_output_column = plan.last_column
-    if tkp_start_column is not None:
-        last_output_column = max(
-            last_output_column,
-            tkp_start_column + TKP_COLUMN_COUNT - 1,
-        )
-
     avg_cell.value = _average_formula(
         row_number,
         columns.base_price,
         columns.analog_start,
-        last_output_column,
+        plan.last_column,
     )
     avg_cell.number_format = PRICE_NUMBER_FORMAT
     avg_cell.font = AVG_FONT
 
+
+def _tkp_match_comment(match, price_source: str) -> Comment:
+    entry = match.entry
+    participant_name = (
+        entry.winner_name if price_source == PRICE_SOURCE_WINNER else entry.reserve_name
+    )
+    price_value = (
+        match.winner_price if price_source == PRICE_SOURCE_WINNER else match.reserve_price
+    )
+    lines = [
+        f"TKP task: {entry.normalized_task_no or entry.task_no}",
+        f"TKP item: {entry.item_name}",
+        f"Source: {entry.source_file_name}",
+        f"Match method: {match.match_method}",
+        f"Name score: {match.score:.2f}",
+        f"Price source: {price_source}",
+    ]
+    if participant_name:
+        lines.append(f"Participant: {participant_name}")
+    if price_value is not None:
+        lines.append(f"Participant price: {float(price_value):.2f}")
+    if match.quantity_matched:
+        lines.append("Quantity: exact normalized match")
+    if match.rnmc_price_delta is not None:
+        lines.append(f"RNMC price delta: {match.rnmc_price_delta:.6f}")
+    return Comment("\n".join(lines), "Estimate AI")
 
 def _apply_cell_colour(
     cell,

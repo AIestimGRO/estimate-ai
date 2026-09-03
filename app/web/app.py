@@ -19,11 +19,12 @@ Flow:
   GET  /download?token=        -> download the produced WA workbook
 """
 
+import shutil
 import sys
 import tempfile
 import uuid
 from urllib.parse import parse_qsl, quote, urlencode
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -43,11 +44,14 @@ from app.services.write_result import preview_estimate_context, run_and_write
 from app.services.rnmc_zip import analyze_rnmc_zip_dry_run, commit_rnmc_zip_import_log
 from app.services.rnmc_excel import analyze_rnmc_zip_row_preview, import_rnmc_zip_catalog_rows
 from app.services.tkp_shadow import (
+    SemanticModelUnavailableError,
     ShadowComparison,
     build_shadow_comparison,
     discover_local_semantic_backends,
+    load_qwen_semantic_backend,
 )
-from core.tkp_matching import build_tkp_catalog_index
+from core.tkp_matching import TkpSemanticScoringError, build_tkp_catalog_index
+from core.task_numbers import normalize_single_task_number
 from core.storage.catalog import (
     allow_import_retry,
     clear_catalog_for_rebuild,
@@ -89,6 +93,12 @@ from core.tkp_folder_ingest import (
     TkpSourceInput,
     parse_tkp_source_workbooks,
 )
+from core.tkp_ingest import (
+    STATUS_OK,
+    TkpCatalogParseResult,
+    TkpSourceFile,
+    tkp_item_has_usable_unit_price,
+)
 from core.storage.section_mappings import (
     list_manual_section_mappings,
     set_manual_section_mapping_enabled,
@@ -122,6 +132,8 @@ from app.web.rendering import (
     render_admin_corrections,
     render_admin_gesn_exceptions,
     render_admin_tkp,
+    render_admin_tkp_stage_macro,
+    render_admin_tkp_stage_rows,
     render_admin_import_detail,
     render_admin_imports,
     render_admin_name_exclusions,
@@ -172,13 +184,52 @@ class RnmcImportStage:
 
 
 @dataclass
+class TkpImportStage:
+    """Original KL files parsed and waiting for explicit DB confirmation."""
+
+    directory: Path
+    parsed: TkpCatalogParseResult
+    source_paths: dict[str, Path]
+    ignored_files: int = 0
+    excluded_paths: set[str] = field(default_factory=set)
+
+
+@dataclass
 class AppState:
     """Shared server state (upload stores + working directory)."""
 
     base_dir: Path
     store: dict[str, UploadRecord] = field(default_factory=dict)
     rnmc_stages: dict[str, RnmcImportStage] = field(default_factory=dict)
+    tkp_stages: dict[str, TkpImportStage] = field(default_factory=dict)
 
+
+
+def _tkp_source_with_task_override(
+    source: TkpSourceFile,
+    task_no: str,
+) -> TkpSourceFile:
+    """Apply a staged task number and clear the matching review reason."""
+    normalized = task_no.strip()
+    if not normalized or normalized == source.task_no.strip():
+        return replace(source, task_no=normalized)
+
+    message = source.parse_message.replace("Task number not found.", "").replace("Task number not found or invalid.", "").strip()
+    message = " ".join(message.split())
+    status = source.parse_status
+    if status == "Needs review" and message in {"Parsed.", "Parsed"}:
+        status = STATUS_OK
+        message = "Parsed. Task number supplied manually."
+    elif "Task number supplied manually." not in message:
+        if message and not message.endswith("."):
+            message += "."
+        message = (message + " Task number supplied manually.").strip()
+    return replace(
+        source,
+        task_no=normalized,
+        parse_status=status,
+        parse_message=message,
+    )
 
 
 def _sync_bundled_file_log(connection) -> int:
@@ -1391,90 +1442,293 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
 
         upload_dir = app.state.app_state.base_dir / "admin_tkp"
         upload_dir.mkdir(parents=True, exist_ok=True)
+        stage_id = uuid.uuid4().hex
+        stage_dir = upload_dir / f"stage_{stage_id}"
+        stage_dir.mkdir(parents=True, exist_ok=False)
         source_inputs: list[TkpSourceInput] = []
+        source_paths: dict[str, Path] = {}
         ignored_files = 0
         file_names: set[str] = set()
         duplicates: set[str] = set()
 
-        with tempfile.TemporaryDirectory(
-            prefix="tkp_folder_",
-            dir=upload_dir,
-        ) as temporary_dir:
-            temporary_path = Path(temporary_dir)
-            for index, upload in enumerate(uploads):
-                raw_name = (upload.filename or "").replace("\\", "/")
-                file_name = _safe_name(raw_name)
-                suffix = Path(file_name).suffix.casefold()
-                if (
-                    file_name == ""
-                    or file_name.startswith("~$")
-                    or suffix not in SUPPORTED_SOURCE_SUFFIXES
-                ):
-                    ignored_files += 1
-                    continue
-                normalized_name = file_name.casefold()
-                if normalized_name in file_names:
-                    duplicates.add(file_name)
-                    continue
-                file_names.add(normalized_name)
-                content = await upload.read()
-                if len(content) > MAX_UPLOAD_BYTES:
-                    return RedirectResponse(
-                        f"/admin/tkp?error={quote(f'Файл {file_name} превышает лимит 64 МБ.')}",
-                        status_code=303,
-                    )
-                saved_path = _save(
-                    temporary_path,
-                    f"{index:05d}_{uuid.uuid4().hex}_{file_name}",
-                    content,
-                )
-                source_inputs.append(
-                    TkpSourceInput(
-                        path=saved_path,
-                        display_path=raw_name or file_name,
-                    )
-                )
-
-            if duplicates:
-                duplicate_list = ", ".join(sorted(duplicates))
+        for index, upload in enumerate(uploads):
+            raw_name = (upload.filename or "").replace("\\", "/")
+            file_name = _safe_name(raw_name)
+            suffix = Path(file_name).suffix.casefold()
+            if (
+                file_name == ""
+                or file_name.startswith("~$")
+                or suffix not in SUPPORTED_SOURCE_SUFFIXES
+            ):
+                ignored_files += 1
+                continue
+            normalized_name = file_name.casefold()
+            if normalized_name in file_names:
+                duplicates.add(file_name)
+                continue
+            file_names.add(normalized_name)
+            content = await upload.read()
+            if len(content) > MAX_UPLOAD_BYTES:
+                shutil.rmtree(stage_dir, ignore_errors=True)
                 return RedirectResponse(
-                    f"/admin/tkp?error={quote('В выбранной папке повторяются имена файлов: ' + duplicate_list)}",
+                    f"/admin/tkp?error={quote(f'Файл {file_name} превышает лимит 64 МБ.')}",
                     status_code=303,
                 )
-            if not source_inputs:
-                return RedirectResponse(
-                    f"/admin/tkp?error={quote('В папке нет поддерживаемых файлов .xlsx или .xlsm.')}",
-                    status_code=303,
+            display_path = raw_name or file_name
+            saved_path = _save(
+                stage_dir,
+                f"{index:05d}_{uuid.uuid4().hex}_{file_name}",
+                content,
+            )
+            source_inputs.append(
+                TkpSourceInput(
+                    path=saved_path,
+                    display_path=display_path,
                 )
+            )
+            source_paths[display_path] = saved_path
 
-            parsed = await run_in_threadpool(
-                parse_tkp_source_workbooks,
-                source_inputs,
+        if duplicates:
+            shutil.rmtree(stage_dir, ignore_errors=True)
+            duplicate_list = ", ".join(sorted(duplicates))
+            return RedirectResponse(
+                f"/admin/tkp?error={quote('В выбранной папке повторяются имена файлов: ' + duplicate_list)}",
+                status_code=303,
             )
-            needs_review = sum(
-                source.parse_status == "Needs review"
-                for source in parsed.files
+        if not source_inputs:
+            shutil.rmtree(stage_dir, ignore_errors=True)
+            return RedirectResponse(
+                f"/admin/tkp?error={quote('В папке нет поддерживаемых файлов .xlsx или .xlsm.')}",
+                status_code=303,
             )
-            not_kl = sum(
-                source.parse_status == "Skipped"
-                for source in parsed.files
-            )
-            connection = connect(default_database_path())
-            try:
-                init_database(connection)
-                result = import_tkp_parse_result(connection, parsed)
-            finally:
-                connection.close()
 
+        parsed = await run_in_threadpool(
+            parse_tkp_source_workbooks,
+            source_inputs,
+        )
+        app.state.app_state.tkp_stages[stage_id] = TkpImportStage(
+            directory=stage_dir,
+            parsed=parsed,
+            source_paths=source_paths,
+            ignored_files=ignored_files,
+        )
+        return RedirectResponse(
+            f"/admin/tkp/stage/{stage_id}",
+            status_code=303,
+        )
+
+    @app.get("/admin/tkp/stage/{stage_id}", response_class=HTMLResponse)
+    def admin_tkp_stage_macro(stage_id: str, error: str = "") -> HTMLResponse:
+        stage = app.state.app_state.tkp_stages.get(stage_id)
+        if stage is None:
+            return HTMLResponse(
+                render_error(
+                    "Предпросмотр ТКП не найден",
+                    "Сессия предпросмотра завершена или сервер был перезапущен. Загрузите папку повторно.",
+                ),
+                status_code=404,
+            )
+        return HTMLResponse(
+            render_admin_tkp_stage_macro(
+                stage_id,
+                stage.parsed,
+                ignored_files=stage.ignored_files,
+                excluded_paths=stage.excluded_paths,
+                error=error,
+            )
+        )
+
+    @app.get("/admin/tkp/stage/{stage_id}/rows", response_class=HTMLResponse)
+    def admin_tkp_stage_rows(stage_id: str, show: str = "all") -> HTMLResponse:
+        stage = app.state.app_state.tkp_stages.get(stage_id)
+        if stage is None:
+            return HTMLResponse(
+                render_error(
+                    "Предпросмотр ТКП не найден",
+                    "Сессия предпросмотра завершена или сервер был перезапущен. Загрузите папку повторно.",
+                ),
+                status_code=404,
+            )
+        return HTMLResponse(
+            render_admin_tkp_stage_rows(
+                stage_id,
+                stage.parsed,
+                show=show,
+                excluded_paths=stage.excluded_paths,
+            )
+        )
+
+    @app.get("/admin/tkp/stage/{stage_id}/file/{file_index}")
+    def admin_tkp_stage_file(stage_id: str, file_index: int):
+        stage = app.state.app_state.tkp_stages.get(stage_id)
+        if stage is None or file_index < 0 or file_index >= len(stage.parsed.files):
+            return HTMLResponse(
+                render_error(
+                    "Исходный файл ТКП не найден",
+                    "Файл отсутствует в текущем предпросмотре.",
+                ),
+                status_code=404,
+            )
+        source = stage.parsed.files[file_index]
+        source_path = stage.source_paths.get(source.file_path)
+        if source_path is None or not source_path.is_file():
+            return HTMLResponse(
+                render_error(
+                    "Исходный файл ТКП не найден",
+                    "Временная копия исходного файла уже недоступна.",
+                ),
+                status_code=404,
+            )
+        media_type = (
+            "application/vnd.ms-excel.sheet.macroEnabled.12"
+            if source_path.suffix.casefold() == ".xlsm"
+            else XLSX_MIME
+        )
+        return FileResponse(
+            source_path,
+            media_type=media_type,
+            filename=source.file_name,
+        )
+
+    @app.post("/admin/tkp/stage/{stage_id}/commit", response_class=HTMLResponse)
+    async def admin_tkp_stage_commit(stage_id: str, request: Request):
+        stage = app.state.app_state.tkp_stages.get(stage_id)
+        if stage is None:
+            return HTMLResponse(
+                render_error(
+                    "Предпросмотр ТКП не найден",
+                    "Сессия предпросмотра завершена или сервер был перезапущен. Загрузите папку повторно.",
+                ),
+                status_code=404,
+            )
+
+        form = await request.form()
+        task_overrides: dict[str, str] = {}
+        excluded_paths: set[str] = set()
+        missing_task_files: list[str] = []
+        usable_paths = {
+            item.file_path
+            for item in stage.parsed.items
+            if tkp_item_has_usable_unit_price(item)
+        }
+        for index, source in enumerate(stage.parsed.files):
+            task_no_raw = str(form.get(f"task_no__{index}") or source.task_no).strip()
+            task_no = normalize_single_task_number(task_no_raw)
+            task_overrides[source.file_path] = task_no
+            if form.get(f"exclude__{index}") is not None:
+                excluded_paths.add(source.file_path)
+                continue
+            if (
+                source.parse_status != "Skipped"
+                and source.file_path in usable_paths
+                and not task_no
+            ):
+                missing_task_files.append(source.file_name)
+
+        staged_files = [
+            _tkp_source_with_task_override(
+                source,
+                task_overrides.get(source.file_path, source.task_no),
+            )
+            for source in stage.parsed.files
+        ]
+        staged_items = [
+            replace(
+                item,
+                task_no=task_overrides.get(item.file_path, item.task_no).strip(),
+            )
+            for item in stage.parsed.items
+        ]
+        stage.parsed = replace(
+            stage.parsed,
+            files=staged_files,
+            items=staged_items,
+        )
+        stage.excluded_paths = excluded_paths
+
+        if missing_task_files:
+            return HTMLResponse(
+                render_admin_tkp_stage_macro(
+                    stage_id,
+                    stage.parsed,
+                    ignored_files=stage.ignored_files,
+                    excluded_paths=stage.excluded_paths,
+                    error=(
+                        "Номер задачи обязателен перед записью в БД. "
+                        "Заполните его для файлов: "
+                        + ", ".join(missing_task_files)
+                    ),
+                ),
+                status_code=400,
+            )
+
+        prepared_files = [
+            source
+            for source in staged_files
+            if source.file_path not in excluded_paths
+        ]
+        prepared_items = [
+            item
+            for item in staged_items
+            if item.file_path not in excluded_paths
+        ]
+        prepared = replace(
+            stage.parsed,
+            files=prepared_files,
+            items=prepared_items,
+        )
+
+        accepted_rows = sum(
+            tkp_item_has_usable_unit_price(item) and bool(item.task_no.strip())
+            for item in prepared_items
+        )
+        rejected_price_rows = sum(
+            not tkp_item_has_usable_unit_price(item)
+            for item in prepared_items
+        )
+        needs_review = sum(
+            source.parse_status == "Needs review"
+            for source in prepared_files
+        )
+        not_kl = sum(
+            source.parse_status == "Skipped"
+            for source in prepared_files
+        )
+        manually_excluded = len(excluded_paths)
+
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            result = import_tkp_parse_result(connection, prepared)
+        finally:
+            connection.close()
+
+        app.state.app_state.tkp_stages.pop(stage_id, None)
+        shutil.rmtree(stage.directory, ignore_errors=True)
         message = (
-            f"Папка ТКП обработана: файлов {result.files_seen}, "
+            f"ТКП подтверждены: файлов {result.files_seen}, "
             f"новых {result.files_imported}, обновлено {result.files_updated}, "
             f"без изменений {result.files_skipped}, требуют проверки "
             f"{needs_review}, не распознаны как КЛ {not_kl}, "
-            f"проигнорировано {ignored_files}. Всего позиций в базе: "
-            f"{result.items_imported}."
+            f"исключено вручную {manually_excluded}, "
+            f"проигнорировано файлов {stage.ignored_files}, "
+            f"допущено строк {accepted_rows}, без обеих цен отклонено "
+            f"{rejected_price_rows}. Всего позиций в базе: {result.items_imported}."
         )
-        return RedirectResponse(f"/admin/tkp?message={quote(message)}", status_code=303)
+        return RedirectResponse(
+            f"/admin/tkp?message={quote(message)}",
+            status_code=303,
+        )
+
+    @app.post("/admin/tkp/stage/{stage_id}/cancel")
+    def admin_tkp_stage_cancel(stage_id: str) -> RedirectResponse:
+        stage = app.state.app_state.tkp_stages.pop(stage_id, None)
+        if stage is not None:
+            shutil.rmtree(stage.directory, ignore_errors=True)
+        return RedirectResponse(
+            f"/admin/tkp?message={quote('Предпросмотр ТКП отменён. База не изменена.')}",
+            status_code=303,
+        )
 
     @app.post("/admin/approvals/approve", response_class=HTMLResponse)
     def admin_approval_approve(exception_key: str = Form("")):
@@ -2034,6 +2288,21 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
     # instead of silently switching every task's highlighting/exclusions off.
     task_color_entries = db_task_colors or None
     name_exclusion_rules = db_name_rules or None
+    tkp_semantic_backend = None
+    if record.use_tkp_analogs:
+        models_dir = Path(__file__).resolve().parents[2] / "data" / "models"
+        try:
+            tkp_semantic_backend = load_qwen_semantic_backend(models_dir)
+        except SemanticModelUnavailableError as error:
+            return HTMLResponse(
+                render_error(
+                    "Qwen недоступен",
+                    "Подбор аналогов ТКП включён, но Qwen3-Embedding-0.6B не удалось запустить.",
+                    detail=str(error),
+                ),
+                status_code=503,
+            )
+
     try:
         outcome = run_and_write(
             record.catalog_path,
@@ -2047,6 +2316,12 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             task_color_entries=task_color_entries,
             task_highlight_reasons=task_highlight_reasons,
             use_tkp_analogs=record.use_tkp_analogs,
+            tkp_semantic_scorer=(
+                tkp_semantic_backend.score if tkp_semantic_backend is not None else None
+            ),
+            tkp_semantic_model_name=(
+                tkp_semantic_backend.display_name if tkp_semantic_backend is not None else ""
+            ),
         )
     except MultipleSheetsError as error:
         return HTMLResponse(render_choice(token, error.candidates))
@@ -2063,6 +2338,15 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
         return HTMLResponse(
             render_error("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0441\u043c\u0435\u0442\u0443", str(error)),
             status_code=400,
+        )
+    except TkpSemanticScoringError as error:
+        return HTMLResponse(
+            render_error(
+                "Ошибка Qwen",
+                "Qwen3-Embedding-0.6B запустился, но не смог оценить кандидатов ТКП.",
+                detail=str(error),
+            ),
+            status_code=500,
         )
     except CatalogNotAvailableError as error:
         return HTMLResponse(

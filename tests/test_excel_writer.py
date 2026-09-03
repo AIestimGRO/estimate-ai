@@ -25,6 +25,8 @@ CATALOG_TITLE = "\u041a\u0430\u0442\u0430\u043b\u043e\u0433"
 RED_RGB = "FFFFC7CE"
 GREY_RGB = "FFD9D9D9"
 BLUE_RGB = "FFDDEBF7"
+GREEN_RGB = "FFC6EFCE"
+ORANGE_RGB = "FFF4B183"
 AVERAGE_HEADER = "\u0426\u0435\u043d\u0430 \u0441\u0440\u0435\u0434\u043d\u044f\u044f, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421"
 BASE_PRICE_HEADER = "\u0426\u0435\u043d\u0430 \u0435\u0434\u0438\u043d\u0438\u0446\u044b \u0440\u0430\u0431\u043e\u0442, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421"
 
@@ -35,7 +37,7 @@ def _seed_tkp_database(path: Path) -> None:
         init_database(connection)
         cursor = connection.execute(
             "INSERT INTO tkp_sources (file_name, task_no, item_count) VALUES (?, ?, ?)",
-            ("tkp-source.xlsx", "TKP-77", 1),
+            ("tkp-source.xlsx", "1234567", 1),
         )
         connection.execute(
             """
@@ -44,7 +46,7 @@ def _seed_tkp_database(path: Path) -> None:
                 winner_name, task_no
             ) VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (cursor.lastrowid, INSTALLATION, METER, 200.0, "winner", "TKP-77"),
+            (cursor.lastrowid, INSTALLATION, METER, 200.0, "winner", "1234567"),
         )
         connection.commit()
     finally:
@@ -226,7 +228,7 @@ def test_section_cell_uses_commissioning_rule_without_green_fill(tmp_path: Path)
 
 
 def test_writes_one_tkp_candidate_block_and_includes_price_in_formula(tmp_path: Path) -> None:
-    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("1234567", 100)])
     estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
     database = tmp_path / "estimate_ai.db"
     _seed_tkp_database(database)
@@ -242,25 +244,101 @@ def test_writes_one_tkp_candidate_block_and_includes_price_in_formula(tmp_path: 
 
     assert outcome.result.matched_row_count == 1
     assert outcome.result.tkp_matched_row_count == 1
-    assert outcome.write_report.tkp_start_column == 17
-    assert outcome.write_report.analog_start_column == 20
+    assert outcome.result.tkp_matched_analog_count == 1
+    assert outcome.write_report.tkp_start_column == 18
+    assert outcome.write_report.analog_start_column == 17
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=17).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
-        assert sheet.cell(row=7, column=18).value == "\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0438\u0437 \u0422\u041a\u041f"
-        assert sheet.cell(row=7, column=19).value == "\u041d\u043e\u043c\u0435\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 \u0422\u041a\u041f"
-        assert sheet.cell(row=7, column=20).value == "task-1"
-        assert sheet.cell(row=9, column=17).value == 200
-        assert sheet.cell(row=9, column=18).value == INSTALLATION
-        assert sheet.cell(row=9, column=19).value == "TKP-77"
-        assert sheet.cell(row=9, column=20).value == 100
+        assert sheet.cell(row=7, column=17).value == "1234567"
+        assert sheet.cell(row=7, column=18).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f"
+        assert sheet.cell(row=9, column=17).value == 100
+        assert sheet.cell(row=9, column=18).value == 200
+        assert sheet.cell(row=9, column=18).fill.start_color.rgb == "FFC6EFCE"
+        assert sheet.cell(row=9, column=18).comment is not None
+        assert "TKP task: 1234567" in sheet.cell(row=9, column=18).comment.text
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:T9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
         )
     finally:
         workbook.close()
 
+
+
+def test_paired_tkp_cells_use_price_source_colours(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(
+        tmp_path / "catalog.xlsx",
+        [("1234567", 100), ("2345678", 110), ("3456789", 120), ("4567890", 130)],
+    )
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    database = tmp_path / "estimate_ai.db"
+    connection = connect(database)
+    try:
+        init_database(connection)
+        rows = (
+            ("1234567", 200.0, None),
+            ("2345678", None, 210.0),
+            ("3456789", 190.0, 230.0),
+        )
+        for task_no, winner, reserve in rows:
+            cursor = connection.execute(
+                "INSERT INTO tkp_sources (file_name, task_no, item_count) VALUES (?, ?, 1)",
+                (f"{task_no}.xlsx", task_no),
+            )
+            connection.execute(
+                """
+                INSERT INTO tkp_items (
+                    source_id, item_name, unit, winner_unit_price_no_vat,
+                    reserve_unit_price_no_vat, winner_name, reserve_name, task_no
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    cursor.lastrowid, INSTALLATION, METER, winner, reserve,
+                    "winner", "reserve", task_no,
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    output = tmp_path / "out.xlsx"
+    run_and_write(
+        catalog,
+        estimate,
+        output,
+        database_path=database,
+        use_tkp_analogs=True,
+    )
+
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        # Winner-only TKP creates one green participant column.
+        assert sheet.cell(row=7, column=18).value == "Аналог победителя"
+        assert sheet.cell(row=9, column=18).fill.start_color.rgb == GREEN_RGB
+        assert sheet.cell(row=9, column=18).value == 200
+
+        # Reserve-only TKP creates one light-blue participant column.
+        assert sheet.cell(row=7, column=20).value == "Аналог резервного победителя"
+        assert sheet.cell(row=9, column=20).fill.start_color.rgb == BLUE_RGB
+        assert sheet.cell(row=9, column=20).value == 210
+
+        # When both prices exist, winner is first and reserve is second.
+        assert sheet.cell(row=7, column=22).value == "Аналог победителя"
+        assert sheet.cell(row=7, column=23).value == "Аналог резервного победителя"
+        assert sheet.cell(row=9, column=22).fill.start_color.rgb == GREEN_RGB
+        assert sheet.cell(row=9, column=23).fill.start_color.rgb == BLUE_RGB
+        assert sheet.cell(row=9, column=22).value == 190
+        assert sheet.cell(row=9, column=23).value == 230
+
+        # Task 4567890 has no TKP match anywhere in the run, so no empty
+        # grey TKP partner columns are created for it.
+        assert sheet.cell(row=7, column=24).value == "4567890"
+        assert sheet.cell(row=9, column=24).value == 130
+        assert sheet.cell(row=7, column=25).value is None
+        assert sheet.cell(row=9, column=25).fill.start_color.rgb != GREY_RGB
+    finally:
+        workbook.close()
 
 def test_source_file_is_not_modified(tmp_path: Path) -> None:
     catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100), ("task-2", 120)])
@@ -745,5 +823,35 @@ def test_reprocessing_clears_stale_analog_columns(tmp_path: Path) -> None:
         assert sheet.cell(row=7, column=20).value is None
         assert sheet.cell(row=8, column=20).value is None
         assert sheet.cell(row=9, column=20).value is None
+    finally:
+        workbook.close()
+
+
+def test_tkp_toggle_does_not_create_grey_columns_when_no_tkp_match_exists(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("1234567", 100)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    database = tmp_path / "estimate_ai.db"
+    connection = connect(database)
+    try:
+        init_database(connection)
+    finally:
+        connection.close()
+    output = tmp_path / "out.xlsx"
+
+    outcome = run_and_write(
+        catalog,
+        estimate,
+        output,
+        database_path=database,
+        use_tkp_analogs=True,
+    )
+
+    assert outcome.write_report.tkp_start_column is None
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=7, column=17).value == "1234567"
+        assert sheet.cell(row=7, column=18).value is None
+        assert sheet.cell(row=9, column=18).fill.start_color.rgb != GREY_RGB
     finally:
         workbook.close()

@@ -33,7 +33,7 @@ def _file_row(**overrides: object) -> tuple:
         "WinnerHeader3": "", "WinnerHeader4": "", "WinnerBlockName": WINNER,
         "WinnerBlockUIN": "", "WinnerBlockTotalVat": 1000.0,
         "WinnerBlockReason": "", "WinnerBlockSource": "block10",
-        "TaskNo": "111", "RequestDate": datetime(2026, 5, 1), "Version": 1,
+        "TaskNo": "1111111", "RequestDate": datetime(2026, 5, 1), "Version": 1,
         "Customer": "\u0417\u0430\u043a\u0430\u0437\u0447\u0438\u043a", "GeneralContractor": "",
         "ProcedureName": "\u041e\u0431\u044a\u0435\u043a\u0442", "WinnerTotalNoVat": 900.0,
         "WinnerTotalVat": 1080.0, "RnmcTotalNoVat": 950.0,
@@ -53,7 +53,7 @@ def _wor_row(**overrides: object) -> tuple:
         "WinnerLineTotalNoVat": 5000.0, "WinnerName": WINNER,
         "WinnerINN": "1234567890", "WinnerUIN": "uin-1", "WinnerGroupIndex": 1,
         "WinnerStartCol": 1, "WinnerStartColLetter": "A",
-        "WinnerUnitHeader": "", "WinnerTotalHeader": "", "TaskNo": "111",
+        "WinnerUnitHeader": "", "WinnerTotalHeader": "", "TaskNo": "1111111",
         "RequestDate": datetime(2026, 5, 1), "Version": 1,
         "Customer": "\u0417\u0430\u043a\u0430\u0437\u0447\u0438\u043a", "GeneralContractor": "",
         "ProcedureName": "\u041e\u0431\u044a\u0435\u043a\u0442",
@@ -209,8 +209,8 @@ def test_admin_tkp_filters_and_sorts_catalog_rows(tmp_path, monkeypatch) -> None
     content = _catalog_bytes(
         [_file_row()],
         [
-            _wor_row(ItemName="Нужная работа", TaskNo="TASK-1", WinnerUnitPriceNoVat=700.0),
-            _wor_row(ItemName="Другая работа", TaskNo="TASK-2", WinnerUnitPriceNoVat=100.0),
+            _wor_row(ItemName="Нужная работа", TaskNo="1234567", WinnerUnitPriceNoVat=700.0),
+            _wor_row(ItemName="Другая работа", TaskNo="7654321", WinnerUnitPriceNoVat=100.0),
         ],
     )
 
@@ -223,7 +223,7 @@ def test_admin_tkp_filters_and_sorts_catalog_rows(tmp_path, monkeypatch) -> None
             "/admin/tkp",
             params={
                 "q": "Нужная",
-                "task_no": "TASK-1",
+                "task_no": "1234567",
                 "sort": "winner_unit_price_no_vat",
                 "direction": "asc",
             },
@@ -232,6 +232,6 @@ def test_admin_tkp_filters_and_sorts_catalog_rows(tmp_path, monkeypatch) -> None
     assert page.status_code == 200
     assert "Нужная работа" in page.text
     assert "Другая работа" not in page.text
-    assert "TASK-1" in page.text
+    assert "1234567" in page.text
     assert "Всего строк: 1" in page.text
     assert "Цена победителя за единицу, руб. без НДС ↑" in page.text

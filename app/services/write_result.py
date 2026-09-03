@@ -8,6 +8,7 @@ controls the row positions, the column plan, and the run result, so they stay
 aligned for the writer.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,6 +62,7 @@ class RunAndWriteResult:
     catalog_row_count: int = 0
     tkp_enabled: bool = False
     tkp_catalog_row_count: int = 0
+    tkp_semantic_model: str = ""
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,8 @@ def run_and_write(
     target_region: str | None = None,
     layout_config: LayoutConfig | None = None,
     use_tkp_analogs: bool = False,
+    tkp_semantic_scorer: Callable[[str, list[str]], list[float]] | None = None,
+    tkp_semantic_model_name: str = "",
     manual_section_mappings: dict[str, str] | None = None,
 ) -> RunAndWriteResult:
     """Run matching over the files and write the result into a `WA` copy."""
@@ -188,6 +192,8 @@ def run_and_write(
         regional_coefficient=coefficient,
         tkp_catalog_index=tkp_catalog_index,
         use_tkp_analogs=use_tkp_analogs,
+        tkp_semantic_scorer=tkp_semantic_scorer,
+        tkp_semantic_model_name=tkp_semantic_model_name,
         manual_section_mappings=resolved_manual_sections,
     )
 
@@ -233,6 +239,7 @@ def run_and_write(
         catalog_row_count=catalog.row_count,
         tkp_enabled=use_tkp_analogs,
         tkp_catalog_row_count=len(tkp_catalog_index),
+        tkp_semantic_model=tkp_semantic_model_name if use_tkp_analogs else "",
     )
 
 

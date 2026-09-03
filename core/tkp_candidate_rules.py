@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 from core.multiplicity import multiplicity_is_compatible
-from core.normalize import BaseUnit, NormUnit
 from core.tkp_matching import TkpCatalogEntry
+from core.unit_scaling import UnitConversion, compatible_unit_conversion, split_unit_scale
 
 
 _CONFIG_PATH = (
@@ -19,25 +18,10 @@ _CONFIG_PATH = (
     / "config"
     / "tkp_shadow_rules.json"
 )
-_UNIT_SCALE_PATTERN = re.compile(r"^(\d+)(.+)$")
-
 REASON_UNIT_CONFLICT = "unit_conflict"
 REASON_WORK_TYPE_CONFLICT = "work_type_conflict"
 REASON_MULTIPLICITY_CONFLICT = "multiplicity_conflict"
 REASON_PRICE_MISSING = "price_missing"
-
-
-@dataclass(frozen=True)
-class UnitConversion:
-    query_unit: str
-    candidate_unit: str
-    base_unit: str
-    query_scale: float
-    candidate_scale: float
-
-    @property
-    def price_factor(self) -> float:
-        return self.query_scale / self.candidate_scale
 
 
 @dataclass(frozen=True)
@@ -99,37 +83,6 @@ def evaluate_tkp_candidate(
         price * conversion.price_factor,
         conversion,
     )
-
-
-def compatible_unit_conversion(
-    query_unit: object,
-    candidate_unit: object,
-) -> UnitConversion | None:
-    query_base, query_scale = split_unit_scale(query_unit)
-    candidate_base, candidate_scale = split_unit_scale(candidate_unit)
-    if not query_base or not candidate_base or query_base != candidate_base:
-        return None
-    return UnitConversion(
-        query_unit=NormUnit(query_unit),
-        candidate_unit=NormUnit(candidate_unit),
-        base_unit=query_base,
-        query_scale=query_scale,
-        candidate_scale=candidate_scale,
-    )
-
-
-def split_unit_scale(value: object) -> tuple[str, float]:
-    normalized = NormUnit(value)
-    if not normalized:
-        return "", 1.0
-    base = BaseUnit(normalized)
-    match = _UNIT_SCALE_PATTERN.fullmatch(normalized)
-    if match is None:
-        return base, 1.0
-    scale = int(match.group(1))
-    if scale <= 0:
-        return "", 1.0
-    return base, float(scale)
 
 
 def detect_work_type(value: object) -> str:

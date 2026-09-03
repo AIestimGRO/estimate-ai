@@ -1,41 +1,27 @@
-"""Deterministic lexical matching against the TKP winner catalog.
+"""TKP matching primitives for live pairing and admin diagnostics.
 
-Per docs/ROADMAP.md ("Future phase - multi-source analogs") and
-docs/AGENTS.md rule 2 ("No LLM calls inside the matching/pricing functions
-themselves"), this is intentionally NOT semantic/embedding search: it is a
-pure token-overlap + character-sequence similarity score over normalized
-Russian work-item names, isolated from core/matching.py's exact
-GESN/FER/TER-code pipeline. Given the same two inputs it always returns the
-same score - no external model, no network call, nothing to cache for
-reproducibility because there is nothing non-deterministic to begin with.
-
-Scoring is a blend of two signals so it tolerates both word-order
-differences and minor wording/suffix differences:
-  - token Jaccard similarity (order-independent, robust to reordering)
-  - difflib.SequenceMatcher ratio over the normalized text (order-sensitive,
-    catches near-duplicate phrasing that token overlap alone would miss,
-    e.g. differing noun endings)
-A small bonus is added when the units match (via the existing NormUnit),
-since two identically-worded items with different units are rarely the
-same real-world work.
-
-A leading-action-word penalty (see ACTION_SYNONYM_GROUPS) subtracts points
-when the first meaningful word of the two names names a different
-operation (e.g. "укладка" vs "протаскивание"). This exists because token
-overlap alone cannot tell "Укладка трубопроводов ... 110 мм" apart from
-"Протаскивание в футляр ... 110 мм" - the pipe/diameter tokens dominate the
-Jaccard score even though the two are different construction operations
-with different pricing. Verified against a real 530-row estimate matched
-against a real 2826-item TKP catalog (see tests/test_tkp_matching.py and
-project history) before this penalty was added; it removed that specific
-false-positive class without suppressing genuine synonyms like
-"демонтаж" vs "разборка" (both are members of the same group below).
+The legacy/global helper remains deterministic lexical matching. The paired
+RNMC->TKP product path first applies deterministic task, unit, quantity,
+multiplicity, and demolition filters and may then accept a caller-supplied
+local semantic scorer (Qwen3 in the web application) for work-name ranking.
+Semantic scoring never derives a price; winner/reserve price selection and unit
+conversion remain deterministic.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from math import isclose
 
-from core.normalize import NormUnit
+from core.multiplicity import multiplicity_is_compatible
+from core.normalize import HasDemontazh, NormUnit
+from core.task_numbers import extract_task_numbers, normalize_single_task_number
+from core.unit_scaling import (
+    compatible_unit_conversion,
+    normalized_quantity,
+    normalized_unit_price,
+    positive_float,
+)
 
 # Common Russian function words that carry no discriminative weight for
 # construction work-item names; stripping them focuses the token-overlap
@@ -85,6 +71,20 @@ LEADING_WORD_MISMATCH_PENALTY = 20.0
 
 DEFAULT_MIN_SCORE = 55.0
 DEFAULT_LIMIT = 3
+QUANTITY_REL_TOL = 1e-9
+QUANTITY_ABS_TOL = 1e-8
+PRICE_TIE_ABS_TOL = 1e-9
+PRICE_SOURCE_WINNER = "winner"
+PRICE_SOURCE_RESERVE = "reserve"
+DEFAULT_SEMANTIC_MIN_SCORE = 45.0
+SEMANTIC_TIE_ABS_TOL = 1e-6
+
+SemanticScoreFunction = Callable[[str, list[str]], list[float]]
+
+
+class TkpSemanticScoringError(RuntimeError):
+    """Raised when the configured semantic model cannot score candidates."""
+
 
 
 def leading_action_word(normalized_text: str) -> str:
@@ -130,12 +130,7 @@ def normalize_for_matching(value: object) -> tuple[str, frozenset[str]]:
 
 @dataclass(frozen=True)
 class TkpCatalogEntry:
-    """One catalog item pre-normalized for repeated matching queries.
-
-    Build once per estimate run with `build_tkp_catalog_index` and reuse
-    across every row being matched, instead of re-normalizing the whole
-    catalog for every query.
-    """
+    """One catalog item pre-normalized for repeated matching queries."""
 
     item_id: int
     item_name: str
@@ -150,14 +145,42 @@ class TkpCatalogEntry:
     _leading_word: str
     section_name: str = ""
     subsection_name: str = ""
+    qty: float | None = None
+    rnmc_unit_price_no_vat: float | None = None
+    reserve_unit_price_no_vat: float | None = None
+    reserve_name: str = ""
+    normalized_task_no: str = ""
 
 
 @dataclass(frozen=True)
 class TkpMatch:
-    """One scored candidate returned by `find_best_tkp_matches`."""
+    """One scored TKP candidate with participant prices in the RNMC unit."""
 
     entry: TkpCatalogEntry
     score: float
+    winner_price: float | None = None
+    reserve_price: float | None = None
+    quantity_matched: bool = False
+    rnmc_price_delta: float | None = None
+    semantic_score: float | None = None
+    match_method: str = "lexical"
+
+    @property
+    def has_winner_price(self) -> bool:
+        return self.winner_price is not None
+
+    @property
+    def has_reserve_price(self) -> bool:
+        return self.reserve_price is not None
+
+
+@dataclass(frozen=True)
+class TkpAnalogMatch:
+    """TKP result paired with one concrete RNMC analog output column."""
+
+    task_id: str
+    price_position: int
+    match: TkpMatch
 
 
 def build_tkp_catalog_index(items: list) -> list[TkpCatalogEntry]:
@@ -190,6 +213,15 @@ def build_tkp_catalog_index(items: list) -> list[TkpCatalogEntry]:
                 _leading_word=leading_action_word(normalized_text),
                 section_name=str(getattr(item, "section_name", "") or ""),
                 subsection_name=str(getattr(item, "subsection_name", "") or ""),
+                qty=positive_float(getattr(item, "qty", None)),
+                rnmc_unit_price_no_vat=positive_float(
+                    getattr(item, "rnmc_unit_price_no_vat", None)
+                ),
+                reserve_unit_price_no_vat=positive_float(
+                    getattr(item, "reserve_unit_price_no_vat", None)
+                ),
+                reserve_name=str(getattr(item, "reserve_name", "") or ""),
+                normalized_task_no=normalize_single_task_number(item.task_no),
             )
         )
     return index
@@ -225,6 +257,300 @@ def _max_possible_score(jaccard: float, unit_bonus: float) -> float:
     returned for any given min_score.
     """
     return 100.0 * (TOKEN_WEIGHT * jaccard + SEQUENCE_WEIGHT * 1.0) + unit_bonus
+
+
+def build_tkp_task_index(
+    index: list[TkpCatalogEntry],
+) -> dict[str, tuple[TkpCatalogEntry, ...]]:
+    """Group live TKP entries by normalized task number for cheap pair lookup."""
+    grouped: dict[str, list[TkpCatalogEntry]] = {}
+    for entry in index:
+        if not entry.normalized_task_no:
+            continue
+        grouped.setdefault(entry.normalized_task_no, []).append(entry)
+    return {key: tuple(values) for key, values in grouped.items()}
+
+
+def find_tkp_match_for_rnmc_analog(
+    analog_entry,
+    task_index: dict[str, tuple[TkpCatalogEntry, ...]],
+    *,
+    min_score: float = DEFAULT_MIN_SCORE,
+    semantic_scorer: SemanticScoreFunction | None = None,
+    semantic_model_name: str = "",
+    semantic_min_score: float = DEFAULT_SEMANTIC_MIN_SCORE,
+) -> TkpMatch | None:
+    """Find one TKP work item paired to one RNMC catalog entry.
+
+    Candidate narrowing follows the product rule: task number, compatible
+    scaled unit, exact normalized quantity when available, then name score.
+    When a semantic scorer is supplied, it is the primary name-ranking signal;
+    lexical scoring remains only the non-semantic fallback for direct callers.
+    RNMC unit price resolves truly tied name candidates after unit scaling.
+    Winner and reserve unit prices are retained separately and converted into
+    the concrete RNMC analog unit; they are never averaged at this stage.
+    """
+    task_numbers = set(extract_task_numbers(getattr(analog_entry, "task_id", "")))
+    if not task_numbers:
+        return None
+
+    original_row = getattr(analog_entry, "original_row", None)
+    if original_row is None:
+        return None
+    query_name = getattr(original_row, "work_name", "")
+    query_unit = getattr(original_row, "unit", "")
+    query_quantity = normalized_quantity(
+        getattr(original_row, "quantity", None),
+        query_unit,
+    )
+    query_rnmc_price = normalized_unit_price(
+        getattr(original_row, "price_original", None),
+        query_unit,
+    )
+
+    candidate_pool: list[TkpCatalogEntry] = []
+    for task_no in task_numbers:
+        candidate_pool.extend(task_index.get(task_no, ()))
+
+    query_demolition = HasDemontazh(query_name)
+    candidates: list[tuple[TkpCatalogEntry, float]] = []
+    for entry in candidate_pool:
+        conversion = compatible_unit_conversion(query_unit, entry.unit)
+        if conversion is None:
+            continue
+        if not _entry_has_usable_participant_price(entry):
+            continue
+        if not multiplicity_is_compatible(query_name, entry.item_name):
+            continue
+        candidate_context = " ".join(
+            part for part in (entry.section_name, entry.subsection_name, entry.item_name) if part
+        )
+        if HasDemontazh(candidate_context) != query_demolition:
+            continue
+        candidate_quantity = normalized_quantity(entry.qty, entry.unit)
+        candidates.append((entry, candidate_quantity if candidate_quantity is not None else float("nan")))
+
+    if not candidates:
+        return None
+
+    quantity_matched = False
+    if query_quantity is not None:
+        exact_quantity = [
+            pair
+            for pair in candidates
+            if _same_quantity(query_quantity, pair[1])
+        ]
+        if exact_quantity:
+            candidates = exact_quantity
+            quantity_matched = True
+
+    query_text, query_tokens = normalize_for_matching(query_name)
+    if not query_tokens:
+        return None
+
+    semantic_score: float | None = None
+    match_method = "lexical"
+    if semantic_scorer is not None:
+        scored = _semantic_name_scores(
+            query_name,
+            [entry for entry, _ in candidates],
+            semantic_scorer,
+            min_score=semantic_min_score,
+        )
+        match_method = semantic_model_name or "semantic"
+        tie_tolerance = SEMANTIC_TIE_ABS_TOL
+    else:
+        query_leading_word = leading_action_word(query_text)
+        scored = []
+        for entry, _ in candidates:
+            score = _name_score_for_entry(
+                query_text,
+                query_tokens,
+                query_leading_word,
+                entry,
+                min_score=min_score,
+            )
+            if score >= min_score:
+                scored.append((score, entry))
+        tie_tolerance = PRICE_TIE_ABS_TOL
+
+    if not scored:
+        return None
+
+    best_score = max(score for score, _ in scored)
+    top = [
+        entry
+        for score, entry in scored
+        if isclose(score, best_score, rel_tol=0.0, abs_tol=tie_tolerance)
+    ]
+    selected, rnmc_delta = _resolve_equal_name_candidates(
+        top,
+        query_rnmc_price,
+    )
+    if selected is None:
+        return None
+
+    winner_price, reserve_price = _paired_output_prices(selected, query_unit)
+    if winner_price is None and reserve_price is None:
+        return None
+    if semantic_scorer is not None:
+        semantic_score = max(0.0, min(best_score, 100.0))
+    return TkpMatch(
+        entry=selected,
+        score=max(0.0, min(best_score, 100.0)),
+        winner_price=winner_price,
+        reserve_price=reserve_price,
+        quantity_matched=quantity_matched,
+        rnmc_price_delta=rnmc_delta,
+        semantic_score=semantic_score,
+        match_method=match_method,
+    )
+
+
+
+def _semantic_name_scores(
+    query_name: object,
+    entries: list[TkpCatalogEntry],
+    semantic_scorer: SemanticScoreFunction,
+    *,
+    min_score: float,
+) -> list[tuple[float, TkpCatalogEntry]]:
+    if not entries:
+        return []
+    try:
+        raw_scores = semantic_scorer(
+            str(query_name or ""),
+            [entry.item_name for entry in entries],
+        )
+    except Exception as exc:
+        raise TkpSemanticScoringError(str(exc)) from exc
+    if len(raw_scores) != len(entries):
+        raise TkpSemanticScoringError(
+            "semantic scorer returned an unexpected score count"
+        )
+
+    scored: list[tuple[float, TkpCatalogEntry]] = []
+    for raw_score, entry in zip(raw_scores, entries):
+        try:
+            score = max(0.0, min(float(raw_score), 1.0)) * 100.0
+        except (TypeError, ValueError) as exc:
+            raise TkpSemanticScoringError(
+                "semantic scorer returned a non-numeric score"
+            ) from exc
+        if score >= min_score:
+            scored.append((score, entry))
+    return scored
+
+def _same_quantity(left: float, right: float) -> bool:
+    if right != right:  # NaN marks missing candidate quantity.
+        return False
+    return isclose(
+        left,
+        right,
+        rel_tol=QUANTITY_REL_TOL,
+        abs_tol=QUANTITY_ABS_TOL,
+    )
+
+
+def _entry_has_usable_participant_price(entry: TkpCatalogEntry) -> bool:
+    return (
+        positive_float(entry.winner_unit_price_no_vat) is not None
+        or positive_float(entry.reserve_unit_price_no_vat) is not None
+    )
+
+
+def _name_score_for_entry(
+    query_text: str,
+    query_tokens: frozenset[str],
+    query_leading_word: str,
+    entry: TkpCatalogEntry,
+    *,
+    min_score: float,
+) -> float:
+    jaccard = _jaccard(query_tokens, entry._normalized_tokens)
+    leading_penalty = (
+        0.0
+        if same_action_group(query_leading_word, entry._leading_word)
+        else LEADING_WORD_MISMATCH_PENALTY
+    )
+    if _max_possible_score(jaccard, 0.0) - leading_penalty < min_score:
+        return 0.0
+    return score_names(
+        query_text,
+        query_tokens,
+        entry._normalized_text,
+        entry._normalized_tokens,
+    ) - leading_penalty
+
+
+def _resolve_equal_name_candidates(
+    candidates: list[TkpCatalogEntry],
+    query_rnmc_price: float | None,
+) -> tuple[TkpCatalogEntry | None, float | None]:
+    if not candidates:
+        return None, None
+    if len(candidates) == 1:
+        return candidates[0], _rnmc_price_delta(candidates[0], query_rnmc_price)
+
+    if query_rnmc_price is not None:
+        with_delta = [
+            (delta, entry)
+            for entry in candidates
+            if (delta := _rnmc_price_delta(entry, query_rnmc_price)) is not None
+        ]
+        if with_delta:
+            best_delta = min(delta for delta, _ in with_delta)
+            closest = [
+                entry
+                for delta, entry in with_delta
+                if isclose(delta, best_delta, rel_tol=0.0, abs_tol=PRICE_TIE_ABS_TOL)
+            ]
+            if len(closest) == 1:
+                return closest[0], best_delta
+            candidates = closest
+
+    priced = [
+        (entry, _paired_output_prices(entry, entry.unit))
+        for entry in candidates
+    ]
+    signatures = {
+        (
+            round(float(result[0]), 9) if result[0] is not None else None,
+            round(float(result[1]), 9) if result[1] is not None else None,
+        )
+        for _, result in priced
+        if result[0] is not None or result[1] is not None
+    }
+    if len(signatures) == 1:
+        return min(candidates, key=lambda entry: entry.item_id), None
+    return None, None
+
+
+def _rnmc_price_delta(
+    entry: TkpCatalogEntry,
+    query_rnmc_price: float | None,
+) -> float | None:
+    if query_rnmc_price is None:
+        return None
+    candidate_price = normalized_unit_price(entry.rnmc_unit_price_no_vat, entry.unit)
+    if candidate_price is None:
+        return None
+    return abs(candidate_price - query_rnmc_price) / query_rnmc_price
+
+
+def _paired_output_prices(
+    entry: TkpCatalogEntry,
+    target_unit: object,
+) -> tuple[float | None, float | None]:
+    """Return winner and reserve unit prices converted to the RNMC analog unit."""
+    conversion = compatible_unit_conversion(target_unit, entry.unit)
+    if conversion is None:
+        return None, None
+    winner = positive_float(entry.winner_unit_price_no_vat)
+    reserve = positive_float(entry.reserve_unit_price_no_vat)
+    winner_price = winner * conversion.price_factor if winner is not None else None
+    reserve_price = reserve * conversion.price_factor if reserve is not None else None
+    return winner_price, reserve_price
 
 
 def find_best_tkp_matches(

@@ -147,7 +147,7 @@ def _seed_tkp_item(db_path):
         init_database(connection)
         cursor = connection.execute(
             "INSERT INTO tkp_sources (file_name, task_no, item_count) VALUES (?, ?, ?)",
-            ("tkp-source.xlsx", "TKP-77", 1),
+            ("tkp-source.xlsx", "1234567", 1),
         )
         connection.execute(
             """
@@ -156,7 +156,7 @@ def _seed_tkp_item(db_path):
                 winner_name, task_no
             ) VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (cursor.lastrowid, INSTALLATION, METER, 200.0, "winner", "TKP-77"),
+            (cursor.lastrowid, INSTALLATION, METER, 200.0, "winner", "1234567"),
         )
         connection.commit()
     finally:
@@ -253,8 +253,16 @@ def test_full_run_and_download(client):
 def test_tkp_toggle_writes_best_candidate_to_download(client, tmp_path, monkeypatch):
     db_path = tmp_path / "estimate_ai.db"
     monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
-    _seed_database(db_path, _catalog_bytes([("t-1", 100)]))
+    _seed_database(db_path, _catalog_bytes([("1234567", 100)]))
     _seed_tkp_item(db_path)
+
+    class FakeQwen:
+        display_name = "Qwen3-Embedding-0.6B"
+
+        def score(self, query, candidates):
+            return [0.99 for _ in candidates]
+
+    monkeypatch.setattr("app.web.app.load_qwen_semantic_backend", lambda models_dir: FakeQwen())
 
     files = {"estimate": ("estimate.xlsx", _template_estimate_bytes(), XLSX_MIME)}
     page = client.post("/run", files=files)
@@ -262,6 +270,7 @@ def test_tkp_toggle_writes_best_candidate_to_download(client, tmp_path, monkeypa
 
     assert result.status_code == 200
     assert "\u0410\u043d\u0430\u043b\u043e\u0433\u0438 \u0438\u0437 \u0422\u041a\u041f" in result.text
+    assert "Qwen3-Embedding-0.6B" in result.text
     match = re.search(r'href="(/download\?token=[0-9a-f]+)"', result.text)
     assert match is not None
     download = client.get(match.group(1))
@@ -271,13 +280,35 @@ def test_tkp_toggle_writes_best_candidate_to_download(client, tmp_path, monkeypa
     workbook = load_workbook(BytesIO(download.content), data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=17).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u0438\u0437 \u0422\u041a\u041f"
-        assert sheet.cell(row=9, column=17).value == 200
-        assert sheet.cell(row=9, column=18).value == INSTALLATION
-        assert sheet.cell(row=9, column=19).value == "TKP-77"
-        assert sheet.cell(row=7, column=20).value == "t-1"
+        assert sheet.cell(row=7, column=17).value == "1234567"
+        assert sheet.cell(row=7, column=18).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f"
+        assert sheet.cell(row=9, column=17).value == 100
+        assert sheet.cell(row=9, column=18).value == 200
+        assert sheet.cell(row=9, column=18).fill.start_color.rgb == "FFC6EFCE"
     finally:
         workbook.close()
+
+
+
+def test_tkp_toggle_fails_clearly_when_qwen_is_unavailable(client, tmp_path, monkeypatch):
+    from app.services.tkp_shadow import SemanticModelUnavailableError
+
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    _seed_database(db_path, _catalog_bytes([("1234567", 100)]))
+    _seed_tkp_item(db_path)
+
+    def unavailable(models_dir):
+        raise SemanticModelUnavailableError("missing qwen")
+
+    monkeypatch.setattr("app.web.app.load_qwen_semantic_backend", unavailable)
+    files = {"estimate": ("estimate.xlsx", _template_estimate_bytes(), XLSX_MIME)}
+    page = client.post("/run", files=files)
+    result = _confirm(client, page, use_tkp=True)
+
+    assert result.status_code == 503
+    assert "Qwen" in result.text
+    assert "missing qwen" in result.text
 
 
 def test_key_data_not_found_page(client):

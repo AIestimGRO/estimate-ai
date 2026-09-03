@@ -23,6 +23,26 @@ MODEL_BGE_M3 = "bge-m3"
 STRICT_MIN_LEXICAL_SCORE = 15.0
 
 
+class SemanticModelUnavailableError(RuntimeError):
+    """Requested local semantic model is missing or cannot be loaded."""
+
+
+def load_qwen_semantic_backend(models_dir: str | Path) -> "SentenceTransformerBackend":
+    model_path = Path(models_dir) / "qwen3-embedding-0.6b"
+    if not model_path.is_dir():
+        raise SemanticModelUnavailableError(
+            f"Qwen3-Embedding-0.6B model directory not found: {model_path}"
+        )
+    try:
+        return SentenceTransformerBackend(
+            MODEL_QWEN3,
+            "Qwen3-Embedding-0.6B",
+            model_path,
+        )
+    except Exception as exc:
+        raise SemanticModelUnavailableError(str(exc)) from exc
+
+
 class ShadowModelStatus(str, Enum):
     READY = "ready"
     UNAVAILABLE = "unavailable"
@@ -186,17 +206,23 @@ class SentenceTransformerBackend:
         self._model = _load_cpu_sentence_transformer(
             str(Path(model_path).resolve())
         )
+        self._embedding_cache: dict[str, object] = {}
 
     def score(self, query: str, candidates: list[str]) -> list[float]:
-        embeddings = self._model.encode(
-            [query, *candidates],
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
-        query_embedding = embeddings[0]
+        texts = [str(query or ""), *(str(candidate or "") for candidate in candidates)]
+        missing = list(dict.fromkeys(text for text in texts if text not in self._embedding_cache))
+        if missing:
+            embeddings = self._model.encode(
+                missing,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+            for text, embedding in zip(missing, embeddings):
+                self._embedding_cache[text] = embedding
+        query_embedding = self._embedding_cache[texts[0]]
         return [
-            float(query_embedding @ candidate_embedding)
-            for candidate_embedding in embeddings[1:]
+            float(query_embedding @ self._embedding_cache[candidate])
+            for candidate in texts[1:]
         ]
 
 
@@ -208,7 +234,7 @@ def _load_cpu_sentence_transformer(model_path: str):
         from sentence_transformers import SentenceTransformer
     except ImportError as exc:
         raise RuntimeError(
-            "sentence-transformers is not installed; live matching is unchanged"
+            "sentence-transformers is not installed; install requirements-semantic.txt"
         ) from exc
 
     model = SentenceTransformer(

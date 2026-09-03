@@ -28,15 +28,19 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 from openpyxl.worksheet.worksheet import Worksheet
 
+from core.task_numbers import normalize_single_task_number
 from core.tkp_ingest import (
     STATUS_OK,
+    TkpBlockDiagnostic,
     TkpCatalogParseResult,
     TkpItem,
+    TkpSourceDiagnostics,
     TkpSourceFile,
+    tkp_item_has_usable_unit_price,
 )
 
 SUPPORTED_SOURCE_SUFFIXES = frozenset({".xlsx", ".xlsm"})
-PARSER_VERSION = "tkp-folder-v1"
+PARSER_VERSION = "tkp-folder-v2"
 
 _WOR_BLOCK = "\u0411\u041b\u041e\u041a \u0412\u041e\u0420 \u0418 \u0426\u0415\u041d\u0410"
 _ADVANCE_LIMIT = (
@@ -130,6 +134,7 @@ def parse_tkp_source_workbooks(
     """Parse multiple original KL workbooks into the aggregate data model."""
     files: list[TkpSourceFile] = []
     items: list[TkpItem] = []
+    diagnostics: list[TkpSourceDiagnostics] = []
     run_ids: list[str] = []
     for source in sources:
         try:
@@ -151,15 +156,32 @@ def parse_tkp_source_workbooks(
                     message=f"Workbook read error: {exc}",
                 )
             )
+            diagnostics.append(
+                TkpSourceDiagnostics(
+                    file_path=source.display_path,
+                    file_name=file_name,
+                    sheet_name="",
+                    blocks=(
+                        TkpBlockDiagnostic(
+                            code="workbook",
+                            label="Workbook",
+                            found=False,
+                            value=f"Workbook read error: {exc}",
+                        ),
+                    ),
+                )
+            )
             run_ids.append(run_id)
             continue
         files.extend(result.files)
         items.extend(result.items)
+        diagnostics.extend(result.diagnostics)
         run_ids.extend(result.run_ids)
     return TkpCatalogParseResult(
         run_ids=tuple(dict.fromkeys(run_ids)),
         files=files,
         items=items,
+        diagnostics=diagnostics,
     )
 
 
@@ -187,9 +209,27 @@ def parse_tkp_source_workbook(
                 file_path=source_path,
                 file_name=file_name,
                 status="Skipped",
-                message="KL worksheet not found by name or structure.",
+                message="KL worksheet not found by name or strict KL structure.",
             )
-            return TkpCatalogParseResult(run_ids=(run_id,), files=[source], items=[])
+            diagnostics = TkpSourceDiagnostics(
+                file_path=source_path,
+                file_name=file_name,
+                sheet_name="",
+                blocks=(
+                    TkpBlockDiagnostic(
+                        code="KL",
+                        label="KL worksheet",
+                        found=False,
+                        value="KL worksheet not found by name or strict KL structure.",
+                    ),
+                ),
+            )
+            return TkpCatalogParseResult(
+                run_ids=(run_id,),
+                files=[source],
+                items=[],
+                diagnostics=[diagnostics],
+            )
 
         formula_sheet = pair.formulas[sheet_name]
         value_sheet = pair.values[sheet_name]
@@ -231,15 +271,24 @@ def parse_tkp_source_workbook(
             if participants
             else 11
         )
-        task_no = reader.text_at_code("1.3", metadata_col)
+        task_no_raw = reader.text_at_code("1.3", metadata_col)
+        task_no = normalize_single_task_number(task_no_raw)
+        if not task_no:
+            problems.append("Task number not found or invalid.")
         request_date = _as_datetime(reader.value_at_code("1.1", metadata_col))
         version = reader.text_at_code("1.2", metadata_col)
         customer = reader.text_at_code("1.5", metadata_col)
         general_contractor = reader.text_at_code("1.7", metadata_col)
         procedure_name = _first_nonblank(reader.text(1, 2), reader.text(2, 2))
 
-        recommended = _recommended_fields(reader, (("10.1", "block10"), ("8.1", "block8")))
-        reserve_recommended = _recommended_fields(reader, (("10.2", "block10_reserve"), ("8.2", "block8_reserve")))
+        winner_block_10 = _recommended_fields(reader, (("10.1", "block10"),))
+        winner_block_8 = _recommended_fields(reader, (("8.1", "block8"),))
+        reserve_block_10 = _recommended_fields(reader, (("10.2", "block10_reserve"),))
+        reserve_block_8 = _recommended_fields(reader, (("8.2", "block8_reserve"),))
+        recommended = winner_block_10 if winner_block_10["source"] else winner_block_8
+        reserve_recommended = (
+            reserve_block_10 if reserve_block_10["source"] else reserve_block_8
+        )
         winner_name = winner.name if winner is not None else ""
         winner_inn = (
             reader.text_at_code("2.3", winner.start_col)
@@ -345,13 +394,72 @@ def parse_tkp_source_workbook(
             reserve_total_vat=reserve_total_vat,
             reserve_method=reserve_method,
         )
+        usable_rows = sum(tkp_item_has_usable_unit_price(item) for item in parsed_items)
+        diagnostics = TkpSourceDiagnostics(
+            file_path=source_path,
+            file_name=file_name,
+            sheet_name=sheet_name,
+            wor_start_row=start_row,
+            wor_end_row=end_row,
+            wor_end_method=end_method,
+            wor_schema=layout.schema_name,
+            participant_count=len(participants),
+            rows_found=len(parsed_items),
+            rows_with_usable_price=usable_rows,
+            rows_rejected_missing_prices=len(parsed_items) - usable_rows,
+            blocks=(
+                _block_diagnostic(reader, "1.1", "Request date", reader.text_at_code("1.1", metadata_col)),
+                _block_diagnostic(reader, "1.2", "Version", version),
+                _block_diagnostic(reader, "1.3", "Task number", task_no_raw),
+                _block_diagnostic(reader, "1.5", "Customer", customer),
+                _block_diagnostic(reader, "1.7", "General contractor", general_contractor),
+                _block_diagnostic(
+                    reader,
+                    "2.2",
+                    "Participants",
+                    ", ".join(participant.name for participant in participants),
+                ),
+                TkpBlockDiagnostic(
+                    code="4",
+                    label="WOR and Price",
+                    found=start_row > 0,
+                    value=(
+                        f"row {start_row}; end {end_row}; schema {layout.schema_name}"
+                        if start_row > 0
+                        else ""
+                    ),
+                    row=start_row,
+                ),
+                _block_diagnostic(reader, "8.1", "Preliminary winner", _text(winner_block_8["name"])),
+                _block_diagnostic(reader, "8.2", "Preliminary reserve", _text(reserve_block_8["name"])),
+                _block_diagnostic(reader, "10.1", "Recommended winner", _text(winner_block_10["name"])),
+                _block_diagnostic(reader, "10.2", "Reserve winner", _text(reserve_block_10["name"])),
+            ),
+        )
         return TkpCatalogParseResult(
             run_ids=(run_id,),
             files=[source],
             items=parsed_items,
+            diagnostics=[diagnostics],
         )
     finally:
         pair.close()
+
+
+def _block_diagnostic(
+    reader: "_SheetReader",
+    code: str,
+    label: str,
+    value: str,
+) -> TkpBlockDiagnostic:
+    row = reader.find_code_row(code)
+    return TkpBlockDiagnostic(
+        code=code,
+        label=label,
+        found=row > 0,
+        value=value,
+        row=row,
+    )
 
 
 class _SheetReader:
@@ -502,37 +610,101 @@ class _SheetReader:
 
 
 def _find_kl_sheet_name(workbook) -> str | None:
-    exact: list[str] = []
+    """Return a KL worksheet without mistaking RNMC/estimate sheets for KL.
+
+    A sheet whose title explicitly looks like a KL sheet remains eligible so
+    incomplete KL workbooks can still reach the Needs review stage. A sheet
+    with an unrelated title is accepted only when several independent KL
+    structures agree: participant metadata, WOR block, participant price
+    headers, offer total, and a recommendation block.
+    """
+    named: list[str] = []
     structural: list[tuple[int, str]] = []
     for worksheet in workbook.worksheets:
         normalized = _norm_sheet_name(worksheet.title)
-        if normalized in {"\u041a\u041b20", "\u041a\u041b2"}:
-            exact.append(worksheet.title)
+        if re.fullmatch(r"\u041a\u041b\d+", normalized):
+            named.append(worksheet.title)
             continue
-        max_row = min(worksheet.max_row or 1, 500)
-        max_col = min(worksheet.max_column or 1, 120)
-        score = 0
-        for row in range(1, max_row + 1):
-            code = _code_norm(worksheet.cell(row, 1).value)
-            label = _norm(worksheet.cell(row, 2).value)
-            if code == "2.2" and _NAME in label:
-                score += 4
-            if _WOR_BLOCK in label:
-                score += 8
-                if _looks_like_price_header(worksheet.cell(row, 11).value):
-                    score += 3
-                if _looks_like_total_header(worksheet.cell(row, 12).value):
-                    score += 3
-            if score >= 12:
-                break
-        if score:
-            structural.append((score, worksheet.title))
-    if exact:
-        return exact[0]
+
+        evidence = _kl_structural_evidence(worksheet)
+        if evidence["strict_match"]:
+            structural.append((int(evidence["score"]), worksheet.title))
+
+    if named:
+        return named[0]
     if not structural:
         return None
     structural.sort(key=lambda item: (-item[0], workbook.sheetnames.index(item[1])))
-    return structural[0][1] if structural[0][0] >= 12 else None
+    return structural[0][1]
+
+
+def _kl_structural_evidence(worksheet: Worksheet) -> dict[str, object]:
+    """Collect independent KL markers for a nonstandard worksheet title."""
+    max_row = min(worksheet.max_row or 1, 500)
+    max_col = min(worksheet.max_column or 1, 120)
+    participant_row = 0
+    wor_row = 0
+    total_offer_row = 0
+    recommendation_row = 0
+    participant_identity_row = 0
+
+    for row in range(1, max_row + 1):
+        code = _code_norm(worksheet.cell(row, 1).value)
+        label = _norm(worksheet.cell(row, 2).value)
+        marker_text = _norm(
+            " ".join(
+                _text(worksheet.cell(row, col).value)
+                for col in range(1, min(max_col, 8) + 1)
+                if _text(worksheet.cell(row, col).value)
+            )
+        )
+
+        if code == "2.2" and _NAME in label:
+            participant_row = participant_row or row
+        if code == "2.3":
+            participant_identity_row = participant_identity_row or row
+        if _WOR_BLOCK in marker_text:
+            wor_row = wor_row or row
+        if _TOTAL_OFFER in marker_text:
+            total_offer_row = total_offer_row or row
+        if code in {"8.1", "10.1"}:
+            recommendation_row = recommendation_row or row
+
+    price_pair = False
+    if wor_row:
+        for col in range(1, max_col):
+            if (
+                _looks_like_price_header(worksheet.cell(wor_row, col).value)
+                and _looks_like_total_header(worksheet.cell(wor_row, col + 1).value)
+            ):
+                price_pair = True
+                break
+
+    score = (
+        (4 if participant_row else 0)
+        + (2 if participant_identity_row else 0)
+        + (8 if wor_row else 0)
+        + (4 if price_pair else 0)
+        + (4 if total_offer_row else 0)
+        + (6 if recommendation_row else 0)
+    )
+    strict_match = bool(
+        participant_row
+        and wor_row
+        and price_pair
+        and total_offer_row
+        and recommendation_row
+    )
+    return {
+        "strict_match": strict_match,
+        "score": score,
+        "participant_row": participant_row,
+        "participant_identity_row": participant_identity_row,
+        "wor_row": wor_row,
+        "price_pair": price_pair,
+        "total_offer_row": total_offer_row,
+        "recommendation_row": recommendation_row,
+    }
 
 
 def _find_wor_start(reader: _SheetReader) -> int:

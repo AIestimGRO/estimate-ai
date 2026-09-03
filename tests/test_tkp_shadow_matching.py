@@ -178,3 +178,15 @@ def test_strict_shadow_hides_zero_relevance_candidates() -> None:
     )
 
     assert result.strict_candidates == []
+
+
+def test_load_qwen_backend_requires_local_model_directory(tmp_path) -> None:
+    import pytest
+
+    from app.services.tkp_shadow import (
+        SemanticModelUnavailableError,
+        load_qwen_semantic_backend,
+    )
+
+    with pytest.raises(SemanticModelUnavailableError, match="Qwen3-Embedding-0.6B"):
+        load_qwen_semantic_backend(tmp_path)

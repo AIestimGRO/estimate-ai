@@ -107,13 +107,23 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   files with the same name, reject duplicate names within one folder, and keep
   the aggregate CatalogBuilder import as a fallback.
 - Enable TKP matching per run with the `Use TKP analogs` toggle; it is off by
-  default.
-- Select one best priced TKP candidate per estimate row with deterministic
-  lexical scoring.
-- Write three adjacent columns before the RNMC analog block: TKP price, original
-  TKP work name, and TKP task number.
-- Include the TKP price in the average-price formula while keeping RNMC
-  matching, RNMC matched-row counts, `/KR`, and RNMC price-risk logic unchanged.
+  default and the RNMC-only output remains unchanged when disabled.
+- Pair TKP to each already selected RNMC analog rather than searching one global
+  TKP candidate per estimate row. Scope candidates to normalized seven-digit
+  task numbers from the RNMC analog, compatible scaled units, and preferably an
+  exact normalized quantity before local Qwen3 semantic work-name ranking.
+- Resolve equal-name duplicates with the normalized RNMC source unit price when
+  available; leave genuinely different-price ties blank instead of selecting an
+  arbitrary row.
+- Keep explicit winner and reserve TKP unit prices separate after unit-scale
+  conversion; never collapse them into one mean output price.
+- Write sparse gray participant columns after each RNMC analog: `Аналог
+  победителя` only when a winner price exists somewhere for that analog column,
+  and `Аналог резервного победителя` only when a reserve price exists. When both
+  exist, winner is first and reserve second. Do not create empty gray partner
+  columns. Color populated winner cells green and reserve cells light blue.
+  Include each populated participant price independently in the average while
+  keeping RNMC matching counts, `/KR`, and RNMC price-risk logic unchanged.
 - Persist the selected TKP business/audit columns instead of the whole raw
   workbook, migrate existing databases additively, and refresh previously
   imported TKP rows once so the new fields are populated.
@@ -121,6 +131,20 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   WOR-only catalog; show an unambiguous winner unit-price label and all
   retained fields in a full admin grid with filters, sorting, pagination,
   configurable columns, and resizable widths.
+- Stage direct KL folder uploads before database writes: show a file-level
+  macro preview with detected/missing blocks and values, provide a separate
+  row-level preview, and allow opening the temporary source workbook.
+- Classify mixed Excel folders before TKP import so RNMC/OS lookalikes are
+  shown as `NOT_KL` and skipped instead of being persisted; keep an explicit
+  per-file manual exclusion control in the staged preview for templates and
+  edge cases.
+- Enforce TKP import quality at storage: every stored row must have a task
+  number and at least one explicit positive participant unit price (winner or
+  reserve). Rows with neither unit price are rejected and unit prices are never
+  reconstructed from line totals or quantity.
+- When a healthy KL has no detected task number, keep it in preview, block
+  confirmation, and allow the user to enter the task number manually before
+  the accepted rows are written to SQLite.
 - Read-only TKP shadow comparison: unchanged live result, strict deterministic
   filters/unit-price conversion, and optional local Qwen3/BGE-M3 embeddings.
 
@@ -162,8 +186,16 @@ See `docs/RNMC_IMPORT.md` for the import specification.
   the three decimal-shift fixes and the four-layer waterproofing correction.
 - [x] Filter RNMC analogs when both the estimate and catalog name explicitly
   state different layer counts.
-- [x] TKP catalog import, deterministic best-candidate matching, per-run toggle,
-  Excel output block, and average-price integration.
+- [x] TKP catalog import and staged quality controls.
+- [x] Paired TKP analog matching per RNMC analog: normalized task/unit/quantity
+  narrowing, local Qwen3 name ranking, RNMC-price tie-break, sparse separate
+  winner/reserve TKP columns, and average-price integration.
+- [x] TKP staged import quality gate: macro/file preview, row preview, source
+  workbook inspection, manual task-number recovery, and rejection of rows with
+  neither winner nor reserve unit price.
+- [x] Mixed-folder TKP classifier and per-file exclusion: strict structural
+  fallback prevents RNMC/OS files from entering the TKP database while keeping
+  suspicious files visible in preview.
 - [x] User exclusions during RNMC preview with durable processed-file history.
 - [x] Resizable main analog-catalog columns with browser-local persistence/reset.
 - [x] Isolated TKP shadow prototype with strict safety filters and optional
@@ -195,9 +227,10 @@ See `docs/RNMC_IMPORT.md` for the import specification.
 TKP is the first optional secondary source. Other sources may be added later,
 but must remain isolated from the exact RNMC matching and risk pipeline.
 
-Do not add semantic/AI matching inside RNMC matching/pricing. Any future
-semantic source must be isolated behind a separate, cache-backed, reproducible
-layer.
+Do not add semantic/AI matching inside the core RNMC analog selection or RNMC
+risk/pricing rules. Semantic ranking is allowed for the optional secondary TKP
+pairing layer only after deterministic task/unit/quantity safety filters, using
+a local cache-backed model and explicit failure when the model is unavailable.
 
 ## Working rules
 

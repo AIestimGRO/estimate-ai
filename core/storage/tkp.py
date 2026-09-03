@@ -13,17 +13,20 @@ since RNMC has no reliable modified-date signal.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.task_numbers import normalize_single_task_number
 from core.tkp_ingest import (
     TkpCatalogParseResult,
     TkpItem,
     TkpSourceFile,
     parse_tkp_catalog_workbook,
+    tkp_item_has_usable_unit_price,
 )
 
-TKP_DETAILS_VERSION = 2
+TKP_DETAILS_VERSION = 3
 
 TKP_SORT_COLUMNS = {
     "item_name": "tkp_items.item_name",
@@ -161,7 +164,13 @@ def import_tkp_parse_result(
     """Insert a parsed aggregate workbook or direct folder-upload result."""
     items_by_file_path: dict[str, list[TkpItem]] = {}
     for item in result.items:
-        items_by_file_path.setdefault(item.file_path, []).append(item)
+        if not tkp_item_has_usable_unit_price(item):
+            continue
+        task_no = normalize_single_task_number(item.task_no)
+        if not task_no:
+            continue
+        normalized_item = item if item.task_no == task_no else replace(item, task_no=task_no)
+        items_by_file_path.setdefault(item.file_path, []).append(normalized_item)
 
     files_imported = 0
     files_updated = 0
@@ -169,9 +178,18 @@ def import_tkp_parse_result(
     items_imported = 0
 
     for source_file in result.files:
+        if source_file.parse_status == "Skipped":
+            files_skipped += 1
+            continue
+        source_task_no = normalize_single_task_number(source_file.task_no)
+        normalized_source = (
+            source_file
+            if source_file.task_no == source_task_no
+            else replace(source_file, task_no=source_task_no)
+        )
         outcome = _upsert_source_file(
             connection,
-            source_file,
+            normalized_source,
             items_by_file_path.get(source_file.file_path, []),
         )
         if outcome == "imported":

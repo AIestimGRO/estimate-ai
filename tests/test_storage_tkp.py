@@ -36,7 +36,7 @@ def _file_row(modified: datetime, **overrides: object) -> tuple:
         "WinnerHeader3": "", "WinnerHeader4": "", "WinnerBlockName": WINNER,
         "WinnerBlockUIN": "", "WinnerBlockTotalVat": 1000.0,
         "WinnerBlockReason": "", "WinnerBlockSource": "block10",
-        "TaskNo": "111", "RequestDate": datetime(2026, 5, 1), "Version": 1,
+        "TaskNo": "1111111", "RequestDate": datetime(2026, 5, 1), "Version": 1,
         "Customer": "\u0417\u0430\u043a\u0430\u0437\u0447\u0438\u043a", "GeneralContractor": "",
         "ProcedureName": "\u041e\u0431\u044a\u0435\u043a\u0442", "WinnerTotalNoVat": 900.0,
         "WinnerTotalVat": 1080.0, "RnmcTotalNoVat": 950.0,
@@ -56,7 +56,7 @@ def _wor_row(price: float, **overrides: object) -> tuple:
         "WinnerLineTotalNoVat": price * 10, "WinnerName": WINNER,
         "WinnerINN": "1234567890", "WinnerUIN": "uin-1", "WinnerGroupIndex": 1,
         "WinnerStartCol": 1, "WinnerStartColLetter": "A",
-        "WinnerUnitHeader": "", "WinnerTotalHeader": "", "TaskNo": "111",
+        "WinnerUnitHeader": "", "WinnerTotalHeader": "", "TaskNo": "1111111",
         "RequestDate": datetime(2026, 5, 1), "Version": 1,
         "Customer": "\u0417\u0430\u043a\u0430\u0437\u0447\u0438\u043a", "GeneralContractor": "",
         "ProcedureName": "\u041e\u0431\u044a\u0435\u043a\u0442",
@@ -138,7 +138,7 @@ def test_catalog_page_filters_sorts_and_paginates_items(tmp_path: Path) -> None:
             float(index),
             SourceRow=index + 2,
             ItemName=f"Работа {index:02d}",
-            TaskNo="TASK-A" if index == 30 else "TASK-B",
+            TaskNo="1234567" if index == 30 else "7654321",
             WinnerName="Нужный победитель" if index == 30 else "Другой победитель",
         )
         for index in range(1, 31)
@@ -167,7 +167,7 @@ def test_catalog_page_filters_sorts_and_paginates_items(tmp_path: Path) -> None:
 
         filtered = list_tkp_catalog_page(
             connection,
-            filters={"q": "Нужный", "task_no": "TASK-A"},
+            filters={"q": "Нужный", "task_no": "1234567"},
         )
         assert filtered.total_rows == 1
         assert filtered.rows[0].item_name == "Работа 30"
@@ -266,9 +266,8 @@ def test_skipped_source_file_has_no_items(tmp_path: Path) -> None:
         result = import_tkp_catalog_workbook(connection, workbook_path)
 
         assert result.items_imported == 0
-        sources = list_tkp_sources(connection)
-        assert sources[0].parse_status == "Skipped"
-        assert sources[0].item_count == 0
+        assert result.files_skipped == 1
+        assert list_tkp_sources(connection) == []
     finally:
         connection.close()
 

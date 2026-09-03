@@ -10,6 +10,7 @@ Ports the orchestration of ProcessSmeta, Module4, DOMAIN_RULES.md sections
 3-6.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from numbers import Real
 from pathlib import Path
@@ -38,9 +39,11 @@ from core.risk import (
 )
 from core.sections import ResolveSectionCodeWithSource
 from core.tkp_matching import (
+    TkpAnalogMatch,
     TkpCatalogEntry,
     TkpMatch,
-    find_best_tkp_matches,
+    build_tkp_task_index,
+    find_tkp_match_for_rnmc_analog,
 )
 
 
@@ -67,7 +70,7 @@ class EstimateRowResult:
     exception_key: str
     status: str
     section_source: str = ""
-    tkp_match: TkpMatch | None = None
+    tkp_analogs: tuple[TkpAnalogMatch, ...] = ()
 
     @property
     def analogs(self) -> list[AnalogColumn]:
@@ -79,7 +82,18 @@ class EstimateRowResult:
 
     @property
     def has_tkp_analog(self) -> bool:
-        return self.tkp_match is not None
+        return bool(self.tkp_analogs)
+
+    @property
+    def tkp_match(self) -> TkpMatch | None:
+        """Backward-compatible first TKP match for summaries/older callers."""
+        return self.tkp_analogs[0].match if self.tkp_analogs else None
+
+    def tkp_match_for(self, task_id: str, price_position: int) -> TkpMatch | None:
+        for paired in self.tkp_analogs:
+            if paired.task_id == task_id and paired.price_position == price_position:
+                return paired.match
+        return None
 
 
 @dataclass(frozen=True)
@@ -91,6 +105,7 @@ class MatchingRunResult:
     matched_row_count: int = 0
     flagged_row_count: int = 0
     tkp_matched_row_count: int = 0
+    tkp_matched_analog_count: int = 0
 
 
 def run_matching(
@@ -104,6 +119,8 @@ def run_matching(
     regional_coefficient: float = 1.0,
     tkp_catalog_index: list[TkpCatalogEntry] | None = None,
     use_tkp_analogs: bool = False,
+    tkp_semantic_scorer: Callable[[str, list[str]], list[float]] | None = None,
+    tkp_semantic_model_name: str = "",
     manual_section_mappings: dict[str, str] | None = None,
 ) -> MatchingRunResult:
     """Run matching for pre-read structured rows (no Excel I/O here)."""
@@ -112,11 +129,14 @@ def run_matching(
 
     catalog: Catalog = BuildCatalog(catalog_rows, rules)
     tkp_index = _priced_tkp_entries(tkp_catalog_index) if use_tkp_analogs else []
+    tkp_task_index = build_tkp_task_index(tkp_index) if tkp_index else {}
 
     row_results: list[EstimateRowResult] = []
     matched_row_count = 0
     flagged_row_count = 0
     tkp_matched_row_count = 0
+    tkp_matched_analog_count = 0
+    tkp_match_cache: dict[int, TkpMatch | None] = {}
 
     for row_index, estimate_row in enumerate(estimate_rows, start=1):
         row_result = _match_one_row(
@@ -128,8 +148,11 @@ def run_matching(
             demontazh_filter_enabled,
             price_spread_limit,
             regional_coefficient,
-            tkp_index,
+            tkp_task_index,
+            tkp_match_cache,
             use_tkp_analogs,
+            tkp_semantic_scorer,
+            tkp_semantic_model_name,
             manual_section_mappings,
         )
         row_results.append(row_result)
@@ -140,6 +163,7 @@ def run_matching(
             flagged_row_count += 1
         if row_result.has_tkp_analog:
             tkp_matched_row_count += 1
+            tkp_matched_analog_count += len(row_result.tkp_analogs)
 
     return MatchingRunResult(
         rows=row_results,
@@ -147,6 +171,7 @@ def run_matching(
         matched_row_count=matched_row_count,
         flagged_row_count=flagged_row_count,
         tkp_matched_row_count=tkp_matched_row_count,
+        tkp_matched_analog_count=tkp_matched_analog_count,
     )
 
 
@@ -162,6 +187,8 @@ def run_matching_from_files(
     regional_coefficient: float = 1.0,
     tkp_catalog_index: list[TkpCatalogEntry] | None = None,
     use_tkp_analogs: bool = False,
+    tkp_semantic_scorer: Callable[[str, list[str]], list[float]] | None = None,
+    tkp_semantic_model_name: str = "",
     manual_section_mappings: dict[str, str] | None = None,
 ) -> MatchingRunResult:
     """Read catalog/estimate workbooks, then run matching over their rows."""
@@ -178,6 +205,8 @@ def run_matching_from_files(
         regional_coefficient=regional_coefficient,
         tkp_catalog_index=tkp_catalog_index,
         use_tkp_analogs=use_tkp_analogs,
+        tkp_semantic_scorer=tkp_semantic_scorer,
+        tkp_semantic_model_name=tkp_semantic_model_name,
         manual_section_mappings=manual_section_mappings,
     )
 
@@ -191,8 +220,11 @@ def _match_one_row(
     demontazh_filter_enabled: bool,
     price_spread_limit: float,
     regional_coefficient: float,
-    tkp_catalog_index: list[TkpCatalogEntry],
+    tkp_task_index: dict[str, tuple[TkpCatalogEntry, ...]],
+    tkp_match_cache: dict[int, TkpMatch | None],
     use_tkp_analogs: bool,
+    tkp_semantic_scorer: Callable[[str, list[str]], list[float]] | None,
+    tkp_semantic_model_name: str,
     manual_section_mappings: dict[str, str] | None,
 ) -> EstimateRowResult:
     norm_code = NormCode(estimate_row.code)
@@ -229,22 +261,33 @@ def _match_one_row(
             manual_section_mappings=manual_section_mappings,
         )
 
-    tkp_match: TkpMatch | None = None
-    if use_tkp_analogs and tkp_catalog_index:
-        matches = find_best_tkp_matches(
-            estimate_row.work_name,
-            estimate_row.unit,
-            tkp_catalog_index,
-            limit=1,
-        )
-        if matches:
-            tkp_match = matches[0]
+    tkp_analogs: list[TkpAnalogMatch] = []
+    if use_tkp_analogs and tkp_task_index:
+        for analog in match_result.analogs:
+            cache_key = id(analog.entry)
+            if cache_key not in tkp_match_cache:
+                tkp_match_cache[cache_key] = find_tkp_match_for_rnmc_analog(
+                    analog.entry,
+                    tkp_task_index,
+                    semantic_scorer=tkp_semantic_scorer,
+                    semantic_model_name=tkp_semantic_model_name,
+                )
+            tkp_match = tkp_match_cache[cache_key]
+            if tkp_match is None:
+                continue
+            tkp_analogs.append(
+                TkpAnalogMatch(
+                    task_id=analog.task_id,
+                    price_position=analog.price_position,
+                    match=tkp_match,
+                )
+            )
 
     recommended_price = _recommended_price(
         estimate_row.base_price,
         match_result,
         regional_coefficient,
-        tkp_match,
+        tkp_analogs,
     )
 
     if match_result.has_analogs:
@@ -269,7 +312,7 @@ def _match_one_row(
         exception_key=exception_key,
         status=match_result.reason,
         section_source=section_source,
-        tkp_match=tkp_match,
+        tkp_analogs=tuple(tkp_analogs),
     )
 
 
@@ -277,7 +320,7 @@ def _recommended_price(
     base_price: object,
     match_result: MatchResult,
     regional_coefficient: float,
-    tkp_match: TkpMatch | None = None,
+    tkp_analogs: list[TkpAnalogMatch] | tuple[TkpAnalogMatch, ...] = (),
 ) -> float | None:
     """Value port of the average-price formula, DOMAIN_RULES.md section 6.
 
@@ -292,13 +335,17 @@ def _recommended_price(
     analog_prices = [
         analog.entry.price * regional_coefficient for analog in match_result.analogs
     ]
-    if tkp_match is not None:
-        tkp_price = _parse_positive_number(tkp_match.entry.winner_unit_price_no_vat)
-        if tkp_price is not None:
-            # TKP winner prices are already stored at their source price level;
-            # unlike RNMC ZLVL prices, they are not scaled by the estimate's
-            # regional coefficient.
-            analog_prices.append(tkp_price)
+    for paired in tkp_analogs:
+        for tkp_price_value in (
+            paired.match.winner_price,
+            paired.match.reserve_price,
+        ):
+            tkp_price = _parse_positive_number(tkp_price_value)
+            if tkp_price is not None:
+                # Participant TKP prices are already converted to the RNMC
+                # analog unit and are not multiplied by the estimate regional
+                # coefficient. Winner and reserve are independent analogs.
+                analog_prices.append(tkp_price)
     return CalculateAveragePrice(base, analog_prices)
 
 
@@ -311,7 +358,10 @@ def _priced_tkp_entries(
     return [
         entry
         for entry in index
-        if _parse_positive_number(entry.winner_unit_price_no_vat) is not None
+        if (
+            _parse_positive_number(entry.winner_unit_price_no_vat) is not None
+            or _parse_positive_number(entry.reserve_unit_price_no_vat) is not None
+        )
     ]
 
 
