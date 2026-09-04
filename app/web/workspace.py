@@ -856,10 +856,11 @@ main{{padding:24px;max-width:1600px;margin:0 auto}}
 .review-grid th,.review-grid td{{border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;background:#fff}}
 .review-grid td{{padding:6px 8px;vertical-align:top;white-space:normal;overflow:hidden;text-overflow:clip}}
 .review-grid td .cell-text{{white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:18px;overflow:hidden}}
-.review-grid th{{position:sticky;top:0;height:68px;z-index:12;background:#f8fafc;vertical-align:top;padding:6px}}
-.review-grid th .head-label{{font-size:12px;font-weight:700;cursor:pointer;display:block;overflow:hidden;text-overflow:ellipsis}}
-.review-grid th .head-sub{{font-size:10px;color:#64748b;display:block;overflow:hidden;text-overflow:ellipsis}}
-.review-grid th input{{width:100%;margin-top:5px;border:1px solid #d6dce5;border-radius:5px;padding:3px 5px;font-size:11px}}
+.review-grid th{{position:sticky;top:0;height:104px;z-index:12;background:#f8fafc;vertical-align:top;padding:6px}}
+.review-grid th .head-stack{{height:92px;display:grid;grid-template-rows:46px 14px 26px;gap:3px;min-width:0;align-content:start}}
+.review-grid th .head-label{{font-size:12px;line-height:14px;font-weight:700;cursor:pointer;display:flex;align-items:flex-start;justify-content:center;text-align:center;white-space:normal;overflow:hidden;overflow-wrap:anywhere;word-break:break-word;min-width:0}}
+.review-grid th .head-sub{{font-size:10px;line-height:14px;color:#64748b;display:block;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}}
+.review-grid th input{{width:100%;height:26px;min-width:0;margin:0;border:1px solid #d6dce5;border-radius:5px;padding:3px 5px;font-size:11px;align-self:end}}
 .review-grid td.changed{{background:#fff7d6}}
 .review-grid td.pending{{outline:2px solid #f59e0b;outline-offset:-2px}}
 .review-grid td.requested{{box-shadow:inset 0 -3px #7c3aed}}
@@ -1211,6 +1212,7 @@ function makeHeader(columns) {{
   const tr = document.createElement('tr');
   columns.forEach((column, visibleIndex) => {{
     const th = document.createElement('th');
+    const stack = document.createElement('div'); stack.className = 'head-stack';
     const head = document.createElement('span'); head.className = 'head-label'; head.textContent = column.label;
     const sub = document.createElement('span'); sub.className = 'head-sub'; sub.textContent = column.sublabel || column.letter;
     const filter = document.createElement('input'); filter.placeholder = 'filter'; filter.value = state.columnFilters[column.index] || '';
@@ -1226,7 +1228,8 @@ function makeHeader(columns) {{
     resizer.style.cssText = 'position:absolute;right:0;top:0;width:6px;height:100%;cursor:col-resize';
     resizer.addEventListener('mousedown', event => startResize(event, column));
     th.style.position = 'sticky';
-    th.append(head, sub, filter, resizer);
+    stack.append(head, sub, filter);
+    th.append(stack, resizer);
     if (visibleIndex < 2) th.classList.add('sticky-cell');
     tr.appendChild(th);
   }});
