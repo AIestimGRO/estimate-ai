@@ -132,6 +132,11 @@ def resolve_preview_row_values(job, rows) -> dict[int, list[object]]:
     if not formula_targets:
         return resolved
 
+    stored_formulas = {
+        (int(row.excel_row_number), int(column)): str(row.values[column - 1])
+        for row, column in formula_targets
+    }
+
     source_path = Path(job.source_path)
     if not source_path.is_file():
         return resolved
@@ -171,7 +176,10 @@ def resolve_preview_row_values(job, rows) -> dict[int, list[object]]:
                     cache[key] = result
                     return result
 
-                raw = formula_sheet.cell(row=key[0], column=key[1]).value
+                raw = stored_formulas.get(
+                    key,
+                    formula_sheet.cell(row=key[0], column=key[1]).value,
+                )
                 if not isinstance(raw, str) or not raw.lstrip().startswith("="):
                     result = _json_cell_value(raw)
                     cache[key] = result
@@ -386,8 +394,16 @@ def _display_text(value: object) -> str:
 def _is_excel_error_value(value: object) -> bool:
     if not isinstance(value, str):
         return False
-    text = value.strip().upper()
-    return text.startswith("#") and text.endswith(("!", "?", "A", "D", "L"))
+    return value.strip().upper() in {
+        "#NULL!",
+        "#DIV/0!",
+        "#VALUE!",
+        "#REF!",
+        "#NAME?",
+        "#NUM!",
+        "#N/A",
+        "#GETTING_DATA",
+    }
 
 
 def _json_cell_value(value: object) -> object:
