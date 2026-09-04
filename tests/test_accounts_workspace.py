@@ -195,6 +195,10 @@ def test_workspace_wraps_text_when_columns_are_narrowed() -> None:
     assert "grid-template-rows:46px 14px 26px" in page
     assert "head-stack" in page
     assert "stack.append(head, sub, filter)" in page
+    assert 'id="gridHScroll"' in page
+    assert "syncHorizontalScrollbar()" in page
+    assert 'id="withAnalogOnly"' in page
+    assert "row.metadata.has_analogs || row.metadata.has_tkp" in page
 
 
 def test_user_password_and_session_round_trip() -> None:
