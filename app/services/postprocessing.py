@@ -103,7 +103,8 @@ def persist_processing_job(
 
 
 _SIMPLE_REFERENCE_FORMULA = re.compile(
-    r"^\\s*=\\s*\\$?([A-Za-z]{1,3})\\$?(\\d+)\\s*(?:([+-])\\s*(-?\\d+(?:[.,]\\d+)?))?\\s*$"
+    r"^\s*=\s*\$?([A-Za-z]{1,3})\$?(\d+)\s*(?:([+-])\s*(-?\d+(?:[.,]\d+)?))?\s*$"
+
 )
 
 
