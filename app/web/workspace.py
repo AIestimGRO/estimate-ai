@@ -10,7 +10,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from app.services.postprocessing import build_postprocessed_workbook
+from app.services.postprocessing import build_postprocessed_workbook, resolve_preview_row_values
 from core.storage.accounts import (
     ROLE_ADMIN,
     ROLE_SPECIALIST,
@@ -292,6 +292,7 @@ def install_workspace_routes(app: FastAPI) -> None:
             if job is None:
                 return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
             rows = list_processing_rows(connection, job.id)
+            preview_values = resolve_preview_row_values(job, rows)
             overrides = list_cell_overrides(connection, job.id)
             all_requests = list_change_requests(
                 connection,
@@ -327,7 +328,7 @@ def install_workspace_routes(app: FastAPI) -> None:
                         "id": row.id,
                         "row_index": row.row_index,
                         "excel_row_number": row.excel_row_number,
-                        "values": row.values,
+                        "values": preview_values.get(row.id, row.values),
                         "metadata": row.metadata,
                     }
                     for row in rows
