@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
 from app.services.postprocessing import build_postprocessed_workbook
 from app.web.app import create_app
+from app.web.workspace import _render_workspace
 from core.storage.accounts import (
     ROLE_ADMIN,
     ROLE_SPECIALIST,
@@ -164,6 +166,32 @@ def test_schema_contains_account_and_workspace_tables() -> None:
     assert "processing_edit_events" in tables
     assert "specialist_change_requests" in tables
     assert "audit_events" in tables
+
+
+def test_workspace_wraps_text_when_columns_are_narrowed() -> None:
+    job = SimpleNamespace(
+        id="job-wrap",
+        estimate_filename="estimate.xlsx",
+        owner_name="Specialist User",
+        sheet_title="Estimate",
+        region="",
+        total_rows=1,
+        matched_rows=1,
+        flagged_rows=0,
+        tkp_matched_rows=0,
+    )
+    user = SimpleNamespace(
+        id=2,
+        full_name="Specialist User",
+        role=ROLE_SPECIALIST,
+    )
+
+    page = _render_workspace(job, user)
+
+    assert "overflow-wrap:anywhere" in page
+    assert "Math.max(48" in page
+    assert "function currentRowHeight(columns)" in page
+    assert "makeRow(state.rows[i], columns, rowHeight)" in page
 
 
 def test_user_password_and_session_round_trip() -> None:
