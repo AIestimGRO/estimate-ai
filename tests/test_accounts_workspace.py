@@ -192,6 +192,9 @@ def test_workspace_wraps_text_when_columns_are_narrowed() -> None:
     assert "Math.max(48" in page
     assert "function currentRowHeight(columns)" in page
     assert "makeRow(state.rows[i], columns, rowHeight)" in page
+    assert "grid-template-rows:46px 14px 26px" in page
+    assert "head-stack" in page
+    assert "stack.append(head, sub, filter)" in page
 
 
 def test_user_password_and_session_round_trip() -> None:
