@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 
 from app.services.write_result import RunAndWriteResult
 from core.ooxml_preservation import preserve_workbook_package_features
@@ -99,6 +100,116 @@ def persist_processing_job(
         column_schema=schema,
     )
     replace_processing_rows(connection, str(job_id), rows)
+
+
+_SIMPLE_REFERENCE_FORMULA = re.compile(
+    r"^\\s*=\\s*\\$?([A-Za-z]{1,3})\\$?(\\d+)\\s*(?:([+-])\\s*(-?\\d+(?:[.,]\\d+)?))?\\s*$"
+)
+
+
+def resolve_preview_row_values(job, rows) -> dict[int, list[object]]:
+    """Return browser-only values with source formulas resolved where possible.
+
+    Stored processing rows intentionally keep the original formula text so
+    restore/export operations can preserve the workbook. This helper changes
+    only the values sent to the browser preview.
+    """
+    resolved = {int(row.id): list(row.values) for row in rows}
+    source_columns = {
+        int(column.get("index") or 0)
+        for column in job.column_schema
+        if str(column.get("kind") or "") == "source"
+    }
+    formula_targets = [
+        (row, column)
+        for row in rows
+        for column in source_columns
+        if 0 < column <= len(row.values)
+        and isinstance(row.values[column - 1], str)
+        and str(row.values[column - 1]).lstrip().startswith("=")
+    ]
+    if not formula_targets:
+        return resolved
+
+    source_path = Path(job.source_path)
+    if not source_path.is_file():
+        return resolved
+
+    keep_vba = source_path.suffix.lower() == ".xlsm"
+    formulas = load_workbook(
+        source_path,
+        data_only=False,
+        read_only=True,
+        keep_vba=keep_vba,
+    )
+    values = load_workbook(
+        source_path,
+        data_only=True,
+        read_only=True,
+        keep_vba=keep_vba,
+    )
+    try:
+        if job.sheet_title not in formulas.sheetnames or job.sheet_title not in values.sheetnames:
+            return resolved
+        formula_sheet = formulas[job.sheet_title]
+        value_sheet = values[job.sheet_title]
+        cache: dict[tuple[int, int], object | None] = {}
+        visiting: set[tuple[int, int]] = set()
+
+        def resolve_cell(row_number: int, column_number: int) -> object | None:
+            key = (int(row_number), int(column_number))
+            if key in cache:
+                return cache[key]
+            if key in visiting:
+                return None
+            visiting.add(key)
+            try:
+                cached = value_sheet.cell(row=key[0], column=key[1]).value
+                if cached is not None:
+                    result = _json_cell_value(cached)
+                    cache[key] = result
+                    return result
+
+                raw = formula_sheet.cell(row=key[0], column=key[1]).value
+                if not isinstance(raw, str) or not raw.lstrip().startswith("="):
+                    result = _json_cell_value(raw)
+                    cache[key] = result
+                    return result
+
+                match = _SIMPLE_REFERENCE_FORMULA.match(raw)
+                if match is None:
+                    cache[key] = None
+                    return None
+
+                ref_column = column_index_from_string(match.group(1).upper())
+                ref_row = int(match.group(2))
+                base_value = resolve_cell(ref_row, ref_column)
+                if isinstance(base_value, bool) or not isinstance(base_value, (int, float)):
+                    cache[key] = None
+                    return None
+
+                operator = match.group(3)
+                if operator is None:
+                    result = base_value
+                else:
+                    delta = float(match.group(4).replace(",", "."))
+                    result = base_value + delta if operator == "+" else base_value - delta
+                    if isinstance(base_value, int) and float(result).is_integer():
+                        result = int(result)
+                cache[key] = result
+                return result
+            finally:
+                visiting.discard(key)
+
+        for row, column in formula_targets:
+            display_value = resolve_cell(int(row.excel_row_number), int(column))
+            if display_value is not None:
+                resolved[int(row.id)][int(column) - 1] = display_value
+    finally:
+        formulas.close()
+        values.close()
+
+    return resolved
 
 
 def build_postprocessed_workbook(connection, job_id: str) -> Path:
