@@ -199,6 +199,35 @@ def test_preview_resolves_simple_source_formula_chain(tmp_path: Path) -> None:
     assert rows[2].values[0] == "=A3 + 1"
 
 
+def test_preview_ignores_ref_cache_and_uses_stored_formula(tmp_path: Path) -> None:
+    source_path = tmp_path / "source-ref-cache.xlsx"
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Estimate"
+    worksheet["A2"] = 1
+    worksheet["A3"] = "#REF!"
+    worksheet["A4"] = "#REF!"
+    workbook.save(source_path)
+    workbook.close()
+
+    job = SimpleNamespace(
+        source_path=str(source_path),
+        sheet_title="Estimate",
+        column_schema=[{"index": 1, "kind": "source"}],
+    )
+    rows = [
+        SimpleNamespace(id=1, excel_row_number=2, values=[1]),
+        SimpleNamespace(id=2, excel_row_number=3, values=["=A2+1"]),
+        SimpleNamespace(id=3, excel_row_number=4, values=["=A3+1"]),
+    ]
+
+    preview = resolve_preview_row_values(job, rows)
+
+    assert preview[1][0] == 1
+    assert preview[2][0] == 2
+    assert preview[3][0] == 3
+
+
 def test_workspace_wraps_text_when_columns_are_narrowed() -> None:
     job = SimpleNamespace(
         id="job-wrap",
