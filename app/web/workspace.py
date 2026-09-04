@@ -853,7 +853,9 @@ main{{padding:24px;max-width:1600px;margin:0 auto}}
 .grid-shell{{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}}
 .grid-scroll{{height:calc(100vh - 290px);min-height:420px;overflow:auto;position:relative}}
 .review-grid{{border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:100%;width:max-content}}
-.review-grid th,.review-grid td{{border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;padding:0 8px;height:36px;max-height:36px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#fff}}
+.review-grid th,.review-grid td{{border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;background:#fff}}
+.review-grid td{{padding:6px 8px;vertical-align:top;white-space:normal;overflow:hidden;text-overflow:clip}}
+.review-grid td .cell-text{{white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:18px;overflow:hidden}}
 .review-grid th{{position:sticky;top:0;height:68px;z-index:12;background:#f8fafc;vertical-align:top;padding:6px}}
 .review-grid th .head-label{{font-size:12px;font-weight:700;cursor:pointer;display:block;overflow:hidden;text-overflow:ellipsis}}
 .review-grid th .head-sub{{font-size:10px;color:#64748b;display:block;overflow:hidden;text-overflow:ellipsis}}
@@ -987,7 +989,7 @@ def _render_workspace(job, user) -> str:
 (() => {{
 const JOB_ID = {job_id};
 const T = {labels};
-const ROW_HEIGHT = 36;
+const BASE_ROW_HEIGHT = 36;
 const BUFFER = 20;
 const queueKey = 'estimate-ai-edit-queue:' + JOB_ID;
 const localPrefKey = 'estimate-ai-grid-pref-v1:{int(user.id)}';
@@ -1236,7 +1238,7 @@ function startResize(event, column) {{
   const startX = event.clientX;
   const startWidth = Number(state.widths[column.index]) || (column.kind === 'source' ? 170 : 140);
   const move = e => {{
-    state.widths[column.index] = Math.max(70, Math.min(520, startWidth + e.clientX - startX));
+    state.widths[column.index] = Math.max(48, Math.min(520, startWidth + e.clientX - startX));
     renderGrid();
   }};
   const up = () => {{
@@ -1245,21 +1247,33 @@ function startResize(event, column) {{
   }};
   document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
 }}
+function currentRowHeight(columns) {{
+  if (!columns.length) return BASE_ROW_HEIGHT;
+  const narrowest = Math.min(...columns.map(column =>
+    Number(state.widths[column.index]) || (column.kind === 'source' ? 170 : 140)
+  ));
+  if (narrowest < 64) return 108;
+  if (narrowest < 86) return 90;
+  if (narrowest < 116) return 72;
+  if (narrowest < 150) return 54;
+  return BASE_ROW_HEIGHT;
+}}
 function renderGrid() {{
   const columns = visibleColumns();
   state.visibleColumns = columns;
+  const rowHeight = currentRowHeight(columns);
   const top = scroll.scrollTop;
   const viewportHeight = scroll.clientHeight || 600;
-  const start = Math.max(0, Math.floor(top / ROW_HEIGHT) - BUFFER);
-  const count = Math.ceil(viewportHeight / ROW_HEIGHT) + BUFFER * 2;
+  const start = Math.max(0, Math.floor(top / rowHeight) - BUFFER);
+  const count = Math.ceil(viewportHeight / rowHeight) + BUFFER * 2;
   const end = Math.min(state.rows.length, start + count);
   grid.innerHTML = '';
   grid.appendChild(makeColGroup(columns));
   grid.appendChild(makeHeader(columns));
   const tbody = document.createElement('tbody');
-  if (start > 0) tbody.appendChild(spacerRow(start * ROW_HEIGHT, columns.length));
-  for (let i=start; i<end; i++) tbody.appendChild(makeRow(state.rows[i], columns));
-  if (end < state.rows.length) tbody.appendChild(spacerRow((state.rows.length-end)*ROW_HEIGHT, columns.length));
+  if (start > 0) tbody.appendChild(spacerRow(start * rowHeight, columns.length));
+  for (let i=start; i<end; i++) tbody.appendChild(makeRow(state.rows[i], columns, rowHeight));
+  if (end < state.rows.length) tbody.appendChild(spacerRow((state.rows.length-end)*rowHeight, columns.length));
   grid.appendChild(tbody);
   applyStickyOffsets(columns);
 }}
@@ -1268,13 +1282,18 @@ function spacerRow(height, colspan) {{
   td.colSpan=Math.max(1,colspan); td.style.height=height+'px'; td.style.padding='0'; td.style.border='0';
   tr.appendChild(td); return tr;
 }}
-function makeRow(row, columns) {{
+function makeRow(row, columns, rowHeight) {{
   const tr = document.createElement('tr');
   tr.dataset.rowId = row.id;
+  tr.style.height = rowHeight + 'px';
   columns.forEach((column, visibleIndex) => {{
     const td = document.createElement('td');
     const k = key(row.id, column.index);
-    td.textContent = asText(cellValue(row,column));
+    const cellText = document.createElement('div');
+    cellText.className = 'cell-text';
+    cellText.style.maxHeight = Math.max(18, rowHeight - 12) + 'px';
+    cellText.textContent = asText(cellValue(row,column));
+    td.appendChild(cellText);
     const savedOverride=state.overrides.get(k);
     td.title = savedOverride
       ? ('Original: '+asText(savedOverride.original_value)+' | '+savedOverride.editor_name+' | '+savedOverride.updated_at)
