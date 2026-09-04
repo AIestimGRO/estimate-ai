@@ -218,7 +218,27 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
     current = connection.execute(
         "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
     ).fetchone()
-    return current is not None and int(current["version"]) >= SCHEMA_VERSION
+    if current is None or int(current["version"]) < SCHEMA_VERSION:
+        return False
+
+    required_tables = {
+        "app_users",
+        "user_sessions",
+        "processing_jobs",
+        "processing_rows",
+        "processing_cell_overrides",
+        "processing_edit_events",
+        "specialist_change_requests",
+        "user_preferences",
+        "audit_events",
+    }
+    existing_tables = {
+        str(row["name"])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    return required_tables.issubset(existing_tables)
 
 
 def _default_config_path() -> Path:
