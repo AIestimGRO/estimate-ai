@@ -79,6 +79,7 @@ TEXT = {
     "changed_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043d\u044b\u0435",
     "flagged_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0441 \u0437\u0430\u043f\u0440\u043e\u0441\u0430\u043c\u0438",
     "risk_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0440\u0438\u0441\u043a\u0438",
+    "with_analog_only": "\u0422\u043e\u043b\u044c\u043a\u043e \u0441 \u0430\u043d\u0430\u043b\u043e\u0433\u0430\u043c\u0438",
     "no_analog_only": "\u0411\u0435\u0437 \u0430\u043d\u0430\u043b\u043e\u0433\u0430",
     "saved": "\u0412\u0441\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u044b",
     "saving": "\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435...",
@@ -851,7 +852,9 @@ main{{padding:24px;max-width:1600px;margin:0 auto}}
 .save-state{{margin-left:auto;font-weight:650;color:var(--ok)}}
 .save-state.offline{{color:var(--warn)}}
 .grid-shell{{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}}
-.grid-scroll{{height:calc(100vh - 290px);min-height:420px;overflow:auto;position:relative}}
+.grid-hscroll{{height:18px;overflow-x:auto;overflow-y:hidden;background:#f8fafc;border-bottom:1px solid var(--line)}}
+.grid-hscroll-inner{{height:1px}}
+.grid-scroll{{height:calc(100vh - 308px);min-height:420px;overflow-y:auto;overflow-x:hidden;position:relative}}
 .review-grid{{border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:100%;width:max-content}}
 .review-grid th,.review-grid td{{border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;background:#fff}}
 .review-grid td{{padding:6px 8px;vertical-align:top;white-space:normal;overflow:hidden;text-overflow:clip}}
@@ -964,12 +967,14 @@ def _render_workspace(job, user) -> str:
 <label><input type="checkbox" id="changedOnly"> {_escape(TEXT["changed_only"])}</label>
 <label><input type="checkbox" id="requestedOnly"> {_escape(TEXT["flagged_only"])}</label>
 <label><input type="checkbox" id="riskOnly"> {_escape(TEXT["risk_only"])}</label>
+<label><input type="checkbox" id="withAnalogOnly"> {_escape(TEXT["with_analog_only"])}</label>
 <label><input type="checkbox" id="noAnalogOnly"> {_escape(TEXT["no_analog_only"])}</label>
 <span class="muted">{_escape(TEXT["help_edit"])}</span>
 <span id="saveState" class="save-state">{_escape(TEXT["saved"])}</span>
 </div>
 <div class="grid-shell">
 <div id="columnPanel" class="column-panel" hidden></div>
+<div id="gridHScroll" class="grid-hscroll"><div id="gridHScrollInner" class="grid-hscroll-inner"></div></div>
 <div id="gridScroll" class="grid-scroll"><table id="grid" class="review-grid"></table></div>
 </div>
 <div id="contextMenu" class="context-menu">
@@ -1007,7 +1012,10 @@ const globalSearch = document.getElementById('globalSearch');
 const changedOnly = document.getElementById('changedOnly');
 const requestedOnly = document.getElementById('requestedOnly');
 const riskOnly = document.getElementById('riskOnly');
+const withAnalogOnly = document.getElementById('withAnalogOnly');
 const noAnalogOnly = document.getElementById('noAnalogOnly');
+const topScroll = document.getElementById('gridHScroll');
+const topScrollInner = document.getElementById('gridHScrollInner');
 const panel = document.getElementById('columnPanel');
 const contextMenu = document.getElementById('contextMenu');
 const modal = document.getElementById('requestModal');
@@ -1167,7 +1175,9 @@ function applyFilters(focusColumn = null) {{
       if (!hasRequested) return false;
     }}
     if (riskOnly.checked && !(row.metadata && row.metadata.risk)) return false;
-    if (noAnalogOnly.checked && row.metadata && row.metadata.has_analogs) return false;
+    const hasAnyAnalog = Boolean(row.metadata && (row.metadata.has_analogs || row.metadata.has_tkp));
+    if (withAnalogOnly.checked && !hasAnyAnalog) return false;
+    if (noAnalogOnly.checked && hasAnyAnalog) return false;
     return true;
   }});
   if (state.sortColumn) {{
@@ -1279,6 +1289,12 @@ function renderGrid() {{
   if (end < state.rows.length) tbody.appendChild(spacerRow((state.rows.length-end)*rowHeight, columns.length));
   grid.appendChild(tbody);
   applyStickyOffsets(columns);
+  syncHorizontalScrollbar();
+}}
+function syncHorizontalScrollbar() {{
+  const contentWidth = Math.max(scroll.clientWidth, grid.scrollWidth);
+  topScrollInner.style.width = contentWidth + 'px';
+  if (topScroll.scrollLeft !== scroll.scrollLeft) topScroll.scrollLeft = scroll.scrollLeft;
 }}
 function spacerRow(height, colspan) {{
   const tr=document.createElement('tr'); const td=document.createElement('td');
@@ -1461,8 +1477,34 @@ globalSearch.addEventListener('input',()=>applyFilters());
 changedOnly.addEventListener('change',()=>applyFilters());
 requestedOnly.addEventListener('change',()=>applyFilters());
 riskOnly.addEventListener('change',()=>applyFilters());
-noAnalogOnly.addEventListener('change',()=>applyFilters());
-scroll.addEventListener('scroll',()=>requestAnimationFrame(renderGrid));
+withAnalogOnly.addEventListener('change',()=>{{
+  if (withAnalogOnly.checked) noAnalogOnly.checked = false;
+  applyFilters();
+}});
+noAnalogOnly.addEventListener('change',()=>{{
+  if (noAnalogOnly.checked) withAnalogOnly.checked = false;
+  applyFilters();
+}});
+let syncingHorizontal = false;
+let lastScrollTop = scroll.scrollTop;
+topScroll.addEventListener('scroll',()=>{{
+  if (syncingHorizontal) return;
+  syncingHorizontal = true;
+  scroll.scrollLeft = topScroll.scrollLeft;
+  syncingHorizontal = false;
+}});
+scroll.addEventListener('scroll',()=>{{
+  if (!syncingHorizontal && topScroll.scrollLeft !== scroll.scrollLeft) {{
+    syncingHorizontal = true;
+    topScroll.scrollLeft = scroll.scrollLeft;
+    syncingHorizontal = false;
+  }}
+  if (scroll.scrollTop !== lastScrollTop) {{
+    lastScrollTop = scroll.scrollTop;
+    requestAnimationFrame(renderGrid);
+  }}
+}});
+window.addEventListener('resize',syncHorizontalScrollbar);
 window.addEventListener('online',flushQueue);
 window.addEventListener('offline',updateSaveState);
 window.addEventListener('beforeunload',event=>{{if(state.queue.length){{event.preventDefault();event.returnValue='';}}}});
