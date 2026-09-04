@@ -112,6 +112,37 @@ def _seed_job(connection, tmp_path: Path, owner_user_id: int) -> str:
     return job_id
 
 
+def test_v14_database_is_upgraded_with_auth_workspace_tables() -> None:
+    connection = connect(":memory:")
+    try:
+        connection.execute(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version) VALUES (14)"
+        )
+        connection.commit()
+
+        init_database(connection)
+
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        version = connection.execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+
+    assert int(version) == 15
+    assert "app_users" in tables
+    assert "processing_jobs" in tables
+    assert "specialist_change_requests" in tables
+
+
 def test_schema_contains_account_and_workspace_tables() -> None:
     connection = connect(":memory:")
     try:
