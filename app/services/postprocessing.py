@@ -166,7 +166,7 @@ def resolve_preview_row_values(job, rows) -> dict[int, list[object]]:
             visiting.add(key)
             try:
                 cached = value_sheet.cell(row=key[0], column=key[1]).value
-                if cached is not None:
+                if cached is not None and not _is_excel_error_value(cached):
                     result = _json_cell_value(cached)
                     cache[key] = result
                     return result
@@ -381,6 +381,13 @@ def _display_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _is_excel_error_value(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip().upper()
+    return text.startswith("#") and text.endswith(("!", "?", "A", "D", "L"))
 
 
 def _json_cell_value(value: object) -> object:
