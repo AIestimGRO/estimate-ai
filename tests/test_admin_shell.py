@@ -1,6 +1,14 @@
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.web.app import create_app
+
+
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path, monkeypatch) -> None:
+    """Keep shell tests independent from the user's real local database."""
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(tmp_path / "estimate_ai.db"))
 
 
 def test_admin_index_shows_navigation(tmp_path) -> None:
