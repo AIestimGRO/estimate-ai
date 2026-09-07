@@ -96,6 +96,15 @@ connected to the main estimate-processing flow.
 
 See `docs/RNMC_IMPORT.md` for the import specification.
 
+### Done — configurable per-run RNMC matching
+
+- Standard mode stays strict: exact normalized code, compatible base unit, and
+  demolition filtering enabled.
+- Confirmation UI can opt into GESN/FER/TER number-equivalence.
+- Confirmation UI can ignore the unit for nonstandard matching.
+- Confirmation UI can ignore installation/demolition separation.
+- All three relaxations are independent and default to off.
+
 ### Done — optional TKP analogs
 
 - Import and update the aggregate TKP winner catalog in SQLite.
