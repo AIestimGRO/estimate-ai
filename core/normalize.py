@@ -122,10 +122,26 @@ def HasDemontazh(value: object) -> bool:
     return False
 
 
+def CanonicalAnalogCode(value: object) -> str:
+    """Canonicalize compatible estimate-code families for RNMC lookup only.
+
+    FER and TER use the same normative position numbering as GESN in the RNMC
+    catalog. Preserve repair/montage suffixes while leaving unrelated codes unchanged.
+    """
+    code = NormCode(value)
+    if code == "":
+        return ""
+
+    match = re.match(r"^(?:ФЕР|ТЕР)((?:МР|М|Р)?\d.*)$", code)
+    if match is None:
+        return code
+    return f"ГЭСН{match.group(1)}"
+
+
 def AnalogSearchKey(unit_value: object, code_value: object) -> str:
-    """Port of AnalogSearchKey from Module3, with base-unit matching (DOMAIN_RULES.md section 2.3)."""
+    """Build the RNMC lookup key with compatible code-family normalization."""
     unit = BaseUnit(unit_value)
-    code = NormCode(code_value)
+    code = CanonicalAnalogCode(code_value)
 
     if unit == "" or code == "":
         return ""
