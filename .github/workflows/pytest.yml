@@ -3,7 +3,7 @@ name: pytest
 on:
   push:
     branches:
-      - "work/reconcile-runtime-auth-fer-20260907"
+      - "work/**"
       - "feature/admin-ui"
   workflow_dispatch:
 
