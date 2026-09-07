@@ -601,6 +601,9 @@ def render_confirm(
     coefficient_value: float | str,
     coefficient_method: str,
     use_tkp_analogs: bool = False,
+    compatible_code_families_enabled: bool = False,
+    unit_filter_enabled: bool = True,
+    demontazh_filter_enabled: bool = True,
     error: str | None = None,
 ) -> str:
     """Region/coefficient confirmation screen shown before the real run."""
@@ -639,6 +642,13 @@ def render_confirm(
         coefficient_source=coefficient_source,
         warning=warning,
         tkp_checked="checked" if use_tkp_analogs else "",
+        code_families_checked=(
+            "checked" if compatible_code_families_enabled else ""
+        ),
+        ignore_unit_checked="checked" if not unit_filter_enabled else "",
+        ignore_demolition_checked=(
+            "checked" if not demontazh_filter_enabled else ""
+        ),
     )
 
 
