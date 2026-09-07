@@ -63,6 +63,7 @@ class RunAndWriteResult:
     tkp_enabled: bool = False
     tkp_catalog_row_count: int = 0
     tkp_semantic_model: str = ""
+    row_numbers: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -240,6 +241,7 @@ def run_and_write(
         tkp_enabled=use_tkp_analogs,
         tkp_catalog_row_count=len(tkp_catalog_index),
         tkp_semantic_model=tkp_semantic_model_name if use_tkp_analogs else "",
+        row_numbers=tuple(row_numbers),
     )
 
 
