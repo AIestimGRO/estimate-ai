@@ -170,6 +170,9 @@ class UploadRecord:
     coefficient: float | None = None
     target_region: str | None = None
     use_tkp_analogs: bool = False
+    compatible_code_families_enabled: bool = False
+    unit_filter_enabled: bool = True
+    demontazh_filter_enabled: bool = True
     use_database_catalog: bool = False
     output_path: Path | None = None
     output_name: str = ""
@@ -2146,6 +2149,9 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         region: str = Form(""),
         coefficient: str = Form(""),
         use_tkp_analogs: str | None = Form(None),
+        match_code_families: str | None = Form(None),
+        ignore_unit: str | None = Form(None),
+        ignore_demolition: str | None = Form(None),
     ) -> HTMLResponse:
         state: AppState = app.state.app_state
         if token not in state.store:
@@ -2173,6 +2179,9 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
                     coefficient_value=coefficient,
                     coefficient_method="explicit",
                     use_tkp_analogs=use_tkp_analogs is not None,
+                    compatible_code_families_enabled=match_code_families is not None,
+                    unit_filter_enabled=ignore_unit is None,
+                    demontazh_filter_enabled=ignore_demolition is None,
                     error="\u041a\u043e\u044d\u0444\u0444\u0438\u0446\u0438\u0435\u043d\u0442 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0447\u0438\u0441\u043b\u043e\u043c, \u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440 1.15.",
                 ),
                 status_code=400,
@@ -2182,6 +2191,9 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         record.coefficient = coef  # type: ignore[assignment]
         record.target_region = region.strip() or None
         record.use_tkp_analogs = use_tkp_analogs is not None
+        record.compatible_code_families_enabled = match_code_families is not None
+        record.unit_filter_enabled = ignore_unit is None
+        record.demontazh_filter_enabled = ignore_demolition is None
         return _process(state, token, selected_sheet=sheet)
 
     @app.get("/download")
@@ -2338,6 +2350,9 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             name_exclusion_rules=name_exclusion_rules,
             task_color_entries=task_color_entries,
             task_highlight_reasons=task_highlight_reasons,
+            demontazh_filter_enabled=record.demontazh_filter_enabled,
+            compatible_code_families_enabled=record.compatible_code_families_enabled,
+            unit_filter_enabled=record.unit_filter_enabled,
             use_tkp_analogs=record.use_tkp_analogs,
             tkp_semantic_scorer=(
                 tkp_semantic_backend.score if tkp_semantic_backend is not None else None
