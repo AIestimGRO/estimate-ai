@@ -138,12 +138,31 @@ def CanonicalAnalogCode(value: object) -> str:
     return f"ГЭСН{match.group(1)}"
 
 
-def AnalogSearchKey(unit_value: object, code_value: object) -> str:
-    """Build the RNMC lookup key with compatible code-family normalization."""
-    unit = BaseUnit(unit_value)
-    code = CanonicalAnalogCode(code_value)
+def AnalogSearchKey(
+    unit_value: object,
+    code_value: object,
+    *,
+    compatible_code_families_enabled: bool = False,
+    unit_filter_enabled: bool = True,
+) -> str:
+    """Build the RNMC lookup key for the selected matching mode.
 
-    if unit == "" or code == "":
+    Standard matching is strict: normalized unit + exact normalized code.
+    Optional modes can ignore the GESN/FER/TER family prefix and/or the unit.
+    """
+    code = (
+        CanonicalAnalogCode(code_value)
+        if compatible_code_families_enabled
+        else NormCode(code_value)
+    )
+    if code == "":
+        return ""
+
+    if not unit_filter_enabled:
+        return f"*||{code}"
+
+    unit = BaseUnit(unit_value)
+    if unit == "":
         return ""
 
     return f"{unit}||{code}"
