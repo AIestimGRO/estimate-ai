@@ -69,6 +69,9 @@ Catalog = dict[str, dict[str, list[CatalogEntry]]]
 def BuildCatalog(
     rows: list[CatalogRow],
     name_exclusion_rules: list[NameExclusionRule] | None = None,
+    *,
+    compatible_code_families_enabled: bool = False,
+    unit_filter_enabled: bool = True,
 ) -> Catalog:
     """Build the nested catalog structure from rows.
 
@@ -91,10 +94,15 @@ def BuildCatalog(
             continue
 
         norm_unit = NormUnit(row.unit)
-        if norm_unit == "":
+        if unit_filter_enabled and norm_unit == "":
             continue
 
-        matching_key = AnalogSearchKey(row.unit, row.code)
+        matching_key = AnalogSearchKey(
+            row.unit,
+            row.code,
+            compatible_code_families_enabled=compatible_code_families_enabled,
+            unit_filter_enabled=unit_filter_enabled,
+        )
         if matching_key == "":
             continue
 
