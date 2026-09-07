@@ -24,7 +24,9 @@ SHEET_B = "\u0421\u043c\u0435\u0442\u0430 B"
 
 
 @pytest.fixture()
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    """Use an isolated DB so local real users cannot trigger auth redirects."""
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(tmp_path / "estimate_ai.db"))
     with TestClient(create_app(base_dir=tmp_path / "work")) as test_client:
         yield test_client
 
