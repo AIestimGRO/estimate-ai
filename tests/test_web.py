@@ -102,13 +102,18 @@ def _hidden_value(page_text, name):
     return match.group(1)
 
 
-def _confirm(client, page, *, coefficient=None, region=None, use_tkp=False):
-    """POST /confirm using the token/sheet from a rendered confirm page.
-
-    Defaults to whatever the confirm screen pre-filled (i.e. "just click
-    confirm"); pass `coefficient`/`region` to simulate the user editing a
-    field before submitting.
-    """
+def _confirm(
+    client,
+    page,
+    *,
+    coefficient=None,
+    region=None,
+    use_tkp=False,
+    match_code_families=False,
+    ignore_unit=False,
+    ignore_demolition=False,
+):
+    """POST /confirm using the token/sheet from a rendered confirm page."""
     token = _hidden_value(page.text, "token")
     sheet = _hidden_value(page.text, "sheet")
     if coefficient is None:
@@ -118,6 +123,12 @@ def _confirm(client, page, *, coefficient=None, region=None, use_tkp=False):
     data = {"token": token, "sheet": sheet, "coefficient": coefficient, "region": region}
     if use_tkp:
         data["use_tkp_analogs"] = "1"
+    if match_code_families:
+        data["match_code_families"] = "1"
+    if ignore_unit:
+        data["ignore_unit"] = "1"
+    if ignore_demolition:
+        data["ignore_demolition"] = "1"
     return client.post("/confirm", data=data)
 
 
@@ -391,7 +402,64 @@ def test_confirm_screen_shows_detected_values_and_lets_user_edit(client):
     assert _hidden_value(page.text, "coefficient") == "1"
     assert "\u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d" in page.text
     assert 'name="use_tkp_analogs"' in page.text
+    assert 'name="match_code_families"' in page.text
+    assert 'name="ignore_unit"' in page.text
+    assert 'name="ignore_demolition"' in page.text
     assert 'name="use_tkp_analogs" value="1" checked' not in page.text
+    assert 'name="match_code_families" value="1" checked' not in page.text
+    assert 'name="ignore_unit" value="1" checked' not in page.text
+    assert 'name="ignore_demolition" value="1" checked' not in page.text
+
+
+
+
+def test_matching_options_survive_validation_error(client):
+    files = _files(_catalog_bytes([("t-1", 100)]), _template_estimate_bytes())
+    page = client.post("/run", files=files)
+
+    result = _confirm(
+        client,
+        page,
+        coefficient="bad",
+        match_code_families=True,
+        ignore_unit=True,
+        ignore_demolition=True,
+    )
+
+    assert result.status_code == 400
+    assert 'name="match_code_families" value="1" checked' in result.text
+    assert 'name="ignore_unit" value="1" checked' in result.text
+    assert 'name="ignore_demolition" value="1" checked' in result.text
+
+
+def test_web_code_family_matching_is_opt_in(client):
+    catalog = Workbook()
+    catalog_sheet = catalog.active
+    catalog_sheet.title = CATALOG_TITLE
+    catalog_sheet.cell(row=4, column=2, value="task-family")
+    catalog_sheet.cell(row=4, column=3, value=INSTALLATION)
+    catalog_sheet.cell(row=4, column=4, value=METER)
+    catalog_sheet.cell(row=4, column=7, value=100)
+    catalog_sheet.cell(row=4, column=14, value="ГЭСН27-06-026-01")
+    catalog_bytes = _to_bytes(catalog)
+
+    estimate = Workbook()
+    estimate_sheet = estimate.active
+    estimate_sheet.title = ESTIMATE_TITLE
+    estimate_sheet.cell(row=7, column=14, value="ФЕР27-06-026-01")
+    estimate_sheet.cell(row=9, column=3, value=INSTALLATION)
+    estimate_sheet.cell(row=9, column=4, value=METER)
+    estimate_sheet.cell(row=9, column=6, value=50.0)
+    estimate_sheet.cell(row=9, column=14, value="ФЕР27-06-026-01")
+    estimate_bytes = _to_bytes(estimate)
+
+    strict_page = client.post("/run", files=_files(catalog_bytes, estimate_bytes))
+    strict_result = _confirm(client, strict_page)
+    assert "С подобранными аналогами</dt><dd>0</dd>" in strict_result.text
+
+    relaxed_page = client.post("/run", files=_files(catalog_bytes, estimate_bytes))
+    relaxed_result = _confirm(client, relaxed_page, match_code_families=True)
+    assert "С подобранными аналогами</dt><dd>1</dd>" in relaxed_result.text
 
 
 def test_confirm_screen_warns_when_coefficient_defaulted(client):
