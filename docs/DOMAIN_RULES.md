@@ -71,6 +71,23 @@ all regions are pooled together at lookup time; region is only recorded
 per price entry for display and risk-flagging, never used as a filter or
 adjustment coefficient on the matching side.
 
+### 2.3.1 Per-run matching modes
+
+The web confirmation screen exposes optional matching relaxations for unusual
+requests. They are **off by default**, so the standard run remains strict.
+
+- **Match GESN / FER / TER by number**: ignore the family prefix for the lookup
+  key while preserving repair/montage subtypes (`р`, `м`, `мр`). Example:
+  `ФЕР27-06-026-01` may match `ГЭСН27-06-026-01`.
+- **Ignore unit**: build the lookup key from the normalized code only. This can
+  intentionally return analogs with a different unit, so the operator must use
+  it only for nonstandard tasks where that is acceptable.
+- **Ignore installation / demolition**: disable the demolition flag filter and
+  allow both demolition and non-demolition catalog rows for the same lookup key.
+
+These options are independent and apply only to the current processing run.
+They do not rewrite the RNMC catalog or change stored source data.
+
 ### 2.4 Demolition detection (`HasDemontazh`, Module3)
 
 1. Lowercase, normalize ё→е and nbsp→space.
