@@ -115,6 +115,8 @@ def run_matching(
     name_exclusion_rules: list[NameExclusionRule] | None = None,
     gesn_exceptions: dict[str, GesnException] | None = None,
     demontazh_filter_enabled: bool = True,
+    compatible_code_families_enabled: bool = False,
+    unit_filter_enabled: bool = True,
     price_spread_limit: float = DEFAULT_PRICE_SPREAD_LIMIT,
     regional_coefficient: float = 1.0,
     tkp_catalog_index: list[TkpCatalogEntry] | None = None,
@@ -127,7 +129,12 @@ def run_matching(
     rules = [] if name_exclusion_rules is None else name_exclusion_rules
     exceptions = {} if gesn_exceptions is None else gesn_exceptions
 
-    catalog: Catalog = BuildCatalog(catalog_rows, rules)
+    catalog: Catalog = BuildCatalog(
+        catalog_rows,
+        rules,
+        compatible_code_families_enabled=compatible_code_families_enabled,
+        unit_filter_enabled=unit_filter_enabled,
+    )
     tkp_index = _priced_tkp_entries(tkp_catalog_index) if use_tkp_analogs else []
     tkp_task_index = build_tkp_task_index(tkp_index) if tkp_index else {}
 
@@ -146,6 +153,8 @@ def run_matching(
             rules,
             exceptions,
             demontazh_filter_enabled,
+            compatible_code_families_enabled,
+            unit_filter_enabled,
             price_spread_limit,
             regional_coefficient,
             tkp_task_index,
@@ -183,6 +192,8 @@ def run_matching_from_files(
     name_exclusion_rules: list[NameExclusionRule] | None = None,
     gesn_exceptions: dict[str, GesnException] | None = None,
     demontazh_filter_enabled: bool = True,
+    compatible_code_families_enabled: bool = False,
+    unit_filter_enabled: bool = True,
     price_spread_limit: float = DEFAULT_PRICE_SPREAD_LIMIT,
     regional_coefficient: float = 1.0,
     tkp_catalog_index: list[TkpCatalogEntry] | None = None,
@@ -201,6 +212,8 @@ def run_matching_from_files(
         name_exclusion_rules=name_exclusion_rules,
         gesn_exceptions=gesn_exceptions,
         demontazh_filter_enabled=demontazh_filter_enabled,
+        compatible_code_families_enabled=compatible_code_families_enabled,
+        unit_filter_enabled=unit_filter_enabled,
         price_spread_limit=price_spread_limit,
         regional_coefficient=regional_coefficient,
         tkp_catalog_index=tkp_catalog_index,
@@ -218,6 +231,8 @@ def _match_one_row(
     rules: list[NameExclusionRule],
     exceptions: dict[str, GesnException],
     demontazh_filter_enabled: bool,
+    compatible_code_families_enabled: bool,
+    unit_filter_enabled: bool,
     price_spread_limit: float,
     regional_coefficient: float,
     tkp_task_index: dict[str, tuple[TkpCatalogEntry, ...]],
@@ -235,7 +250,9 @@ def _match_one_row(
         estimate_row,
         catalog,
         rules,
-        demontazh_filter_enabled,
+        demontazh_filter_enabled=demontazh_filter_enabled,
+        compatible_code_families_enabled=compatible_code_families_enabled,
+        unit_filter_enabled=unit_filter_enabled,
     )
 
     exception_key = ""
