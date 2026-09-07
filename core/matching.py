@@ -52,6 +52,8 @@ def MatchEstimateRow(
     name_exclusion_rules: list[NameExclusionRule] | None = None,
     demontazh_filter_enabled: bool = True,
     multiplicity_filter_enabled: bool = True,
+    compatible_code_families_enabled: bool = False,
+    unit_filter_enabled: bool = True,
 ) -> MatchResult:
     """Match one estimate row to catalog analogs.
 
@@ -66,10 +68,19 @@ def MatchEstimateRow(
     norm_code = NormCode(estimate_row.code)
     norm_unit = NormUnit(estimate_row.unit)
     base_price = _parse_positive_price(estimate_row.base_price)
-    if norm_code == "" or norm_unit == "" or base_price is None:
+    if (
+        norm_code == ""
+        or (unit_filter_enabled and norm_unit == "")
+        or base_price is None
+    ):
         return _zero(REASON_INVALID_INPUT)
 
-    matching_key = AnalogSearchKey(estimate_row.unit, estimate_row.code)
+    matching_key = AnalogSearchKey(
+        estimate_row.unit,
+        estimate_row.code,
+        compatible_code_families_enabled=compatible_code_families_enabled,
+        unit_filter_enabled=unit_filter_enabled,
+    )
     if matching_key == "":
         return _zero(REASON_INVALID_INPUT)
 
