@@ -321,6 +321,54 @@ def test_demolition_filter_selects_matching_analogs() -> None:
     assert row.is_demolition
 
 
+
+
+def test_run_matching_keeps_standard_mode_strict_by_default() -> None:
+    result = run_matching(
+        [catalog_row(code="ГЭСН27-06-026-01", unit=METER, price=100)],
+        [estimate_row(code="ФЕР27-06-026-01", unit=METER, base_price=50)],
+    )
+
+    assert not result.rows[0].has_analogs
+    assert result.rows[0].status == REASON_NO_MATCH
+
+
+def test_run_matching_can_match_code_families_by_number() -> None:
+    result = run_matching(
+        [catalog_row(code="ГЭСН27-06-026-01", unit=METER, price=100)],
+        [estimate_row(code="ФЕР27-06-026-01", unit=METER, base_price=50)],
+        compatible_code_families_enabled=True,
+    )
+
+    assert result.rows[0].has_analogs
+    assert [analog.entry.price for analog in result.rows[0].analogs] == [100]
+
+
+def test_run_matching_can_ignore_unit_and_demolition_filters() -> None:
+    result = run_matching(
+        [
+            catalog_row(
+                code=CODE,
+                unit="шт",
+                price=200,
+                work_name=INSTALLATION,
+            )
+        ],
+        [
+            estimate_row(
+                code=CODE,
+                unit=METER,
+                base_price=50,
+                work_name=DEMOLITION,
+            )
+        ],
+        unit_filter_enabled=False,
+        demontazh_filter_enabled=False,
+    )
+
+    assert result.rows[0].has_analogs
+    assert [analog.entry.price for analog in result.rows[0].analogs] == [200]
+
 def test_run_aggregates_counts() -> None:
     catalog_rows = [
         catalog_row(task_id="task-1", price=100),
