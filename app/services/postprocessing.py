@@ -37,37 +37,66 @@ def persist_processing_job(
     region: str,
     use_tkp_analogs: bool,
 ) -> None:
-    """Snapshot the generated workbook so browser review survives restarts."""
+    """Snapshot the generated workbook so browser review survives restarts.
+
+    The workbook is opened in read-only mode and scanned sequentially once.
+    Random worksheet.cell() access on a read-only worksheet can repeatedly
+    rescan the XML stream and becomes extremely slow on large estimates.
+    """
     workbook = load_workbook(outcome.output_path, data_only=False, read_only=True)
     try:
         worksheet = workbook[outcome.sheet_title]
         header_row = int(outcome.write_report.header_row)
         max_column = _max_output_column(outcome, worksheet.max_column)
-        schema = _build_column_schema(
-            worksheet,
-            header_row,
-            max_column,
-            outcome,
-        )
-        rows: list[tuple[int, int, list[object], dict[str, object]]] = []
-        for row_index, (excel_row, result_row) in enumerate(
-            zip(outcome.row_numbers, outcome.result.rows),
-            start=1,
-        ):
-            values = [
-                _json_cell_value(
-                    worksheet.cell(row=int(excel_row), column=column).value
-                )
-                for column in range(1, max_column + 1)
-            ]
-            average_column = int(outcome.write_report.average_column)
-            if 0 < average_column <= len(values):
-                values[average_column - 1] = result_row.recommended_price
-            rows.append(
-                (
+        average_column = int(outcome.write_report.average_column)
+
+        indexed_rows = [
+            (row_index, int(excel_row), result_row)
+            for row_index, (excel_row, result_row) in enumerate(
+                zip(outcome.row_numbers, outcome.result.rows),
+                start=1,
+            )
+        ]
+        target_rows = {
+            excel_row: (row_index, result_row)
+            for row_index, excel_row, result_row in indexed_rows
+        }
+
+        header_values: list[object] = [None] * max_column
+        row_snapshots: dict[int, tuple[int, int, list[object], dict[str, object]]] = {}
+
+        required_rows = list(target_rows)
+        if header_row > 0:
+            required_rows.append(header_row)
+
+        if required_rows:
+            first_row = min(required_rows)
+            last_row = max(required_rows)
+            for excel_row, raw_values in enumerate(
+                worksheet.iter_rows(
+                    min_row=first_row,
+                    max_row=last_row,
+                    min_col=1,
+                    max_col=max_column,
+                    values_only=True,
+                ),
+                start=first_row,
+            ):
+                values = list(raw_values)
+                if excel_row == header_row:
+                    header_values = values
+
+                target = target_rows.get(excel_row)
+                if target is None:
+                    continue
+
+                row_index, result_row = target
+                if 0 < average_column <= len(values):
+                    values[average_column - 1] = result_row.recommended_price
+                row_snapshots[row_index] = (
                     row_index,
-                    int(excel_row),
-                    values,
+                    excel_row,
+                    [_json_cell_value(value) for value in values],
                     {
                         "has_analogs": bool(result_row.has_analogs),
                         "risk": bool(result_row.risk_result.is_flagged),
@@ -76,7 +105,20 @@ def persist_processing_job(
                         "reason": str(result_row.match_result.reason),
                     },
                 )
-            )
+
+        rows = [
+            row_snapshots[row_index]
+            for row_index, _excel_row, _result_row in indexed_rows
+            if row_index in row_snapshots
+        ]
+        if len(rows) != len(indexed_rows):
+            raise ValueError("Could not snapshot all processing rows")
+
+        schema = _build_column_schema(
+            header_values,
+            max_column,
+            outcome,
+        )
     finally:
         workbook.close()
 
@@ -332,8 +374,7 @@ def _max_output_column(outcome: RunAndWriteResult, worksheet_max: int) -> int:
 
 
 def _build_column_schema(
-    worksheet,
-    header_row: int,
+    header_values: list[object],
     max_column: int,
     outcome: RunAndWriteResult,
 ) -> list[dict[str, object]]:
@@ -347,8 +388,8 @@ def _build_column_schema(
 
     for column in range(1, max_column + 1):
         raw_header = (
-            worksheet.cell(row=header_row, column=column).value
-            if header_row > 0
+            header_values[column - 1]
+            if column <= len(header_values)
             else None
         )
         label = _display_text(raw_header) or get_column_letter(column)
