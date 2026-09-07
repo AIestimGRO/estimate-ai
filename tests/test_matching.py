@@ -262,3 +262,43 @@ def test_estimate_hundred_m2_matches_catalog_m2_without_price_scaling() -> None:
     assert result.reason == REASON_MATCHED
     assert len(result.analogs) == 2
     assert prices(result) == [171.65, 180.0]
+
+
+@pytest.mark.parametrize(
+    ("estimate_code", "catalog_code"),
+    [
+        ("ФЕР27-06-026-01", "ГЭСН27-06-026-01"),
+        ("ТЕР27-06-026-01", "ГЭСН27-06-026-01"),
+        ("ФЕРр68-14-1", "ГЭСНр68-14-1"),
+        ("ФЕРм08-01-080-02", "ГЭСНм08-01-080-02"),
+    ],
+)
+def test_fer_and_ter_codes_match_equivalent_gesn_catalog(
+    estimate_code: str,
+    catalog_code: str,
+) -> None:
+    catalog = BuildCatalog(
+        [
+            catalog_row(
+                task_id="task-compatible-family",
+                price=321.0,
+                code=catalog_code,
+                unit=METER,
+                work_name=INSTALLATION,
+            )
+        ]
+    )
+
+    result = MatchEstimateRow(
+        estimate_row(
+            code=estimate_code,
+            unit=METER,
+            work_name=INSTALLATION,
+            base_price=100.0,
+        ),
+        catalog,
+    )
+
+    assert result.reason == REASON_MATCHED
+    assert result.has_analogs
+    assert prices(result) == [321.0]
