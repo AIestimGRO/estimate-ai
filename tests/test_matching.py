@@ -273,11 +273,11 @@ def test_estimate_hundred_m2_matches_catalog_m2_without_price_scaling() -> None:
         ("ФЕРм08-01-080-02", "ГЭСНм08-01-080-02"),
     ],
 )
-def test_fer_and_ter_codes_match_equivalent_gesn_catalog(
+def test_fer_and_ter_code_family_matching_is_opt_in(
     estimate_code: str,
     catalog_code: str,
 ) -> None:
-    catalog = BuildCatalog(
+    strict_catalog = BuildCatalog(
         [
             catalog_row(
                 task_id="task-compatible-family",
@@ -288,17 +288,79 @@ def test_fer_and_ter_codes_match_equivalent_gesn_catalog(
             )
         ]
     )
-
-    result = MatchEstimateRow(
+    strict_result = MatchEstimateRow(
         estimate_row(
             code=estimate_code,
             unit=METER,
             work_name=INSTALLATION,
             base_price=100.0,
         ),
-        catalog,
+        strict_catalog,
+    )
+    assert strict_result.reason == REASON_NO_MATCH
+
+    compatible_catalog = BuildCatalog(
+        [
+            catalog_row(
+                task_id="task-compatible-family",
+                price=321.0,
+                code=catalog_code,
+                unit=METER,
+                work_name=INSTALLATION,
+            )
+        ],
+        compatible_code_families_enabled=True,
+    )
+    compatible_result = MatchEstimateRow(
+        estimate_row(
+            code=estimate_code,
+            unit=METER,
+            work_name=INSTALLATION,
+            base_price=100.0,
+        ),
+        compatible_catalog,
+        compatible_code_families_enabled=True,
     )
 
-    assert result.reason == REASON_MATCHED
-    assert result.has_analogs
-    assert prices(result) == [321.0]
+    assert compatible_result.reason == REASON_MATCHED
+    assert compatible_result.has_analogs
+    assert prices(compatible_result) == [321.0]
+
+
+def test_unit_filter_can_be_disabled_for_nonstandard_matching() -> None:
+    catalog_rows = [
+        catalog_row(
+            task_id="task-ignore-unit",
+            price=450.0,
+            code="ГЭСН01-01-001-01",
+            unit="шт",
+            work_name=INSTALLATION,
+        )
+    ]
+
+    strict_catalog = BuildCatalog(catalog_rows)
+    strict_result = MatchEstimateRow(
+        estimate_row(
+            code="ГЭСН01-01-001-01",
+            unit=METER,
+            work_name=INSTALLATION,
+            base_price=100.0,
+        ),
+        strict_catalog,
+    )
+    assert strict_result.reason == REASON_NO_MATCH
+
+    relaxed_catalog = BuildCatalog(catalog_rows, unit_filter_enabled=False)
+    relaxed_result = MatchEstimateRow(
+        estimate_row(
+            code="ГЭСН01-01-001-01",
+            unit=METER,
+            work_name=INSTALLATION,
+            base_price=100.0,
+        ),
+        relaxed_catalog,
+        unit_filter_enabled=False,
+    )
+
+    assert relaxed_result.reason == REASON_MATCHED
+    assert prices(relaxed_result) == [450.0]
