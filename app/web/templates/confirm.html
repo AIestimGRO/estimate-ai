@@ -25,6 +25,25 @@
       <label>Коэффициент ($coefficient_source)
         <input type="text" name="coefficient" inputmode="decimal" value="$coefficient_value">
       </label>
+      <fieldset>
+        <legend>Настройки подбора</legend>
+        <p class="muted">Стандартный режим — все три опции ниже выключены: точный код, совпадающая единица измерения и раздельный монтаж/демонтаж.</p>
+        <label class="option-toggle">
+          <input type="checkbox" name="match_code_families" value="1" $code_families_checked>
+          <span>Сопоставлять ГЭСН / ФЕР / ТЕР по номеру</span>
+        </label>
+        <p class="muted">Префикс семейства не учитывается: например, ФЕР27-06-026-01 сможет совпасть с ГЭСН27-06-026-01. Подтипы р/м сохраняются.</p>
+        <label class="option-toggle">
+          <input type="checkbox" name="ignore_unit" value="1" $ignore_unit_checked>
+          <span>Игнорировать единицу измерения</span>
+        </label>
+        <p class="muted">Расширенный режим: поиск идёт по коду без привязки к единице измерения. Используйте только для нестандартных запросов — цены из разных единиц могут быть несопоставимы.</p>
+        <label class="option-toggle">
+          <input type="checkbox" name="ignore_demolition" value="1" $ignore_demolition_checked>
+          <span>Игнорировать монтаж / демонтаж</span>
+        </label>
+        <p class="muted">Если включено, признак демонтажа не ограничивает список аналогов.</p>
+      </fieldset>
       <label class="option-toggle">
         <input type="checkbox" name="use_tkp_analogs" value="1" $tkp_checked>
         <span>Использовать аналоги из ТКП (Qwen3)</span>
