@@ -237,3 +237,10 @@ _correction_bulk_fix_review/
 
 # Local semantic embedding weights (optional; never auto-downloaded)
 data/models/
+
+# Windows server runtime state
+deploy/windows/server.local.ps1
+data/backups/
+data/logs/
+data/runtime/
+data/workspaces/
