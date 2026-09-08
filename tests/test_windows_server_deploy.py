@@ -72,3 +72,16 @@ def test_windows_runtime_state_is_gitignored() -> None:
         "data/models/",
     ):
         assert entry in ignore
+
+
+def test_windows_server_task_tolerates_native_uvicorn_stderr() -> None:
+    task = _text("server_task.ps1")
+
+    invoke_marker = "& $VenvPython @arguments *>> $logPath"
+    invoke_index = task.index(invoke_marker)
+    continue_index = task.rfind('$ErrorActionPreference = "Continue"', 0, invoke_index)
+    restore_index = task.index("$ErrorActionPreference = $previousErrorActionPreference", invoke_index)
+
+    assert continue_index >= 0
+    assert continue_index < invoke_index < restore_index
+    assert "$exitCode = $LASTEXITCODE" in task
