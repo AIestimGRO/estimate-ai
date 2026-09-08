@@ -44,7 +44,11 @@ def connect(database_path: str | Path | None = None) -> sqlite3.Connection:
     return connection
 
 
-def init_database(connection: sqlite3.Connection) -> None:
+def init_database(
+    connection: sqlite3.Connection,
+    *,
+    synchronize_corrections: bool = True,
+) -> None:
     if not _schema_is_current(connection):
         connection.executescript(DDL)
         _apply_additive_migrations(connection)
@@ -54,10 +58,11 @@ def init_database(connection: sqlite3.Connection) -> None:
         )
         connection.commit()
 
-    from core.storage.corrections import synchronize_catalog_corrections
+    if synchronize_corrections:
+        from core.storage.corrections import synchronize_catalog_corrections
 
-    synchronize_catalog_corrections(connection)
-    connection.commit()
+        synchronize_catalog_corrections(connection)
+        connection.commit()
 
 
 def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
