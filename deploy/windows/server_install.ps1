@@ -1,6 +1,6 @@
 param(
-    [string]$CertFile = "",
-    [string]$KeyFile = "",
+    [Alias("CertFile")][string]$RequestedCertFile = "",
+    [Alias("KeyFile")][string]$RequestedKeyFile = "",
     [int]$Port = 7777,
     [switch]$SkipSemantic,
     [switch]$SkipTests
@@ -35,7 +35,7 @@ $requirements = if ($SkipSemantic) { "requirements.txt" } else { "requirements-s
 & $VenvPython -m pip install -r $requirements
 if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed." }
 
-$pair = Resolve-CertificatePair -RequestedCert $CertFile -RequestedKey $KeyFile
+$pair = Resolve-CertificatePair -RequestedCert $RequestedCertFile -RequestedKey $RequestedKeyFile
 Write-LocalServerConfig -ResolvedCert $pair.Cert -ResolvedKey $pair.Key -Port $Port
 
 . (Join-Path $PSScriptRoot "server_config.ps1")
