@@ -117,7 +117,7 @@ def install_workspace_routes(app: FastAPI) -> None:
         path = request.url.path
         connection = connect(default_database_path())
         try:
-            init_database(connection)
+            init_database(connection, synchronize_corrections=False)
             has_users = count_users(connection) > 0
             request.state.user = None
             if not has_users:
