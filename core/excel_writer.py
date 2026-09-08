@@ -291,6 +291,12 @@ def _shift_formula_columns(formula: str, insert_at_column: int) -> str:
         return formula
 
     def _replace(match: re.Match[str]) -> str:
+        # A reference immediately preceded by "!" belongs to another sheet,
+        # e.g. "Дефлятор!$S$12". The inserted column exists only on the
+        # estimate sheet, so external-sheet coordinates must stay unchanged.
+        if match.start() > 0 and formula[match.start() - 1] == "!":
+            return match.group(0)
+
         dollar_col, col_letters, dollar_row, row_digits = match.groups()
         col_index = column_index_from_string(col_letters)
         if col_index >= insert_at_column:
