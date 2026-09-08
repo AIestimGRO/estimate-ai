@@ -855,3 +855,38 @@ def test_tkp_toggle_does_not_create_grey_columns_when_no_tkp_match_exists(tmp_pa
         assert sheet.cell(row=9, column=18).fill.start_color.rgb != GREY_RGB
     finally:
         workbook.close()
+
+
+def test_column_insert_preserves_external_sheet_formula_references(tmp_path: Path) -> None:
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    estimate = tmp_path / "estimate.xlsx"
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = ESTIMATE_TITLE
+    worksheet.cell(row=1, column=5).value = "=Дефлятор!$S$12"
+    worksheet.cell(row=1, column=1).value = "=H9+Дефлятор!$S$12"
+    worksheet.cell(row=7, column=14).value = CODE
+    worksheet.cell(row=9, column=3).value = INSTALLATION
+    worksheet.cell(row=9, column=4).value = METER
+    worksheet.cell(row=9, column=6).value = 50.0
+    worksheet.cell(row=9, column=7).value = "occupied"
+    worksheet.cell(row=9, column=8).value = 10.0
+    worksheet.cell(row=9, column=14).value = CODE
+    deflator = workbook.create_sheet("Дефлятор")
+    deflator.cell(row=12, column=19).value = 1.25
+    workbook.save(estimate)
+    workbook.close()
+
+    output = tmp_path / "out.xlsx"
+    outcome = run_and_write(catalog, estimate, output)
+
+    assert outcome.write_report.inserted_average_column
+    workbook = load_workbook(output, data_only=False)
+    try:
+        sheet = workbook[ESTIMATE_TITLE]
+        assert sheet.cell(row=1, column=5).value == "=Дефлятор!$S$12"
+        assert sheet.cell(row=1, column=1).value == "=I9+Дефлятор!$S$12"
+        assert workbook["Дефлятор"].cell(row=12, column=19).value == 1.25
+    finally:
+        workbook.close()
