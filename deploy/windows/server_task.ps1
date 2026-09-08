@@ -26,5 +26,18 @@ $arguments = @(
     "--ssl-keyfile", $KeyFile,
     "--log-level", "info"
 )
-& $VenvPython @arguments *>> $logPath
-exit $LASTEXITCODE
+# Uvicorn writes normal INFO logs to stderr. Windows PowerShell converts native
+# stderr into ErrorRecord objects when streams are merged. With the script-wide
+# ErrorActionPreference=Stop that would terminate this wrapper immediately even
+# though Uvicorn started successfully. Keep strict error handling everywhere
+# else, but allow the native server process to own its stderr for its lifetime.
+$previousErrorActionPreference = $ErrorActionPreference
+$exitCode = 1
+try {
+    $ErrorActionPreference = "Continue"
+    & $VenvPython @arguments *>> $logPath
+    $exitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
+exit $exitCode
