@@ -410,6 +410,20 @@ body.catalog-resizing, body.catalog-resizing * {
 .correction-review-form .review-comment-help { display: block; margin: 0 0 5px; color: #64748b; font-size: 12px; }
 .correction-review-form button { width: auto; display: inline-block; margin: 2px; padding: 6px 9px; }
 .correction-review-form button.reject { background: #dc2626; }
+.correction-bulk-review {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 10px 0 12px;
+  padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;
+}
+.correction-bulk-copy { margin-right: auto; min-width: 190px; }
+.correction-bulk-copy strong { display: block; font-size: 13px; color: #334155; }
+.correction-bulk-copy span { display: block; margin-top: 2px; font-size: 12px; color: #64748b; }
+.correction-bulk-comment { width: min(320px, 100%); margin: 0; font-size: 12px; color: #475569; }
+.correction-bulk-comment input[type=text] { width: 100%; margin: 4px 0 0; padding: 7px 9px; border-radius: 8px; }
+.correction-bulk-review button { width: auto; margin: 0; padding: 8px 11px; border-radius: 8px; font-size: 13px; }
+.correction-bulk-review button.reject { background: #dc2626; }
+.correction-bulk-review button.reject:hover { background: #b91c1c; }
+.correction-select-col { width: 42px; min-width: 42px; text-align: center !important; }
+.correction-select { width: 18px; height: 18px; margin: 0; cursor: pointer; }
 .muted { color: #94a3b8; font-size: 12px; padding: 8px 10px; margin: 0; }
 .maintenance-tools { margin-top: 18px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
 .maintenance-tools summary { cursor: pointer; color: #64748b; font-size: 13px; font-weight: 600; }
@@ -1188,6 +1202,7 @@ def render_admin_corrections(
         f'<div><dt>Согласованы</dt><dd>{counts[STATUS_APPROVED]}</dd></div>'
         f'<div><dt>Отклонены</dt><dd>{counts[STATUS_REJECTED]}</dd></div></div>'
         f'{_render_correction_filter(status_filter)}'
+        f'{_render_correction_bulk_actions(corrections)}'
         f'{_render_correction_table(corrections)}'
         '</section>'
     )
@@ -1221,19 +1236,62 @@ def _render_correction_filter(status_filter: str) -> str:
     )
 
 
+def _render_correction_bulk_actions(
+    corrections: list[CatalogCorrectionRecord],
+) -> str:
+    pending_count = sum(row.status == STATUS_PENDING for row in corrections)
+    if pending_count == 0:
+        return ""
+    return (
+        '<form id="correction-bulk-review-form" class="correction-bulk-review" method="post">'
+        '<div class="correction-bulk-copy"><strong>Массовое решение</strong>'
+        f'<span>Ожидают на текущем экране: {pending_count}</span></div>'
+        '<label class="correction-bulk-comment">Комментарий для отклонения'
+        '<input type="text" name="comment" required '
+        'placeholder="обязателен только при отклонении"></label>'
+        '<button type="submit" formnovalidate '
+        'formaction="/admin/corrections/bulk-approve" '
+        'onclick="return confirm(\'Согласовать и применить выбранные заявки?\')">'
+        'Согласовать выбранные</button>'
+        '<button class="reject" type="submit" '
+        'formaction="/admin/corrections/bulk-reject" '
+        'onclick="return confirm(\'Отклонить выбранные заявки?\')">'
+        'Отклонить выбранные</button>'
+        '</form>'
+    )
+
+
 def _render_correction_table(
     corrections: list[CatalogCorrectionRecord],
 ) -> str:
     if not corrections:
         return '<p class="muted">Записей с выбранным статусом нет.</p>'
     rows = "".join(_render_correction_row(row) for row in corrections)
+    has_pending = any(row.status == STATUS_PENDING for row in corrections)
+    select_all = (
+        '<input class="correction-select" type="checkbox" '
+        'data-correction-select-all aria-label="Выбрать все ожидающие заявки">'
+        if has_pending
+        else ""
+    )
+    script = (
+        '<script>'
+        'document.querySelector("[data-correction-select-all]")?.addEventListener("change", function () {'
+        'document.querySelectorAll(".correction-row-check").forEach((item) => { item.checked = this.checked; });'
+        '});'
+        '</script>'
+        if has_pending
+        else ""
+    )
     return (
         '<div class="preview-wide"><table class="preview"><thead><tr>'
+        f'<th class="correction-select-col">{select_all}</th>'
         '<th>ID / статус</th><th>Целевая строка</th><th>Изменения</th>'
         '<th>Причина и автор</th><th>Решение</th><th>История</th>'
         '</tr></thead><tbody>'
         + rows
         + '</tbody></table></div>'
+        + script
     )
 
 
@@ -1296,8 +1354,17 @@ def _render_correction_row(row: CatalogCorrectionRecord) -> str:
         )
         + '</details>'
     )
+    select_cell = (
+        '<td class="correction-select-col">'
+        f'<input class="correction-select correction-row-check" type="checkbox" '
+        f'name="correction_ids" value="{row.id}" form="correction-bulk-review-form" '
+        f'aria-label="Выбрать заявку #{row.id}"></td>'
+        if row.status == STATUS_PENDING
+        else '<td class="correction-select-col"></td>'
+    )
     return (
         '<tr>'
+        f'{select_cell}'
         f'<td><strong>#{row.id}</strong><br><span class="correction-status {html.escape(row.status)}">'
         f'{html.escape(status_label)}</span><br>{html.escape(action_label)}</td>'
         f'<td class="wrap">{target}</td><td class="wrap">{changes}</td>'

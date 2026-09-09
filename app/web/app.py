@@ -76,10 +76,12 @@ from core.storage.corrections import (
     ROLE_SENIOR,
     ROLE_SPECIALIST,
     approve_catalog_correction,
+    approve_catalog_corrections,
     create_bulk_catalog_corrections,
     create_catalog_correction,
     list_catalog_corrections,
     reject_catalog_correction,
+    reject_catalog_corrections,
 )
 from core.storage.tkp import (
     TkpImportResult,
@@ -814,6 +816,87 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             connection.close()
         return RedirectResponse(
             "/admin/corrections?message=" + quote("Корректировка отклонена."),
+            status_code=303,
+        )
+
+    @app.post("/admin/corrections/bulk-approve")
+    async def admin_corrections_bulk_approve(request: Request) -> RedirectResponse:
+        form = await request.form()
+        correction_ids = _form_positive_ids(form, "correction_ids")
+        if not correction_ids:
+            return RedirectResponse(
+                "/admin/corrections?error=" + quote("Сначала выберите заявки."),
+                status_code=303,
+            )
+        comment = str(form.get("comment") or "")
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                approved = approve_catalog_corrections(
+                    connection,
+                    correction_ids,
+                    actor="local.senior",
+                    actor_role=ROLE_SENIOR,
+                    comment=comment,
+                )
+            except Exception as exc:
+                return RedirectResponse(
+                    "/admin/corrections?error="
+                    + quote(f"Не удалось массово согласовать корректировки: {exc}"),
+                    status_code=303,
+                )
+        finally:
+            connection.close()
+        message = (
+            f"Согласовано и применено заявок: {approved}."
+            if approved
+            else "Среди выбранных заявок уже нет ожидающих согласования."
+        )
+        return RedirectResponse(
+            "/admin/corrections?message=" + quote(message),
+            status_code=303,
+        )
+
+    @app.post("/admin/corrections/bulk-reject")
+    async def admin_corrections_bulk_reject(request: Request) -> RedirectResponse:
+        form = await request.form()
+        correction_ids = _form_positive_ids(form, "correction_ids")
+        if not correction_ids:
+            return RedirectResponse(
+                "/admin/corrections?error=" + quote("Сначала выберите заявки."),
+                status_code=303,
+            )
+        comment = str(form.get("comment") or "")
+        connection = connect(default_database_path())
+        try:
+            init_database(connection)
+            try:
+                rejected = reject_catalog_corrections(
+                    connection,
+                    correction_ids,
+                    actor="local.senior",
+                    actor_role=ROLE_SENIOR,
+                    comment=comment,
+                )
+            except Exception as exc:
+                error_text = str(exc)
+                if error_text == "Rejection comment is required":
+                    error_text = "Для массового отклонения укажите комментарий"
+                return RedirectResponse(
+                    "/admin/corrections?error="
+                    + quote(f"Не удалось массово отклонить корректировки: {error_text}"),
+                    status_code=303,
+                )
+        finally:
+            connection.close()
+        message = (
+            f"Отклонено заявок: {rejected}."
+            if rejected
+            else "Среди выбранных заявок уже нет ожидающих согласования."
+        )
+        return RedirectResponse(
+            "/admin/corrections?message=" + quote(message),
             status_code=303,
         )
 
@@ -2242,6 +2325,18 @@ def _append_message(return_url: str, key: str, value: str) -> str:
     pairs = [(name, item) for name, item in parse_qsl(query, keep_blank_values=True) if name not in {"message", "error"}]
     pairs.append((key, value))
     return f"{path}?{urlencode(pairs)}"
+
+
+def _form_positive_ids(form, field_name: str) -> list[int]:
+    ids: set[int] = set()
+    for value in form.getlist(field_name):
+        text = str(value).strip()
+        if not text.isdigit():
+            continue
+        parsed = int(text)
+        if parsed > 0:
+            ids.add(parsed)
+    return sorted(ids)
 
 
 def _catalog_row_form_values(form, item_id: int) -> dict[str, object]:
