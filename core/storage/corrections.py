@@ -205,31 +205,43 @@ def approve_catalog_correction(
         raise ValueError("Pending correction was not found")
 
     with connection:
-        connection.execute(
-            """
-            UPDATE catalog_correction_requests
-            SET status = ?, reviewed_by = ?, reviewed_role = ?,
-                reviewed_at = datetime('now'), review_comment = ?
-            WHERE id = ?
-            """,
-            (
-                STATUS_APPROVED,
-                normalized_actor,
-                normalized_role,
-                _text(comment),
-                int(correction_id),
-            ),
-        )
-        _insert_event(
+        _approve_request(
             connection,
-            int(correction_id),
-            "approved",
-            normalized_actor,
-            normalized_role,
-            _text(comment),
+            request,
+            actor=normalized_actor,
+            actor_role=normalized_role,
+            comment=_text(comment),
         )
-        if not _apply_request(connection, request, event_type="applied"):
-            raise ValueError("Catalog row for the correction was not found")
+
+
+def approve_catalog_corrections(
+    connection: sqlite3.Connection,
+    correction_ids: list[int],
+    *,
+    actor: str,
+    actor_role: str,
+    comment: str = "",
+) -> int:
+    """Approve selected pending requests atomically while preserving per-request audit."""
+    normalized_actor = _required_text(actor, "Reviewer is required")
+    normalized_role = _validate_role(actor_role)
+    if normalized_role not in APPROVER_ROLES:
+        raise PermissionError("Only a senior or admin can approve corrections")
+    requests = _pending_requests(connection, correction_ids)
+    if not requests:
+        return 0
+
+    normalized_comment = _text(comment)
+    with connection:
+        for request in requests:
+            _approve_request(
+                connection,
+                request,
+                actor=normalized_actor,
+                actor_role=normalized_role,
+                comment=normalized_comment,
+            )
+    return len(requests)
 
 
 def reject_catalog_correction(
@@ -248,30 +260,134 @@ def reject_catalog_correction(
     request = _request_row(connection, int(correction_id))
     if request is None or str(request["status"]) != STATUS_PENDING:
         raise ValueError("Pending correction was not found")
+
     with connection:
-        connection.execute(
-            """
-            UPDATE catalog_correction_requests
-            SET status = ?, reviewed_by = ?, reviewed_role = ?,
-                reviewed_at = datetime('now'), review_comment = ?
-            WHERE id = ?
-            """,
-            (
-                STATUS_REJECTED,
-                normalized_actor,
-                normalized_role,
-                normalized_comment,
-                int(correction_id),
-            ),
-        )
-        _insert_event(
+        _reject_request(
             connection,
-            int(correction_id),
-            "rejected",
-            normalized_actor,
-            normalized_role,
-            normalized_comment,
+            request,
+            actor=normalized_actor,
+            actor_role=normalized_role,
+            comment=normalized_comment,
         )
+
+
+def reject_catalog_corrections(
+    connection: sqlite3.Connection,
+    correction_ids: list[int],
+    *,
+    actor: str,
+    actor_role: str,
+    comment: str,
+) -> int:
+    """Reject selected pending requests atomically while preserving per-request audit."""
+    normalized_actor = _required_text(actor, "Reviewer is required")
+    normalized_role = _validate_role(actor_role)
+    normalized_comment = _required_text(comment, "Rejection comment is required")
+    if normalized_role not in APPROVER_ROLES:
+        raise PermissionError("Only a senior or admin can reject corrections")
+    requests = _pending_requests(connection, correction_ids)
+    if not requests:
+        return 0
+
+    with connection:
+        for request in requests:
+            _reject_request(
+                connection,
+                request,
+                actor=normalized_actor,
+                actor_role=normalized_role,
+                comment=normalized_comment,
+            )
+    return len(requests)
+
+
+def _pending_requests(
+    connection: sqlite3.Connection,
+    correction_ids: list[int],
+) -> list[sqlite3.Row]:
+    ids = sorted({int(correction_id) for correction_id in correction_ids if int(correction_id) > 0})
+    if not ids:
+        return []
+    placeholders = ", ".join("?" for _ in ids)
+    return connection.execute(
+        f"""
+        SELECT *
+        FROM catalog_correction_requests
+        WHERE status = ? AND id IN ({placeholders})
+        ORDER BY CASE action WHEN 'delete' THEN 1 ELSE 0 END, id
+        """,
+        (STATUS_PENDING, *ids),
+    ).fetchall()
+
+
+def _approve_request(
+    connection: sqlite3.Connection,
+    request: sqlite3.Row,
+    *,
+    actor: str,
+    actor_role: str,
+    comment: str,
+) -> None:
+    correction_id = int(request["id"])
+    connection.execute(
+        """
+        UPDATE catalog_correction_requests
+        SET status = ?, reviewed_by = ?, reviewed_role = ?,
+            reviewed_at = datetime('now'), review_comment = ?
+        WHERE id = ?
+        """,
+        (
+            STATUS_APPROVED,
+            actor,
+            actor_role,
+            comment,
+            correction_id,
+        ),
+    )
+    _insert_event(
+        connection,
+        correction_id,
+        "approved",
+        actor,
+        actor_role,
+        comment,
+    )
+    if not _apply_request(connection, request, event_type="applied"):
+        raise ValueError("Catalog row for the correction was not found")
+
+
+def _reject_request(
+    connection: sqlite3.Connection,
+    request: sqlite3.Row,
+    *,
+    actor: str,
+    actor_role: str,
+    comment: str,
+) -> None:
+    correction_id = int(request["id"])
+    connection.execute(
+        """
+        UPDATE catalog_correction_requests
+        SET status = ?, reviewed_by = ?, reviewed_role = ?,
+            reviewed_at = datetime('now'), review_comment = ?
+        WHERE id = ?
+        """,
+        (
+            STATUS_REJECTED,
+            actor,
+            actor_role,
+            comment,
+            correction_id,
+        ),
+    )
+    _insert_event(
+        connection,
+        correction_id,
+        "rejected",
+        actor,
+        actor_role,
+        comment,
+    )
 
 
 def synchronize_catalog_corrections(connection: sqlite3.Connection) -> int:

@@ -10,13 +10,20 @@ from core.storage.corrections import (
     STATUS_APPROVED,
     STATUS_PENDING,
     approve_catalog_correction,
+    approve_catalog_corrections,
     create_catalog_correction,
     list_catalog_corrections,
     reject_catalog_correction,
+    reject_catalog_corrections,
 )
 
 
-def _seed_catalog_row(connection, *, item_id: int | None = None) -> int:
+def _seed_catalog_row(
+    connection,
+    *,
+    item_id: int | None = None,
+    source_row_number: int = 42,
+) -> int:
     connection.execute(
         "INSERT OR IGNORE INTO catalog_sources(name, kind) VALUES (?, ?)",
         ("legacy", "excel_bulk"),
@@ -49,7 +56,7 @@ def _seed_catalog_row(connection, *, item_id: int | None = None) -> int:
         2.0,
         1.0,
         "source.xlsx",
-        42,
+        source_row_number,
     )
     placeholders = ", ".join("?" for _ in values)
     if item_id is None:
@@ -116,6 +123,123 @@ def test_pending_correction_does_not_change_catalog_until_approved(tmp_path) -> 
             "approved",
             "applied",
         ]
+    finally:
+        connection.close()
+
+
+def test_bulk_approval_applies_selected_requests_and_preserves_audit(tmp_path) -> None:
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        first_id = _seed_catalog_row(connection)
+        second_id = _seed_catalog_row(connection, source_row_number=43)
+        correction_ids = [
+            create_catalog_correction(
+                connection,
+                first_id,
+                values={"price": 80.0},
+                reason="First correction",
+                actor="specialist.one",
+                actor_role=ROLE_SPECIALIST,
+            ),
+            create_catalog_correction(
+                connection,
+                second_id,
+                values={"price": 70.0},
+                reason="Second correction",
+                actor="specialist.one",
+                actor_role=ROLE_SPECIALIST,
+            ),
+        ]
+
+        approved_count = approve_catalog_corrections(
+            connection,
+            correction_ids,
+            actor="senior.one",
+            actor_role=ROLE_SENIOR,
+            comment="Bulk checked",
+        )
+
+        prices = [
+            row["price"]
+            for row in connection.execute(
+                "SELECT price FROM catalog_items WHERE id IN (?, ?) ORDER BY id",
+                (first_id, second_id),
+            ).fetchall()
+        ]
+        approved = list_catalog_corrections(connection, status=STATUS_APPROVED)
+        assert approved_count == 2
+        assert prices == [80.0, 70.0]
+        assert len(approved) == 2
+        assert all(row.review_comment == "Bulk checked" for row in approved)
+        assert all(
+            [event.event_type for event in row.events]
+            == ["submitted", "approved", "applied"]
+            for row in approved
+        )
+    finally:
+        connection.close()
+
+
+def test_bulk_rejection_requires_comment_and_preserves_catalog(tmp_path) -> None:
+    connection = connect(tmp_path / "estimate_ai.db")
+    try:
+        init_database(connection)
+        first_id = _seed_catalog_row(connection)
+        second_id = _seed_catalog_row(connection, source_row_number=43)
+        correction_ids = [
+            create_catalog_correction(
+                connection,
+                first_id,
+                values={"price": 80.0},
+                reason="First correction",
+                actor="specialist.one",
+                actor_role=ROLE_SPECIALIST,
+            ),
+            create_catalog_correction(
+                connection,
+                second_id,
+                values={"price": 70.0},
+                reason="Second correction",
+                actor="specialist.one",
+                actor_role=ROLE_SPECIALIST,
+            ),
+        ]
+
+        with pytest.raises(ValueError, match="Rejection comment is required"):
+            reject_catalog_corrections(
+                connection,
+                correction_ids,
+                actor="senior.one",
+                actor_role=ROLE_SENIOR,
+                comment="",
+            )
+        assert len(list_catalog_corrections(connection, status=STATUS_PENDING)) == 2
+
+        rejected_count = reject_catalog_corrections(
+            connection,
+            correction_ids,
+            actor="senior.one",
+            actor_role=ROLE_SENIOR,
+            comment="Bulk rejected",
+        )
+
+        prices = [
+            row["price"]
+            for row in connection.execute(
+                "SELECT price FROM catalog_items WHERE id IN (?, ?) ORDER BY id",
+                (first_id, second_id),
+            ).fetchall()
+        ]
+        rejected = list_catalog_corrections(connection, status="rejected")
+        assert rejected_count == 2
+        assert prices == [100.0, 100.0]
+        assert len(rejected) == 2
+        assert all(row.review_comment == "Bulk rejected" for row in rejected)
+        assert all(
+            [event.event_type for event in row.events] == ["submitted", "rejected"]
+            for row in rejected
+        )
     finally:
         connection.close()
 

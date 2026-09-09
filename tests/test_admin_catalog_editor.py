@@ -15,7 +15,13 @@ from core.storage import (
 )
 
 
-def _seed_catalog_row(db_path, *, price: float = 100.0, quantity: float = 2.0) -> int:
+def _seed_catalog_row(
+    db_path,
+    *,
+    price: float = 100.0,
+    quantity: float = 2.0,
+    source_row_number: int = 42,
+) -> int:
     connection = connect(db_path)
     try:
         init_database(connection)
@@ -55,7 +61,7 @@ def _seed_catalog_row(db_path, *, price: float = 100.0, quantity: float = 2.0) -
                 1.0,
                 "Moscow",
                 "catalog.xlsx",
-                42,
+                source_row_number,
             ),
         )
         row_id = int(cursor.lastrowid)
@@ -412,6 +418,74 @@ def test_admin_catalog_row_actions_use_small_independent_forms(
         in response.text
     )
     assert response.text.count(f'form="{target_form_id}"') < 30
+
+
+def test_admin_corrections_support_compact_bulk_approval(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "estimate_ai.db"
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(db_path))
+    first_id = _seed_catalog_row(db_path, price=100.0)
+    second_id = _seed_catalog_row(db_path, price=200.0, source_row_number=43)
+
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        submitted = client.post(
+            "/admin/catalog/bulk",
+            data={
+                "return_url": "/admin/catalog",
+                "selected_ids": [str(first_id), str(second_id)],
+                "bulk_action": "update",
+                "bulk_field": "price",
+                "bulk_operation": "set",
+                "bulk_value": "150",
+                "bulk_reason": "Bulk review",
+            },
+            follow_redirects=False,
+        )
+
+    assert submitted.status_code == 303
+    connection = connect(db_path)
+    try:
+        pending = list_catalog_corrections(connection, status=STATUS_PENDING)
+    finally:
+        connection.close()
+    assert len(pending) == 2
+
+    correction_ids = [str(row.id) for row in pending]
+    with TestClient(create_app(base_dir=tmp_path / "work")) as client:
+        journal = client.get("/admin/corrections")
+        approved = client.post(
+            "/admin/corrections/bulk-approve",
+            data={
+                "correction_ids": correction_ids,
+                "comment": "Checked together",
+            },
+            follow_redirects=False,
+        )
+
+    assert journal.status_code == 200
+    assert 'id="correction-bulk-review-form"' in journal.text
+    assert 'formaction="/admin/corrections/bulk-approve"' in journal.text
+    assert 'formaction="/admin/corrections/bulk-reject"' in journal.text
+    assert 'data-correction-select-all' in journal.text
+    assert '.correction-bulk-review button { width: auto;' in journal.text
+    assert approved.status_code == 303
+
+    connection = connect(db_path)
+    try:
+        prices = [
+            row["price"]
+            for row in connection.execute(
+                "SELECT price FROM catalog_items WHERE id IN (?, ?) ORDER BY id",
+                (first_id, second_id),
+            ).fetchall()
+        ]
+        pending_after = list_catalog_corrections(connection, status=STATUS_PENDING)
+    finally:
+        connection.close()
+    assert prices == [150.0, 150.0]
+    assert pending_after == []
 
 
 def test_admin_catalog_delete_can_be_rejected_then_approved(
