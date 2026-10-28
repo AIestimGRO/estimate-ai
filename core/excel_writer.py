@@ -62,6 +62,11 @@ TKP_RESERVE_HEADER_LABEL = "\u0410\u043d\u0430\u043b\u043e\u0433 \u0440\u0435\u0
 TKP_COLUMN_FILL = PatternFill(start_color="FFD9D9D9", end_color="FFD9D9D9", fill_type="solid")
 TKP_WINNER_FILL = PatternFill(start_color="FFC6EFCE", end_color="FFC6EFCE", fill_type="solid")
 TKP_RESERVE_FILL = PatternFill(start_color="FFDDEBF7", end_color="FFDDEBF7", fill_type="solid")
+DEVIATION_HEADER_LABEL = "\u041e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0438\u0435 \u0441\u0440\u0435\u0434\u043d\u0435\u0439 \u043e\u0442 \u0438\u0441\u0445\u043e\u0434\u043d\u043e\u0439, %"
+MIN_PRICE_HEADER_LABEL = "\u041c\u0438\u043d. \u0446\u0435\u043d\u0430 \u0430\u043d\u0430\u043b\u043e\u0433\u0430, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421"
+MAX_PRICE_HEADER_LABEL = "\u041c\u0430\u043a\u0441. \u0446\u0435\u043d\u0430 \u0430\u043d\u0430\u043b\u043e\u0433\u0430, \u0440\u0443\u0431. \u0431\u0435\u0437 \u041d\u0414\u0421"
+OUTPUT_METRIC_COLUMN_COUNT = 3
+PERCENT_NUMBER_FORMAT = "+0.00%;-0.00%;0.00%"
 
 
 @dataclass(frozen=True)
@@ -90,6 +95,11 @@ class WriteReport:
     tkp_start_column: int | None = None
     header_row: int = 0
     analog_columns: tuple["AnalogColumnDef", ...] = ()
+    code_kr_column: int = 0
+    section_column: int | None = None
+    deviation_column: int = 0
+    min_price_column: int = 0
+    max_price_column: int = 0
 
 
 @dataclass(frozen=True)
@@ -177,6 +187,7 @@ def write_run_result(
         output_columns = _plan_output_columns(layout_columns, placement, analog_start_base)
 
         header_row = _effective_header_row(layout_columns, row_numbers)
+        _write_metric_headers(worksheet, header_row, output_columns)
         analog_start_column = output_columns.analog_start
         analog_plan = _build_global_analog_plan(
             result,
@@ -252,6 +263,11 @@ def write_run_result(
         tkp_start_column=tkp_start_column,
         header_row=header_row,
         analog_columns=analog_plan.columns,
+        code_kr_column=output_columns.code_kr,
+        section_column=output_columns.section,
+        deviation_column=output_columns.deviation,
+        min_price_column=output_columns.min_price,
+        max_price_column=output_columns.max_price,
     )
 
 
@@ -262,6 +278,9 @@ class _OutputColumns:
     code_kr: int
     section: int | None
     analog_start: int
+    deviation: int
+    min_price: int
+    max_price: int
 
 
 # Matches a column reference inside a formula, e.g. "H29", "$H$29", "AVERAGE(F32,Q32:CK32)".
@@ -362,6 +381,9 @@ def _plan_output_columns(columns: WriterColumns, placement, analog_start_base: i
         code_kr=columns.code_kr,
         section=columns.section,
         analog_start=analog_start_base,
+        deviation=analog_start_base - 3,
+        min_price=analog_start_base - 2,
+        max_price=analog_start_base - 1,
     )
 
 
@@ -430,7 +452,7 @@ def _ensure_kr_and_section_columns(
     for column, label in pending_headers:
         _write_output_header(worksheet, header_row, column, label)
 
-    analog_start = section_col + 1
+    analog_start = section_col + 1 + OUTPUT_METRIC_COLUMN_COUNT
     return WriterColumns(
         base_price=columns.base_price,
         average=columns.average,
@@ -440,6 +462,23 @@ def _ensure_kr_and_section_columns(
         analog_start=analog_start,
         header_row=columns.header_row,
     )
+
+
+def _write_metric_headers(worksheet: Worksheet, header_row: int, columns: _OutputColumns) -> None:
+    if header_row <= 0:
+        return
+    for column, label in (
+        (columns.deviation, DEVIATION_HEADER_LABEL),
+        (columns.min_price, MIN_PRICE_HEADER_LABEL),
+        (columns.max_price, MAX_PRICE_HEADER_LABEL),
+    ):
+        cell = worksheet.cell(row=header_row, column=column)
+        cell.value = label
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        worksheet.cell(row=header_row + 1, column=column).value = None
+        if header_row > 1:
+            worksheet.cell(row=header_row - 1, column=column).value = None
 
 
 def _extend_auto_filter(worksheet: Worksheet, last_output_column: int) -> None:
@@ -892,6 +931,7 @@ def _write_row(
         columns,
         plan,
     )
+    _write_metric_formulas(worksheet, row_number, columns, plan)
 
     if row.kr_code is not None:
         kr_cell = worksheet.cell(row=row_number, column=columns.code_kr)
@@ -942,6 +982,37 @@ def _write_average_formula(
     )
     avg_cell.number_format = PRICE_NUMBER_FORMAT
     avg_cell.font = AVG_FONT
+
+
+def _write_metric_formulas(
+    worksheet: Worksheet,
+    row_number: int,
+    columns: _OutputColumns,
+    plan: GlobalAnalogPlan,
+) -> None:
+    """Dynamic prices across RNMC and paired winner/reserve TKP analog columns."""
+    original = f"{get_column_letter(columns.base_price)}{row_number}"
+    average = f"{get_column_letter(columns.average)}{row_number}"
+    deviation = worksheet.cell(row=row_number, column=columns.deviation)
+    deviation.value = (
+        f'=IFERROR(IF(OR(NOT(ISNUMBER({original})),{original}=0),"",'
+        f'({average}-{original})/{original}),"")'
+    )
+    deviation.number_format = PERCENT_NUMBER_FORMAT
+
+    minimum = worksheet.cell(row=row_number, column=columns.min_price)
+    maximum = worksheet.cell(row=row_number, column=columns.max_price)
+    if plan.last_column < columns.analog_start:
+        minimum.value = None
+        maximum.value = None
+    else:
+        first = f"{get_column_letter(columns.analog_start)}{row_number}"
+        last = f"{get_column_letter(plan.last_column)}{row_number}"
+        prices = f"{first}:{last}"
+        minimum.value = f'=IFERROR(AGGREGATE(15,6,{prices}/({prices}>0),1),"")'
+        maximum.value = f'=IF(COUNTIF({prices},">0")=0,"",MAX({prices}))'
+    minimum.number_format = PRICE_NUMBER_FORMAT
+    maximum.number_format = PRICE_NUMBER_FORMAT
 
 
 def _tkp_match_comment(match, price_source: str) -> Comment:

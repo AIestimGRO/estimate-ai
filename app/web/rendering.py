@@ -730,8 +730,11 @@ def render_result(token: str, output_name: str, outcome: RunAndWriteResult) -> s
         ("\u0417\u0430\u043f\u0438\u0441\u0430\u043d\u043e \u0441\u0442\u0440\u043e\u043a \u0432 \u0444\u0430\u0439\u043b", str(outcome.write_report.written_rows)),
         (
             "\u041a\u043e\u043b\u043e\u043d\u043a\u0438 \u0432\u044b\u0432\u043e\u0434\u0430",
-            f"/\u041a\u0420={outcome.write_report.analog_start_column - 2}, "
-            f"\u0440\u0430\u0437\u0434\u0435\u043b={outcome.write_report.analog_start_column - 1}, "
+            f"/\u041a\u0420={outcome.write_report.code_kr_column}, "
+            f"\u0440\u0430\u0437\u0434\u0435\u043b={outcome.write_report.section_column}, "
+            f"\u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0438\u0435={outcome.write_report.deviation_column}, "
+            f"min={outcome.write_report.min_price_column}, "
+            f"max={outcome.write_report.max_price_column}, "
             f"\u0430\u043d\u0430\u043b\u043e\u0433\u0438={outcome.write_report.analog_start_column}",
         ),
         (
