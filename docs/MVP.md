@@ -1,5 +1,10 @@
 # MVP Scope — current
 
+> **Documentation reviewed 2026-10-28.** This is an implemented-scope overview
+> for the supplied source snapshot, not a claim that every known KL edge case
+> has been solved or that the production server is presently healthy. Read
+> `AI_HANDOFF.md` and `OPEN_ITEMS.md` before planning new work.
+
 The current MVP is no longer only a VBA-to-Python port. The project now includes
 a deterministic Python core, SQLite persistence, a FastAPI web UI, an admin UI,
 and a working RNMC ZIP import flow.

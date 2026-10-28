@@ -238,6 +238,21 @@ _correction_bulk_fix_review/
 # Local semantic embedding weights (optional; never auto-downloaded)
 data/models/
 
+# Persistent runtime state and secrets (source handoff hardening 2026-10-28)
+data/backups/
+data/workspaces/
+data/models/
+runtime/logs/
+_db_staging/
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+EstimK
+
 # Windows server runtime state
 deploy/windows/server.local.ps1
 data/backups/

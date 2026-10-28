@@ -1,5 +1,50 @@
 # Estimate AI Roadmap
 
+> **Status refreshed 2026-10-28.** This roadmap records implementation milestones
+> in the provided source ZIP; production SQLite state is documented separately
+> in `AI_HANDOFF.md` and `SERVER_RUNBOOK.md`. The old `Current state (2026-07)`
+> heading below is retained as the dated baseline, **not** as a claim that
+> the entire project is still at July status.
+
+## October 2026 handoff — latest verified facts
+
+- Source ZIP has FastAPI, SQLite schema version 12, deterministic RNMC matching,
+  live optional lexical TKP analogs, admin data workflows, and read-only TKP
+  semantic shadow comparisons. `python -m pytest -q`: **362 passed, 1 skipped**
+  when checked 2026-10-28. No code changes were made in this documentation pass.
+- Per operator checks on 2026-10-27: Windows production on HTTPS port 7777,
+  scheduled task `EstimateAI`, SQLite after checked append-only import
+  **633 TKP source KL / 34,763 rows** (up from 536 / 31,925). Online/final
+  SQLite backups, stop/activation and integrity checks were performed. This
+  is a point-in-time operational report; re-verify on next deployment.
+- Important distinction: the supplemental 97-KL import required special
+  verification of original winner/participant columns for non-standard KL
+  layouts. The standard UI importer was **not** separately proved to correctly
+  re-import every such original. This is not a completed parser hardening
+  milestone; see P1 below.
+- The production smoke test currently stops at the app listening and HTTP
+  `303` redirect. An end-to-end admin/TKP matching check on new task
+  `6940345` still needs operator confirmation.
+- The source snapshot **does not include** the Windows `deploy/windows`
+  scripts observed on production; their exact content must be read on the
+  server rather than assumed from this ZIP.
+
+### Priority next steps
+
+1. **P0:** Confirm the new KL #6940345 is visible and yields the correct
+   priced analog in an actual WA run; verify task, winner, unit, VAT.
+2. **P1:** Regression harden original KL participant/winner column layout and
+   price arithmetic; use verified anonymized originals (esp. #6940345 and
+   #6941030), ambiguous/negative examples, and no silent price fallback.
+3. **P1:** Evaluate strict technical TKP live gating against a real benchmark
+   before changing lexical matcher thresholds or applying shadow rules live.
+4. **P1:** Review production deployment-script drift vs canonical source and
+   capture a safe documented, non-secret deploy procedure; protect DB backup
+   and runtime folders from source bundles/commits.
+5. **P2:** RNMC no-data/duplicate/retry/export usability and the deferred
+   detected-layout Excel features already listed below.
+
+
 ## Goal
 
 Build a web service for matching estimate/BOQ rows against a historical RNMC

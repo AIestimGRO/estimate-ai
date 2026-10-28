@@ -1,5 +1,11 @@
 # RNMC Import Workflow
 
+> **Reviewed 2026-10-28.** This is the RNMC workflow, **not** the original-KL
+> winner/TKP import pipeline. For bidder groups, price provenance and unusual
+> column offsets consult `DATA_IMPORT_GUARDRAILS.md`. File identity here is
+> filename-only even for legacy `File_Log.xlsx` status `нет данных` or
+> `новая РНМЦ`. Runtime SQLite must never be replaced from a source snapshot.
+
 This document describes the current web import workflow for adding new RNMC
 files to the SQLite catalog.
 

@@ -74,15 +74,37 @@ Main web routes:
   columns, and resizable widths.
 - `/admin/settings` — database/settings diagnostics.
 
-## Project docs
+## Project docs and AI handoff (2026-10-28)
 
+**Every new AI developer should start from [`AGENTS.md`](AGENTS.md) and
+[`docs/AI_HANDOFF.md`](docs/AI_HANDOFF.md).** This handoff separates the source
+ZIP state from the live Windows/SQLite deployment verified in October 2026.
+Do not deploy or overwrite a production DB based on this source ZIP alone.
+
+- `AGENTS.md` — mandatory top-level AI agent entry point.
+- `docs/AI_HANDOFF.md` — current architecture, project decisions, production
+  status and source-of-truth boundaries.
 - `docs/AGENTS.md` — AI agent and coding rules.
+- `docs/SERVER_RUNBOOK.md` — safe Windows deployment and SQLite rollback.
+- `docs/DATA_IMPORT_GUARDRAILS.md` — RNMC/TKP/Excel provenance, strict QA and
+  regression matrix.
 - `docs/DOMAIN_RULES.md` — business rules extracted from VBA and accepted
   product decisions.
 - `docs/MVP.md` — current MVP scope.
 - `docs/ROADMAP.md` — completed milestones and next work.
 - `docs/RNMC_IMPORT.md` — RNMC ZIP/File_Log import workflow.
 - `docs/OPEN_ITEMS.md` — deliberately deferred decisions and follow-ups.
+- `docs/ARCHITECTURE.md` — module and SQLite data-flow map.
+- `docs/DECISIONS.md` — explicit and pending architectural/domain decisions.
+- `docs/RELEASE_CHECKLIST.md` — development, review, deploy and rollback gates.
+- `docs/README.md` — navigation by task.
+- `docs/GITHUB_SYNC.md` — review-safe procedure for publishing the documentation to `feature/admin-ui`.
+
+**Documentation snapshot, not a published GitHub change:** these files were
+prepared from the user-provided project ZIP; they must be reconciled with
+any newer `feature/admin-ui` commits before a normal Git commit/PR.
+The SQLite figures in the handoff describe the **2026-10-27** server verification,
+not a live connection to production.
 
 ### Single Excel RNMC upload
 

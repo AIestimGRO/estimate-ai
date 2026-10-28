@@ -1,16 +1,21 @@
-# Project Rule
+# Estimate AI Project Rule (updated 2026-10-28)
 
-Before doing anything, read docs/AGENTS.md, docs/DOMAIN_RULES.md and
-docs/MVP.md in this repo. Treat them as binding instructions, not background.
+Before starting, read root AGENTS.md, docs/AI_HANDOFF.md, docs/AGENTS.md,
+docs/DOMAIN_RULES.md and the relevant workflow document.
 
-This project is currently Phase 0: a local Python library that ports
-existing VBA macro logic (see reference/vba_original/, original source,
-read-only) for construction price matching into tested code. No web
-server, no database, no Docker — see docs/MVP.md for exact scope and
-porting order.
+This is NOT the old Phase 0 local-only VBA port. The supplied source ZIP
+contains a deterministic Python matching core, SQLite catalog, FastAPI web
+service, RNMC/TKP imports and admin UI. Do not scaffold these anew.
 
-Never invent construction pricing rules or prices. docs/DOMAIN_RULES.md
-was extracted from real working macros, not designed speculatively — if a
-rule there seems unclear or wrong, ask rather than guessing or "improving"
-it silently. When porting a function, check reference/vba_original/ for
-exact original behavior if DOMAIN_RULES.md is ambiguous.
+Source of truth: latest user-uploaded project ZIP. Canonical GitHub repository
+AIestimGRO/estimate-ai, working branch feature/admin-ui, may be verified when
+needed but is not automatically the user's current code snapshot.
+
+Never invent prices or silently alter VBA-derived business rules. Before and
+after code/documentation edits run python -m pytest -q. Preserve unrelated
+files and return a ZIP, not a patch. Never include production DBs, backups,
+private keys, logs or client source workbooks in source delivery.
+
+The Windows production deployment differs from local development: see
+docs/SERVER_RUNBOOK.md and docs/DATA_IMPORT_GUARDRAILS.md. Use backups and
+staged verification; never overwrite SQLite while web service is running.

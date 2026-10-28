@@ -1,3 +1,9 @@
+> **Historical VBA-derived contract (rechecked 2026-10-28).** Preserve the
+> original macros in `reference/vba_original/` and add regression coverage
+> for any intentional deviation. This document describes domain logic; it
+> does not prove a particular administrative workflow or new TKP import is
+> already implemented. See `AI_HANDOFF.md` for current behavior and risks.
+
 # Domain Rules
 
 > Status: extracted from the working VBA macro set (Module1–Module7),

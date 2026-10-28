@@ -1,13 +1,20 @@
-# Testing Rule
+# Estimate AI Testing Rule (2026-10-28)
 
-Every function in core/ must have a pytest test.
+Read `AGENTS.md`, `docs/AI_HANDOFF.md`, `docs/DOMAIN_RULES.md` and the
+relevant tests before making changes. Run `python -m pytest -q` on the
+user-provided project ZIP **before and after** every meaningful change,
+including a documentation-only release.
 
-Tests must use realistic examples — ideally derived from actual BOQ/macro
-fixture files in tests/fixtures/, not invented edge cases unless the real
-data doesn't cover something important.
+For bug fixes, first reproduce the failure with a test; then fix the root
+cause with the smallest safe change. Business-rule changes require realistic
+positive and negative tests, ideally anonymized from real workbooks.
 
-When fixing a bug: write a failing test that reproduces it first, then fix
-the code, then confirm the test passes.
+Do not weaken validation to make tests pass. Never invent prices or silently
+change historical VBA-derived behavior; keep RNMC live matching separate
+from TKP winner imports and experimental TKP shadow comparisons.
 
-Do not change matching or pricing logic without updating or adding tests
-that cover the change.
+The reference baseline for the supplied ZIP on 2026-10-28 was 362 passed,
+1 skipped. It is not an invariant or a substitute for rerunning tests.
+Always report exact test totals and files changed, and deliver a ZIP, not
+a patch. For database work also check PRAGMA integrity_check and
+foreign_key_check on isolated copies.

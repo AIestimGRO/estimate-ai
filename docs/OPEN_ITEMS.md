@@ -1,5 +1,35 @@
 # Open Items Backlog
 
+> **2026-10-28 priority note:** The old list below is primarily the July
+> backlog. For the current production handoff, see `AI_HANDOFF.md` and the
+> prioritized October block in `ROADMAP.md`. Do not assume a deferred feature
+> is still absent without inspecting the actual source and tests.
+
+## Newly confirmed operational/product follow-ups (October 2026)
+
+- **P0 — functional production smoke test:** verify new TKP task #6940345
+  appears in the admin catalog and can be selected in an actual estimate WA
+  run; the last check on 27.10 was HTTP 303 and `integrity_check=ok`, not an
+  end-to-end proof.
+- **P1 — KL winner parser layout:** original KL worksheets can place
+  participant groups with non-standard offsets; preserve the winner identity
+  and verify correct commercial unit price, not a reference or competitor
+  column. The 97-KL supplemental import was separately audited; it does not
+  prove the original UI parser handles all 156 files. Test problematic cases
+  #6940345 and #6941030 and failure modes.
+- **P1 — TKP equivalence threshold:** live lexical matching uses unit as a
+  score bonus, not strict acceptance; decide with user whether strict unit,
+  unit scale, technology and action checks should be required in live results.
+  Shadow gates are **not** currently equivalent to the live selection rules.
+- **P1 — runtime privacy:** explicitly safeguard `data/backups`,
+  `data/workspaces`, `runtime/logs`, `data/models` and production SQLite
+  from future zip delivery and Git commits; check source tree against live
+  `deploy/windows` files before packaging deployment changes.
+- **P2 — EKR unknown prefixes:** some GESN prefixes were unresolved in the
+  November 2026 analytical workbook. Do not invent EKR mappings; obtain
+  approved business rules and tests before extending `core/sections.py`.
+
+
 > Running list of things flagged during development that need a deliberate
 > decision or follow-up. The deterministic core, SQLite storage, web UI, admin
 > UI, and base RNMC ZIP import are implemented; see `docs/ROADMAP.md` and
@@ -94,10 +124,10 @@ Deferred robustness rules:
 
 ## Multi-source analogs — future phase
 
-Future product direction: beyond the historical RNMC catalog, analogs may later
-come from additional sources and appear in leading analog columns. This remains
-deferred until deterministic exact matching and RNMC import are proven on real
-files.
+Historical context: TKP is already an implemented optional second source;
+**additional source families beyond RNMC and TKP** remain future work. Any
+new source requires reviewed provenance, behavior and deterministic
+integration.
 
 Open decisions before building it:
 
