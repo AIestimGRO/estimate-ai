@@ -293,11 +293,11 @@ def test_tkp_toggle_writes_best_candidate_to_download(client, tmp_path, monkeypa
     workbook = load_workbook(BytesIO(download.content), data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=17).value == "1234567"
-        assert sheet.cell(row=7, column=18).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f"
-        assert sheet.cell(row=9, column=17).value == 100
-        assert sheet.cell(row=9, column=18).value == 200
-        assert sheet.cell(row=9, column=18).fill.start_color.rgb == "FFC6EFCE"
+        assert sheet.cell(row=7, column=20).value == "1234567"
+        assert sheet.cell(row=7, column=21).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f"
+        assert sheet.cell(row=9, column=20).value == 100
+        assert sheet.cell(row=9, column=21).value == 200
+        assert sheet.cell(row=9, column=21).fill.start_color.rgb == "FFC6EFCE"
     finally:
         workbook.close()
 
@@ -510,7 +510,7 @@ def test_full_run_applies_reason_colour_and_label_from_admin(client, monkeypatch
         sheet = workbook[ESTIMATE_TITLE]
         # header_row is 7 in the template fixture; t-1's analog column lands
         # at column 17 (see test_excel_writer.py fixtures for the same layout).
-        assert sheet.cell(row=9, column=17).fill.start_color.rgb == "FFE2EFDA"
-        assert sheet.cell(row=6, column=17).value == "\u0424\u041e\u0422"
+        assert sheet.cell(row=9, column=20).fill.start_color.rgb == "FFE2EFDA"
+        assert sheet.cell(row=6, column=20).value == "\u0424\u041e\u0422"
     finally:
         workbook.close()

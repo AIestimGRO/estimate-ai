@@ -294,3 +294,12 @@ a local cache-backed model and explicit failure when the model is unavailable.
 - Matching/pricing logic must remain deterministic and testable.
 - Port VBA behavior faithfully unless a change is explicitly decided.
 - Prefer zip bundles of updated files for handoff in this project.
+
+
+## 2026-10-28: WA price metrics
+
+- [x] Signed difference `(average - original) / original`.
+- [x] Dynamic minimum/maximum across positive RNMC and TKP winner/reserve analog prices.
+- [ ] Manually verify exported files on laptop before production deployment.
+
+See `docs/OUTPUT_METRICS.md`.

@@ -119,12 +119,12 @@ def test_writes_analogs_formula_kr_and_section(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=17).value == 100
-        assert sheet.cell(row=9, column=18).value == 120
-        assert sheet.cell(row=7, column=17).value == "task-1"
-        assert sheet.cell(row=7, column=18).value == "task-2"
+        assert sheet.cell(row=9, column=20).value == 100
+        assert sheet.cell(row=9, column=21).value == 120
+        assert sheet.cell(row=7, column=20).value == "task-1"
+        assert sheet.cell(row=7, column=21).value == "task-2"
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, T9:U9), F9))"
         )
         assert sheet.cell(row=9, column=14).value == CODE
         assert str(sheet.cell(row=9, column=15).value).endswith(KR_END)
@@ -245,20 +245,20 @@ def test_writes_one_tkp_candidate_block_and_includes_price_in_formula(tmp_path: 
     assert outcome.result.matched_row_count == 1
     assert outcome.result.tkp_matched_row_count == 1
     assert outcome.result.tkp_matched_analog_count == 1
-    assert outcome.write_report.tkp_start_column == 18
-    assert outcome.write_report.analog_start_column == 17
+    assert outcome.write_report.tkp_start_column == 21
+    assert outcome.write_report.analog_start_column == 20
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=17).value == "1234567"
-        assert sheet.cell(row=7, column=18).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f"
-        assert sheet.cell(row=9, column=17).value == 100
-        assert sheet.cell(row=9, column=18).value == 200
-        assert sheet.cell(row=9, column=18).fill.start_color.rgb == "FFC6EFCE"
-        assert sheet.cell(row=9, column=18).comment is not None
-        assert "TKP task: 1234567" in sheet.cell(row=9, column=18).comment.text
+        assert sheet.cell(row=7, column=20).value == "1234567"
+        assert sheet.cell(row=7, column=21).value == "\u0410\u043d\u0430\u043b\u043e\u0433 \u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u044f"
+        assert sheet.cell(row=9, column=20).value == 100
+        assert sheet.cell(row=9, column=21).value == 200
+        assert sheet.cell(row=9, column=21).fill.start_color.rgb == "FFC6EFCE"
+        assert sheet.cell(row=9, column=21).comment is not None
+        assert "TKP task: 1234567" in sheet.cell(row=9, column=21).comment.text
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, T9:U9), F9))"
         )
     finally:
         workbook.close()
@@ -314,29 +314,29 @@ def test_paired_tkp_cells_use_price_source_colours(tmp_path: Path) -> None:
     try:
         sheet = workbook[ESTIMATE_TITLE]
         # Winner-only TKP creates one green participant column.
-        assert sheet.cell(row=7, column=18).value == "Аналог победителя"
-        assert sheet.cell(row=9, column=18).fill.start_color.rgb == GREEN_RGB
-        assert sheet.cell(row=9, column=18).value == 200
+        assert sheet.cell(row=7, column=21).value == "Аналог победителя"
+        assert sheet.cell(row=9, column=21).fill.start_color.rgb == GREEN_RGB
+        assert sheet.cell(row=9, column=21).value == 200
 
         # Reserve-only TKP creates one light-blue participant column.
-        assert sheet.cell(row=7, column=20).value == "Аналог резервного победителя"
-        assert sheet.cell(row=9, column=20).fill.start_color.rgb == BLUE_RGB
-        assert sheet.cell(row=9, column=20).value == 210
+        assert sheet.cell(row=7, column=23).value == "Аналог резервного победителя"
+        assert sheet.cell(row=9, column=23).fill.start_color.rgb == BLUE_RGB
+        assert sheet.cell(row=9, column=23).value == 210
 
         # When both prices exist, winner is first and reserve is second.
-        assert sheet.cell(row=7, column=22).value == "Аналог победителя"
-        assert sheet.cell(row=7, column=23).value == "Аналог резервного победителя"
-        assert sheet.cell(row=9, column=22).fill.start_color.rgb == GREEN_RGB
-        assert sheet.cell(row=9, column=23).fill.start_color.rgb == BLUE_RGB
-        assert sheet.cell(row=9, column=22).value == 190
-        assert sheet.cell(row=9, column=23).value == 230
+        assert sheet.cell(row=7, column=25).value == "Аналог победителя"
+        assert sheet.cell(row=7, column=26).value == "Аналог резервного победителя"
+        assert sheet.cell(row=9, column=25).fill.start_color.rgb == GREEN_RGB
+        assert sheet.cell(row=9, column=26).fill.start_color.rgb == BLUE_RGB
+        assert sheet.cell(row=9, column=25).value == 190
+        assert sheet.cell(row=9, column=26).value == 230
 
         # Task 4567890 has no TKP match anywhere in the run, so no empty
         # grey TKP partner columns are created for it.
-        assert sheet.cell(row=7, column=24).value == "4567890"
-        assert sheet.cell(row=9, column=24).value == 130
-        assert sheet.cell(row=7, column=25).value is None
-        assert sheet.cell(row=9, column=25).fill.start_color.rgb != GREY_RGB
+        assert sheet.cell(row=7, column=27).value == "4567890"
+        assert sheet.cell(row=9, column=27).value == 130
+        assert sheet.cell(row=7, column=28).value is None
+        assert sheet.cell(row=9, column=28).fill.start_color.rgb != GREY_RGB
     finally:
         workbook.close()
 
@@ -379,8 +379,8 @@ def test_ratio_risk_colours_red_without_price_check_log_sheet(tmp_path: Path) ->
         assert "Price_Check_Log" not in workbook.sheetnames
 
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=17).fill.start_color.rgb == RED_RGB
-        assert sheet.cell(row=9, column=18).fill.start_color.rgb == RED_RGB
+        assert sheet.cell(row=9, column=20).fill.start_color.rgb == RED_RGB
+        assert sheet.cell(row=9, column=21).fill.start_color.rgb == RED_RGB
     finally:
         workbook.close()
 
@@ -409,7 +409,7 @@ def test_second_price_within_task_is_greyed(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=18).fill.start_color.rgb == GREY_RGB
+        assert sheet.cell(row=9, column=21).fill.start_color.rgb == GREY_RGB
     finally:
         workbook.close()
 
@@ -426,8 +426,8 @@ def test_regional_coefficient_by_label_scales_analogs(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=17).value == 150
-        assert sheet.cell(row=9, column=18).value == 180
+        assert sheet.cell(row=9, column=20).value == 150
+        assert sheet.cell(row=9, column=21).value == 180
     finally:
         workbook.close()
 
@@ -441,14 +441,14 @@ def test_average_column_inserted_when_neighbour_occupied(tmp_path: Path) -> None
 
     assert outcome.write_report.inserted_average_column is True
     assert outcome.write_report.average_column == 7
-    assert outcome.write_report.analog_start_column == 18
+    assert outcome.write_report.analog_start_column == 21
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=18).value == 100
-        assert sheet.cell(row=9, column=19).value == 120
+        assert sheet.cell(row=9, column=21).value == 100
+        assert sheet.cell(row=9, column=22).value == 120
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, R9:S9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, U9:V9), F9))"
         )
         assert sheet.cell(row=9, column=15).value == CODE
         assert str(sheet.cell(row=9, column=16).value).endswith(KR_END)
@@ -473,13 +473,13 @@ def test_detected_average_column_with_manual_number_is_reused(tmp_path: Path) ->
 
     assert outcome.write_report.inserted_average_column is False
     assert outcome.write_report.average_column == 7
-    assert outcome.write_report.analog_start_column == 17
+    assert outcome.write_report.analog_start_column == 20
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
         assert sheet.cell(row=7, column=7).value == AVERAGE_HEADER
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:Q9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, T9:T9), F9))"
         )
         assert sheet.cell(row=9, column=8).value is None
         assert sheet.cell(row=9, column=14).value == CODE
@@ -544,10 +544,10 @@ def test_analog_headers_include_task_number_and_region(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=17).value == "task-1"
-        assert sheet.cell(row=8, column=17).value == REGION_NAME
-        assert sheet.cell(row=7, column=18).value == "task-2"
-        assert sheet.cell(row=8, column=18).value == REGION_NAME
+        assert sheet.cell(row=7, column=20).value == "task-1"
+        assert sheet.cell(row=8, column=20).value == REGION_NAME
+        assert sheet.cell(row=7, column=21).value == "task-2"
+        assert sheet.cell(row=8, column=21).value == REGION_NAME
     finally:
         workbook.close()
 
@@ -576,9 +576,9 @@ def test_analog_columns_are_grouped_own_region_first_then_az(tmp_path: Path) -> 
         sheet = workbook[ESTIMATE_TITLE]
         # Own region (Тула) first, then the rest alphabetically: Кострома
         # before Якутия.
-        assert sheet.cell(row=7, column=17).value == "task-tula"
-        assert sheet.cell(row=7, column=18).value == "task-kostroma"
-        assert sheet.cell(row=7, column=19).value == "task-yakutia"
+        assert sheet.cell(row=7, column=20).value == "task-tula"
+        assert sheet.cell(row=7, column=21).value == "task-kostroma"
+        assert sheet.cell(row=7, column=22).value == "task-yakutia"
     finally:
         workbook.close()
 
@@ -628,10 +628,10 @@ def test_reprocessing_reuses_existing_average_formula_column(tmp_path: Path) -> 
         # and the analog block land at their normal columns, same as a
         # first-time run -- nothing got shifted right by a phantom insert.
         assert sheet.cell(row=9, column=7).value == (
-            "=MAX(F9, IFERROR(AVERAGE(F9, Q9:R9), F9))"
+            "=MAX(F9, IFERROR(AVERAGE(F9, T9:U9), F9))"
         )
-        assert sheet.cell(row=9, column=17).value == 100
-        assert sheet.cell(row=9, column=18).value == 120
+        assert sheet.cell(row=9, column=20).value == 100
+        assert sheet.cell(row=9, column=21).value == 120
     finally:
         workbook.close()
 
@@ -647,8 +647,8 @@ def test_task_color_list_tints_analog_column_blue(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=17).fill.start_color.rgb == BLUE_RGB
-        assert sheet.cell(row=9, column=18).fill.start_color.rgb != BLUE_RGB
+        assert sheet.cell(row=9, column=20).fill.start_color.rgb == BLUE_RGB
+        assert sheet.cell(row=9, column=21).fill.start_color.rgb != BLUE_RGB
     finally:
         workbook.close()
 
@@ -672,12 +672,12 @@ def test_task_reason_colours_analog_column_and_writes_label_above_header(tmp_pat
     try:
         sheet = workbook[ESTIMATE_TITLE]
         # header_row is 7 in this fixture -> analog column fill uses the FOT colour
-        assert sheet.cell(row=9, column=17).fill.start_color.rgb == "FFE2EFDA"
-        assert sheet.cell(row=9, column=18).fill.start_color.rgb != "FFE2EFDA"
+        assert sheet.cell(row=9, column=20).fill.start_color.rgb == "FFE2EFDA"
+        assert sheet.cell(row=9, column=21).fill.start_color.rgb != "FFE2EFDA"
         # the label sits directly above the task_id header cell (row 7 - 1 = 6)
-        assert sheet.cell(row=6, column=17).value == "\u0424\u041e\u0422"
-        assert sheet.cell(row=6, column=17).fill.start_color.rgb == "FFE2EFDA"
-        assert sheet.cell(row=6, column=18).value is None
+        assert sheet.cell(row=6, column=20).value == "\u0424\u041e\u0422"
+        assert sheet.cell(row=6, column=20).fill.start_color.rgb == "FFE2EFDA"
+        assert sheet.cell(row=6, column=21).value is None
     finally:
         workbook.close()
 
@@ -701,9 +701,9 @@ def test_marked_task_with_unregistered_reason_falls_back_to_legacy_colour(tmp_pa
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=9, column=17).fill.start_color.rgb == BLUE_RGB
+        assert sheet.cell(row=9, column=20).fill.start_color.rgb == BLUE_RGB
         # no matching reason -> no label written above the header
-        assert sheet.cell(row=6, column=17).value is None
+        assert sheet.cell(row=6, column=20).value is None
     finally:
         workbook.close()
 
@@ -746,9 +746,9 @@ def test_kr_and_section_use_dedicated_columns_with_real_headers(tmp_path: Path) 
         assert sheet.cell(row=data_row, column=14).value == CODE
         assert str(sheet.cell(row=data_row, column=15).value).endswith(KR_END)
         assert sheet.cell(row=data_row, column=16).value == "01"
-        assert sheet.cell(row=header_row, column=17).value == "5818383"
-        assert sheet.cell(row=header_row + 1, column=17).value == "\u042f\u043a\u0443\u0442\u0438\u044f"
-        assert sheet.cell(row=header_row, column=18).value == "4768644"
+        assert sheet.cell(row=header_row, column=20).value == "5818383"
+        assert sheet.cell(row=header_row + 1, column=20).value == "\u042f\u043a\u0443\u0442\u0438\u044f"
+        assert sheet.cell(row=header_row, column=21).value == "4768644"
     finally:
         workbook.close()
 
@@ -784,16 +784,16 @@ def test_kr_reuses_free_column_without_inserting(tmp_path: Path) -> None:
 
     outcome = run_and_write(catalog, estimate, tmp_path / "out.xlsx")
 
-    assert outcome.write_report.analog_start_column == 17
+    assert outcome.write_report.analog_start_column == 20
     workbook = load_workbook(tmp_path / "out.xlsx", data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
         assert sheet.cell(row=header_row, column=15).value == "/\u041a\u0420"
         assert sheet.cell(row=header_row, column=16).value == section_header
-        assert sheet.cell(row=header_row, column=17).value == "5818383"
+        assert sheet.cell(row=header_row, column=20).value == "5818383"
         assert str(sheet.cell(row=data_row, column=15).value).endswith(KR_END)
         assert sheet.cell(row=data_row, column=16).value == "01"
-        assert sheet.cell(row=data_row, column=17).value == 100
+        assert sheet.cell(row=data_row, column=20).value == 100
     finally:
         workbook.close()
 
@@ -805,9 +805,9 @@ def test_reprocessing_clears_stale_analog_columns(tmp_path: Path) -> None:
     workbook = load_workbook(estimate)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        sheet.cell(row=7, column=20).value = "stale-task"
-        sheet.cell(row=8, column=20).value = "stale-region"
-        sheet.cell(row=9, column=20).value = 999
+        sheet.cell(row=7, column=23).value = "stale-task"
+        sheet.cell(row=8, column=23).value = "stale-region"
+        sheet.cell(row=9, column=23).value = 999
         workbook.save(estimate)
     finally:
         workbook.close()
@@ -818,11 +818,11 @@ def test_reprocessing_clears_stale_analog_columns(tmp_path: Path) -> None:
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=17).value == "task-1"
-        assert sheet.cell(row=9, column=17).value == 100
-        assert sheet.cell(row=7, column=20).value is None
-        assert sheet.cell(row=8, column=20).value is None
-        assert sheet.cell(row=9, column=20).value is None
+        assert sheet.cell(row=7, column=20).value == "task-1"
+        assert sheet.cell(row=9, column=20).value == 100
+        assert sheet.cell(row=7, column=23).value is None
+        assert sheet.cell(row=8, column=23).value is None
+        assert sheet.cell(row=9, column=23).value is None
     finally:
         workbook.close()
 
@@ -850,9 +850,9 @@ def test_tkp_toggle_does_not_create_grey_columns_when_no_tkp_match_exists(tmp_pa
     workbook = load_workbook(output, data_only=False)
     try:
         sheet = workbook[ESTIMATE_TITLE]
-        assert sheet.cell(row=7, column=17).value == "1234567"
-        assert sheet.cell(row=7, column=18).value is None
-        assert sheet.cell(row=9, column=18).fill.start_color.rgb != GREY_RGB
+        assert sheet.cell(row=7, column=20).value == "1234567"
+        assert sheet.cell(row=7, column=21).value is None
+        assert sheet.cell(row=9, column=21).fill.start_color.rgb != GREY_RGB
     finally:
         workbook.close()
 

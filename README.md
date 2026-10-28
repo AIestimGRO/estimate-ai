@@ -15,6 +15,8 @@ and an admin UI for catalog/import/risk control.
 
 Implemented product flows:
 
+- Dynamic deviation %, minimum and maximum analog prices in exported WA Excel; see `docs/OUTPUT_METRICS.md`.
+
 - Upload an estimate file and produce a WA Excel result.
 - Use a catalog from SQLite or from an uploaded Excel file.
 - Review catalog rows and submit logged corrections for original/ZLVL unit
