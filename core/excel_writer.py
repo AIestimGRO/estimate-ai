@@ -15,13 +15,15 @@ layout (Step 4c) can be written correctly.
 
 import re
 from dataclasses import dataclass
+from copy import copy
 from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.comments import Comment
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import column_index_from_string, get_column_letter, range_boundaries
 from openpyxl.worksheet.worksheet import Worksheet
+from openpyxl.worksheet.dimensions import ColumnDimension
 
 from app.services.run_matching import EstimateRowResult, MatchingRunResult
 from core.excel_io import find_estimate_sheet
@@ -188,6 +190,9 @@ def write_run_result(
 
         header_row = _effective_header_row(layout_columns, row_numbers)
         _write_metric_headers(worksheet, header_row, output_columns)
+        total_columns = _find_average_total_columns(
+            worksheet, header_row, output_columns.section
+        )
         analog_start_column = output_columns.analog_start
         analog_plan = _build_global_analog_plan(
             result,
@@ -240,6 +245,9 @@ def write_run_result(
                 reasons,
             ):
                 written_rows += 1
+            _write_average_total_formula(
+                worksheet, row_number, output_columns.average, total_columns
+            )
 
         destination = Path(output_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -476,9 +484,78 @@ def _write_metric_headers(worksheet: Worksheet, header_row: int, columns: _Outpu
         cell.value = label
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
+        cell.alignment = Alignment(
+            horizontal="center", vertical="center", wrap_text=True
+        )
+        _set_metric_column_width(
+            worksheet, column, 20 if column == columns.deviation else 23
+        )
         worksheet.cell(row=header_row + 1, column=column).value = None
         if header_row > 1:
             worksheet.cell(row=header_row - 1, column=column).value = None
+
+
+def _set_metric_column_width(
+    worksheet: Worksheet, column: int, minimum_width: float
+) -> None:
+    """Split shared width ranges so only the metric column is enlarged."""
+    letter = get_column_letter(column)
+    dimension = worksheet.column_dimensions.get(letter)
+    if dimension is not None and dimension.max is not None and dimension.max > column:
+        old_max = dimension.max
+        next_letter = get_column_letter(column + 1)
+        tail = copy(dimension)
+        tail.index = next_letter
+        tail.min = column + 1
+        tail.max = old_max
+        if next_letter not in worksheet.column_dimensions:
+            worksheet.column_dimensions[next_letter] = tail
+        dimension.min = column
+        dimension.max = column
+    elif dimension is None:
+        dimension = ColumnDimension(worksheet, index=letter, min=column, max=column)
+        worksheet.column_dimensions[letter] = dimension
+    dimension.width = max(dimension.width or 8.43, minimum_width)
+
+
+def _find_average_total_columns(
+    worksheet: Worksheet, header_row: int, section_column: int | None,
+) -> tuple[int, int] | None:
+    """Resolve quantity and average total by headers, never by assumed letters."""
+    if header_row <= 0:
+        return None
+    quantity_column = None
+    total_column = None
+    last = section_column or min(worksheet.max_column, 24)
+    for column in range(1, last + 1):
+        title = _normalize_header_text(
+            worksheet.cell(row=header_row, column=column).value
+        )
+        if title in {"кол-во", "кол во", "количество", "объем", "объём"}:
+            quantity_column = column
+        elif "стоимость средняя" in title or title.startswith("средняя стоимость"):
+            total_column = column
+    if quantity_column is None or total_column is None:
+        return None
+    return quantity_column, total_column
+
+
+def _write_average_total_formula(
+    worksheet: Worksheet, row_number: int, average_column: int,
+    total_columns: tuple[int, int] | None,
+) -> None:
+    """I = average unit price times quantity, blank for invalid inputs."""
+    if total_columns is None:
+        return
+    quantity_column, total_column = total_columns
+    quantity = f"{get_column_letter(quantity_column)}{row_number}"
+    average = f"{get_column_letter(average_column)}{row_number}"
+    cell = worksheet.cell(row=row_number, column=total_column)
+    cell.value = (
+        f'=IFERROR(IF(AND(ISNUMBER({quantity}),ISNUMBER({average})),'
+        f'{quantity}*{average},""),"")'
+    )
+    cell.number_format = PRICE_NUMBER_FORMAT
 
 
 def _extend_auto_filter(worksheet: Worksheet, last_output_column: int) -> None:
