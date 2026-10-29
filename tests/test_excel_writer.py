@@ -890,3 +890,75 @@ def test_column_insert_preserves_external_sheet_formula_references(tmp_path: Pat
         assert workbook["Дефлятор"].cell(row=12, column=19).value == 1.25
     finally:
         workbook.close()
+
+
+def test_average_total_is_quantity_times_average_and_reprocesses(tmp_path: Path) -> None:
+    """WA template: the total-cost column contains a live Excel formula."""
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    workbook = load_workbook(estimate)
+    sheet = workbook[ESTIMATE_TITLE]
+    sheet["E7"] = "Кол-во"
+    sheet["I7"] = "Стоимость средняя"
+    sheet["E9"] = 4.5
+    workbook.save(estimate)
+    workbook.close()
+
+    first = tmp_path / "first.xlsx"
+    run_and_write(catalog, estimate, first)
+    workbook = load_workbook(first)
+    assert workbook[ESTIMATE_TITLE]["I9"].value == (
+        '=IFERROR(IF(AND(ISNUMBER(E9),ISNUMBER(G9)),E9*G9,""),"")'
+    )
+    assert workbook[ESTIMATE_TITLE]["I9"].number_format == "#,##0.00"
+    workbook.close()
+
+    repeated = tmp_path / "repeated.xlsx"
+    result = run_and_write(catalog, first, repeated)
+    assert result.write_report.analog_start_column == 20
+    workbook = load_workbook(repeated)
+    assert workbook[ESTIMATE_TITLE]["I9"].value == (
+        '=IFERROR(IF(AND(ISNUMBER(E9),ISNUMBER(G9)),E9*G9,""),"")'
+    )
+    workbook.close()
+
+
+def test_average_total_does_not_overwrite_unknown_layout(tmp_path: Path) -> None:
+    """Non-standard templates without headers must keep the existing I value."""
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    workbook = load_workbook(estimate)
+    workbook[ESTIMATE_TITLE]["I9"] = "preserve"
+    workbook.save(estimate)
+    workbook.close()
+    output = tmp_path / "out.xlsx"
+    run_and_write(catalog, estimate, output)
+    workbook = load_workbook(output)
+    assert workbook[ESTIMATE_TITLE]["I9"].value == "preserve"
+    workbook.close()
+
+
+def test_metric_column_widths_do_not_widen_analog_block(tmp_path: Path) -> None:
+    """R:XFD in a source template must not make all analog columns huge."""
+    from openpyxl.worksheet.dimensions import ColumnDimension
+
+    catalog = _make_catalog_file(tmp_path / "catalog.xlsx", [("task-1", 100)])
+    estimate = _make_estimate_file(tmp_path / "estimate.xlsx")
+    workbook = load_workbook(estimate)
+    sheet = workbook[ESTIMATE_TITLE]
+    sheet.column_dimensions["R"] = ColumnDimension(
+        sheet, index="R", min=18, max=16384, width=9.14
+    )
+    workbook.save(estimate)
+    workbook.close()
+
+    output = tmp_path / "out.xlsx"
+    run_and_write(catalog, estimate, output)
+    workbook = load_workbook(output)
+    sheet = workbook[ESTIMATE_TITLE]
+    assert sheet.column_dimensions["Q"].width >= 20
+    assert sheet.column_dimensions["R"].width >= 23
+    assert sheet.column_dimensions["S"].width >= 23
+    assert sheet.column_dimensions["T"].width == 9.14
+    assert sheet["Q7"].alignment.wrap_text is True
+    workbook.close()
