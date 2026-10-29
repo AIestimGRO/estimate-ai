@@ -11,6 +11,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from app.services.postprocessing import build_postprocessed_workbook, resolve_preview_row_values
+from app.services.preview_metrics import resolve_generated_preview_values
 from core.storage.accounts import (
     ROLE_ADMIN,
     ROLE_SPECIALIST,
@@ -294,6 +295,9 @@ def install_workspace_routes(app: FastAPI) -> None:
             rows = list_processing_rows(connection, job.id)
             preview_values = resolve_preview_row_values(job, rows)
             overrides = list_cell_overrides(connection, job.id)
+            preview_values = resolve_generated_preview_values(
+                job.column_schema, rows, preview_values, overrides
+            )
             all_requests = list_change_requests(
                 connection,
                 submitted_by=None if user.role == ROLE_ADMIN else user.id,
@@ -1379,6 +1383,7 @@ let flushing=false;
 async function flushQueue() {{
   if (flushing || !navigator.onLine || !state.queue.length) {{ updateSaveState(); return; }}
   flushing=true; updateSaveState();
+  let savedThisRound=false;
   try {{
     while (navigator.onLine && state.queue.length) {{
       const item=state.queue[0];
@@ -1393,6 +1398,20 @@ async function flushQueue() {{
       if (JSON.stringify(data.override.current_value) === JSON.stringify(data.override.original_value)) state.changed.delete(editKey);
       else state.changed.add(editKey);
       state.queue.shift(); saveQueue();
+      savedThisRound=true;
+    }}
+    // Re-read calculated display values from the server after a saved edit.
+    // The workbook and its persisted formula text stay unchanged.
+    if (savedThisRound && !state.queue.length) {{
+      const updated=await fetch('/api/jobs/'+JOB_ID+'/grid', {{cache:'no-store'}});
+      if (updated.ok) {{
+        const payload=await updated.json();
+        const byId=new Map((payload.rows||[]).map(item=>[item.id,item]));
+        state.baseRows.forEach(row=>{{
+          const latest=byId.get(row.id);
+          if (latest) row.values=latest.values;
+        }});
+      }}
     }}
   }} catch (_) {{
     updateSaveState();

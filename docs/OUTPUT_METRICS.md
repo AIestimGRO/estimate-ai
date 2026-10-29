@@ -23,3 +23,8 @@ Regression: check standard formula serialization, both extrema use identical sou
 and deletion of candidate prices. Then manually process the original WA workbook on the laptop.
 For row 36 verify R36 shows the lowest price, and deleting that candidate selects the next lowest.
 Do not deploy any code to the ololosh production server before explicit manual acceptance.
+
+
+## Browser preview numeric values (2026-10-29)
+
+The saved workbook stores dynamic Excel formulas for average total I, deviation Q, minimum R and maximum S. Persisted processing rows preserve original formulas for export, but the browser grid API now calculates **display-only numeric values** for these four metrics. After manually updating/removing an analog price, the server calculates the edited row's average unit price with the existing MAX/AVERAGE rule and updates dependent I/Q/R/S preview values. Existing saved jobs also benefit without reprocessing the original workbook. Grid reloads these computed results after successful edits; the Excel download and persistent formulas remain unchanged. Only known writer formulas are evaluated (no general Excel formula execution).
