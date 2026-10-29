@@ -21,3 +21,7 @@ Before releasing to production: run `python -m pytest -q`, check GitHub CI, expo
 - Output metric headers wrap and have a reasonable width without changing the width of the analog columns.
 - Formula cells have no cached values until recalculated by Excel. The workbook requests an automatic full recalc.
 - The existing mean-price rule `MAX(original, AVERAGE(original, candidates))` is intentionally unchanged. Because the average is floored at the original, the signed percentage may be 0 when every found candidate is cheaper.
+
+## 2026-10-29: R minimum-price fix
+
+In the reviewed WA workbook, R36 was blank despite positive numeric analog prices in T36:BM36 (minimum 1597.32). The generated XLSX stored `AGGREGATE` without the OOXML `_xlfn.` prefix. Excel can interpret this as a #NAME? error, hidden by IFERROR, resulting in a visually blank cell. The generator now uses `_xlfn.AGGREGATE`; regression checks the actual saved worksheet XML. The formula remains dynamic and ignores zero/negative prices. The newly introduced I calculation and the existing G average-price rule are unchanged.

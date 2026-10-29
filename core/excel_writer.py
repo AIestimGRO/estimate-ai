@@ -1086,7 +1086,9 @@ def _write_metric_formulas(
         first = f"{get_column_letter(columns.analog_start)}{row_number}"
         last = f"{get_column_letter(plan.last_column)}{row_number}"
         prices = f"{first}:{last}"
-        minimum.value = f'=IFERROR(AGGREGATE(15,6,{prices}/({prices}>0),1),"")'
+        # In OOXML, AGGREGATE requires _xlfn.; without it Excel can
+        # produce #NAME?, silently hidden by the surrounding IFERROR.
+        minimum.value = f'=IFERROR(_xlfn.AGGREGATE(15,6,{prices}/({prices}>0),1),"")'
         maximum.value = f'=IF(COUNTIF({prices},">0")=0,"",MAX({prices}))'
     minimum.number_format = PRICE_NUMBER_FORMAT
     maximum.number_format = PRICE_NUMBER_FORMAT

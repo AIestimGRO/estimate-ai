@@ -43,7 +43,7 @@ def test_dynamic_formulas_cover_rnmc_and_paired_tkp_columns():
     _write_metric_formulas(sheet, 9, _columns(), _plan(23))
     assert sheet["Q9"].value == '=IFERROR(IF(OR(NOT(ISNUMBER(F9)),F9=0),"",(G9-F9)/F9),"")'
     assert sheet["Q9"].number_format == "+0.00%;-0.00%;0.00%"
-    assert sheet["R9"].value == '=IFERROR(AGGREGATE(15,6,T9:W9/(T9:W9>0),1),"")'
+    assert sheet["R9"].value == '=IFERROR(_xlfn.AGGREGATE(15,6,T9:W9/(T9:W9>0),1),"")'
     assert sheet["S9"].value == '=IF(COUNTIF(T9:W9,">0")=0,"",MAX(T9:W9))'
 
 
@@ -52,3 +52,21 @@ def test_price_metrics_blank_without_candidates():
     _write_metric_formulas(sheet, 9, _columns(), _plan(19))
     assert sheet["R9"].value is None
     assert sheet["S9"].value is None
+
+
+
+def test_minimum_formula_in_xlsx_uses_xlfn_prefix(tmp_path):
+    """Excel requires the OOXML future-function prefix for AGGREGATE."""
+    from zipfile import ZipFile
+
+    workbook = Workbook()
+    sheet = workbook.active
+    _write_metric_formulas(sheet, 9, _columns(), _plan(23))
+    path = tmp_path / "metrics.xlsx"
+    workbook.save(path)
+    workbook.close()
+
+    with ZipFile(path) as archive:
+        sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert "_xlfn.AGGREGATE(15,6," in sheet_xml
+    assert "IFERROR(AGGREGATE(" not in sheet_xml
