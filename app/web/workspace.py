@@ -1035,6 +1035,15 @@ function asText(value) {{
   return String(value);
 }}
 function rawText(value) {{ return value === null || value === undefined ? '' : String(value); }}
+function displayText(value, column) {{
+  if (typeof value === 'number' && /^Отклонение средней/i.test(column.label || '')) {{
+    return new Intl.NumberFormat('ru-RU', {{
+      style:'percent', minimumFractionDigits:2, maximumFractionDigits:2,
+      signDisplay:'exceptZero'
+    }}).format(value);
+  }}
+  return asText(value);
+}}
 function cellValue(row, column) {{ return row.values[column.index - 1]; }}
 function setCellValue(rowId, columnIndex, value) {{
   const row = state.rows.find(item => item.id === rowId);
@@ -1316,7 +1325,7 @@ function makeRow(row, columns, rowHeight) {{
     const cellText = document.createElement('div');
     cellText.className = 'cell-text';
     cellText.style.maxHeight = Math.max(18, rowHeight - 12) + 'px';
-    cellText.textContent = asText(cellValue(row,column));
+    cellText.textContent = displayText(cellValue(row,column),column);
     td.appendChild(cellText);
     const savedOverride=state.overrides.get(k);
     td.title = savedOverride
