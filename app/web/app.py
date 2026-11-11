@@ -34,6 +34,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
+from app.web.grand_routes import install_grand_routes
 from app.services.catalog_source import CatalogNotAvailableError, database_has_catalog
 from app.services.read_estimate import (
     EstimateReadError,
@@ -263,6 +264,12 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
     app = FastAPI(title="Estimate AI", docs_url=None, redoc_url=None)
     app.state.app_state = AppState(base_dir=resolved_base)
     install_workspace_routes(app)
+    install_grand_routes(
+        app, record_type=UploadRecord, preview=_preview,
+        db_path=default_database_path, db_available=database_has_catalog,
+        access_allowed=_upload_record_access_allowed,
+        max_upload_bytes=MAX_UPLOAD_BYTES, xlsx_mime=XLSX_MIME,
+    )
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
