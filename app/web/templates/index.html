@@ -20,6 +20,15 @@
       </label>
       <button type="submit">Далее</button>
     </form>
+    <hr style="margin:26px 0;border:0;border-top:1px solid #ddd">
+    <h2>Загрузка из ГРАНД-Сметы</h2>
+    <p class="muted">Загрузите GSFX, отредактируйте исходную ОС, скачайте Excel или продолжите к подбору аналогов.</p>
+    <form method="post" action="/grand/import" enctype="multipart/form-data">
+      <label>Файл ГРАНД-Сметы (.gsfx)
+        <input type="file" name="estimate" accept=".gsfx" required>
+      </label>
+      <button type="submit">Сформировать ОС</button>
+    </form>
     $message
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <a class="back" href="/jobs">Мои обработки</a>
