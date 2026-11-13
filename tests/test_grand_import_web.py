@@ -1,10 +1,22 @@
 """GSFX upload/edit/export and position 163 regression checks."""
 from io import BytesIO
+import pytest
 from zipfile import ZipFile
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from app.web.app import create_app
 from app.services.read_estimate import load_estimate
+
+@pytest.fixture(autouse=True)
+def isolated_auth_database(tmp_path, monkeypatch):
+    """Never consult or migrate a real installation's authentication database.
+
+    Production has users, which means guest requests redirect to /login.
+    These unauthenticated feature tests intentionally use an isolated empty
+    database, matching the established tests/test_web.py fixture.
+    """
+    monkeypatch.setenv("ESTIMATE_AI_DB_PATH", str(tmp_path / "test_auth.sqlite"))
+
 
 XML = '''<Document Generator="GrandSmeta"><Properties LocNum="L-1"/><Chapters>
 <Chapter Caption="Раздел"><Position Number="163" SysID="abc" Code="43-1"
@@ -130,3 +142,60 @@ def test_grand_review_requires_explicit_confirmation(tmp_path, monkeypatch):
         attempted = client.post('/grand/preview', data=data)
         assert attempted.status_code == 422
         assert 'База аналогов в SQLite не загружена' in attempted.text
+
+def test_grand_authentication_and_cross_user_draft_access(tmp_path):
+    """Real auth guard stays enabled; users must not read each other's drafts."""
+    from core.storage.accounts import ROLE_SPECIALIST, create_session, create_user
+    from core.storage.connection import connect, init_database
+    from app.web.workspace import SESSION_COOKIE
+
+    connection = connect(tmp_path / "test_auth.sqlite")
+    try:
+        init_database(connection)
+        first_id = create_user(
+            connection,
+            full_name="GSFX User One",
+            login="gsfx.one",
+            password="gsfx-test-one",
+            role=ROLE_SPECIALIST,
+        )
+        second_id = create_user(
+            connection,
+            full_name="GSFX User Two",
+            login="gsfx.two",
+            password="gsfx-test-two",
+            role=ROLE_SPECIALIST,
+        )
+        first_session = create_session(connection, first_id)
+        second_session = create_session(connection, second_id)
+    finally:
+        connection.close()
+
+    with TestClient(create_app(base_dir=tmp_path / "auth_uploads")) as client:
+        guest = client.post(
+            "/grand/import",
+            files={"estimate": ("sample.gsfx", _gsfx())},
+            follow_redirects=False,
+        )
+        assert guest.status_code == 303
+        assert guest.headers["location"].startswith("/login")
+
+        client.cookies.set(SESSION_COOKIE, first_session)
+        imported = client.post(
+            "/grand/import",
+            files={"estimate": ("sample.gsfx", _gsfx())},
+        )
+        assert imported.status_code == 200
+        token = next(iter(client.app.state.app_state.grand_drafts))
+        assert client.get("/grand/preview", params={"token": token}).status_code == 200
+
+        client.cookies.set(SESSION_COOKIE, second_session)
+        assert client.get("/grand/preview", params={"token": token}).status_code == 403
+        attempt = client.post(
+            "/grand/preview",
+            data={"token": token, "action": "xlsx"},
+        )
+        assert attempt.status_code == 403
+
+        client.cookies.set(SESSION_COOKIE, first_session)
+        assert client.get("/grand/preview", params={"token": token}).status_code == 200
