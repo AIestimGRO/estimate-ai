@@ -58,8 +58,8 @@ def test_grand_upload_preview_edit_export_and_normal_reader(tmp_path):
         assert parsed.positioned_rows[0][1].code == '43-1'
         assert parsed.positioned_rows[0][1].base_price == 103.54
         wb = load_workbook(path, data_only=True)
-        assert wb.active['E2'].value == 1225
-        assert wb.active['G2'].value == '163'
+        assert wb.active['E29'].value == 1225
+        assert wb.active['B29'].value == '163'
         wb.close()
 
 def test_bad_gsfx_and_add_row(tmp_path):
@@ -94,7 +94,7 @@ def test_grand_import_normalizes_from_analog_db_not_tkp_and_exports_trace(tmp_pa
     with TestClient(create_app(base_dir=tmp_path / 'sessions')) as client:
         response = client.post('/grand/import', files={'estimate': ('grand.gsfx', _gsfx())})
         assert response.status_code == 200
-        assert 'Источник нормализации — только база аналогов (main)' in response.text
+        assert 'Нормализация: только база аналогов (main)' in response.text
         token = next(iter(client.app.state.app_state.grand_drafts))
         rows = client.app.state.app_state.grand_drafts[token]['rows']
         assert rows[0]['unit'] == 'т'
@@ -107,9 +107,9 @@ def test_grand_import_normalizes_from_analog_db_not_tkp_and_exports_trace(tmp_pa
         path = tmp_path / 'normalized.xlsx'
         path.write_bytes(output.content)
         wb = load_workbook(path, data_only=True)
-        assert wb.active['C2'].value == 'т'
-        assert wb.active['D2'].value == 103.54
-        assert wb.active['K2'].value == '1т груза'
+        assert wb.active['D29'].value == 'т'
+        assert wb.active['F29'].value == 103.54
+        assert wb['Сверка с GSFX']['D2'].value == '1т груза'
         wb.close()
         assert len(load_estimate(path).positioned_rows) == 2
     assert db_path.read_bytes() == old
@@ -199,3 +199,83 @@ def test_grand_authentication_and_cross_user_draft_access(tmp_path):
 
         client.cookies.set(SESSION_COOKIE, first_session)
         assert client.get("/grand/preview", params={"token": token}).status_code == 200
+
+
+def _rim_report_bytes():
+    """A realistic filled RIM form: header at 27, data from 29."""
+    from openpyxl import Workbook
+    output = BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws["B27"] = "№ п/п в смете"
+    ws["F27"] = "Цена единицы работ, руб. без НДС"
+    for line,number,code,name,quantity,price in (
+        (29,163,"43-1","Погрузка в автотранспортное средство",1225,103.54),
+        (30,164,"02-15-1","Перевозка",1225,900.82),
+    ):
+        ws.cell(line,2,number)
+        ws.cell(line,3,name)
+        ws.cell(line,4,'т')
+        ws.cell(line,5,quantity)
+        ws.cell(line,6,price)
+        ws.cell(line,8,quantity*price)
+        ws.cell(line,14,code)
+    wb.save(output)
+    wb.close()
+    return output.getvalue()
+
+
+def test_grand_with_filled_rim_has_prices_and_original_os_columns(tmp_path):
+    with TestClient(create_app(base_dir=tmp_path / "grand_session")) as client:
+        incoming = client.post("/grand/import",files={
+            "estimate": ("sample.gsfx", _gsfx()),
+            "rim_export": ("sample_RIM.xlsx", _rim_report_bytes()),
+        })
+        assert incoming.status_code == 200
+        assert "Сверка с заполненным отчётом РИМ" in incoming.text
+        token = next(iter(client.app.state.app_state.grand_drafts))
+        draft = client.app.state.app_state.grand_drafts[token]
+        assert [r["price"] for r in draft["rows"]] == ["103.54", "900.82"]
+        data = _form(token, draft["rows"],price="103,54")
+        # Preserve both individual RIM prices (form helper is for manual edits).
+        for i, row in enumerate(draft["rows"]):
+            data[f"price_{i}"] = row["price"]
+        data["task_number"] = "7122412"
+        data["object_name"] = "Тестовый объект"
+        out = client.post("/grand/preview",data=data)
+        assert out.status_code == 200
+        target = tmp_path / "filled.xlsx"
+        target.write_bytes(out.content)
+        from core.ooxml_preservation import validate_workbook_package
+        validate_workbook_package(target)
+        wb = load_workbook(target)
+        ws = wb["ОС ГРАНД"]
+        assert ws["C27"].value == "Наименование работ"
+        assert ws["N27"].value == "Перечень ГЭСН/ФЕР/ТЕР"
+        assert ws["O27"].value == "/КР"
+        assert ws["P27"].value == "Код раздела"
+        assert ws["N29"].value == "43-1"
+        assert ws["O29"].value == "43-1"
+        assert ws["F29"].value == 103.54
+        assert ws["F30"].value == 900.82
+        assert ws["M9"].value == "№ задачи: 7122412"
+        assert "Тестовый объект" in ws["B16"].value
+        assert "Сверка с GSFX" in wb.sheetnames
+        wb.close()
+        assert len(load_estimate(target).positioned_rows) == 2
+
+
+def test_rim_report_different_estimate_is_rejected(tmp_path):
+    with TestClient(create_app(base_dir=tmp_path / "bad_rim")) as client:
+        from openpyxl import load_workbook
+        wb = load_workbook(BytesIO(_rim_report_bytes()))
+        wb.active["N29"] = "FOREIGN-CODE"
+        buf = BytesIO()
+        wb.save(buf)
+        wb.close()
+        result = client.post("/grand/import",files={
+            "estimate": ("sample.gsfx",_gsfx()),
+            "rim_export": ("unrelated.xlsx",buf.getvalue()),
+        })
+        assert result.status_code == 422
+        assert "Сверка GSFX и РИМ" in result.text

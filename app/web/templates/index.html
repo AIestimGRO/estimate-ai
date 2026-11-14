@@ -27,6 +27,10 @@
       <label>Файл ГРАНД-Сметы (.gsfx)
         <input type="file" name="estimate" accept=".gsfx" required>
       </label>
+      <label>Заполненный отчёт РИМ из ГРАНД-Сметы (.xlsx) — для автоматического получения рассчитанных цен
+        <input type="file" name="rim_export" accept=".xlsx">
+      </label>
+      <p class="muted">Без рассчитанного отчёта цены остаются пустыми: база аналогов и ресурсы GSFX не подменяют исходный расчёт ГРАНД-Сметы.</p>
       <button type="submit">Сформировать ОС</button>
     </form>
     $message
