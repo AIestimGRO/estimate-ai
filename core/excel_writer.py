@@ -35,7 +35,7 @@ from core.exclusions import (
     resolve_task_highlight,
 )
 from core.layout import resolve_average_placement
-from core.ooxml_preservation import preserve_workbook_package_features
+from core.ooxml_preservation import preserve_workbook_package_features, validate_workbook_package
 from core.risk import REASON_RATIO_EXCEEDED
 from core.sections import (
     SECTION_SOURCE_MANUAL,
@@ -258,6 +258,7 @@ def write_run_result(
             destination,
             modified_sheet_title=worksheet.title,
         )
+        validate_workbook_package(destination)
     finally:
         workbook.close()
 
@@ -459,6 +460,13 @@ def _ensure_kr_and_section_columns(
 
     for column, label in pending_headers:
         _write_output_header(worksheet, header_row, column, label)
+
+    # Legacy RIM forms combine the GESN code and /KR in a column title.
+    # Once the dedicated KR column exists, N keeps the source code only.
+    if header_row > 0:
+        source_header = worksheet.cell(row=header_row, column=code_col)
+        if "ГЭСН/ФЕР/ТЕР/КР" in str(source_header.value or ""):
+            source_header.value = "Перечень ГЭСН/ФЕР/ТЕР"
 
     analog_start = section_col + 1 + OUTPUT_METRIC_COLUMN_COUNT
     return WriterColumns(

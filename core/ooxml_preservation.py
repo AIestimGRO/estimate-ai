@@ -53,6 +53,12 @@ def preserve_workbook_package_features(
 
     with ZipFile(source) as source_zip, ZipFile(output) as output_zip:
         source_names = set(source_zip.namelist())
+        # A normal XLSX does not contain unsupported drawings, EMF/WMF,
+        # printer settings or embedded objects. Repackaging a plain workbook
+        # needlessly mixes original worksheet XML with openpyxl's new strings
+        # and can trigger Excel's "repair" dialog. Keep its native save.
+        if not any(name.startswith(PRESERVED_PART_PREFIXES) for name in source_names):
+            return
         output_names = set(output_zip.namelist())
         source_sheets = _sheet_parts(source_zip)
         output_sheets = _sheet_parts(output_zip)
@@ -388,3 +394,37 @@ def _rewrite_archive(
         temporary_path.replace(output_path)
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+def validate_workbook_package(path: str | Path) -> None:
+    """Validate OOXML ZIP integrity, XML parts and internal relationships."""
+    with ZipFile(path) as archive:
+        names = archive.namelist()
+        present = set(names)
+        if len(names) != len(present):
+            raise ValueError('Повторяющиеся элементы внутри XLSX')
+        bad = archive.testzip()
+        if bad:
+            raise ValueError(f'Повреждённый ZIP-элемент XLSX: {bad}')
+        for name in names:
+            if not name.endswith(('.xml', '.rels')):
+                continue
+            try:
+                root = ET.fromstring(archive.read(name))
+            except ET.ParseError as exc:
+                raise ValueError(f'Некорректный XML в XLSX: {name}') from exc
+            if not name.endswith('.rels'):
+                continue
+            path_obj = PurePosixPath(name)
+            parent = '' if name == '_rels/.rels' else str(path_obj.parent.parent / path_obj.name.removesuffix('.rels'))
+            ids = set()
+            for rel in root:
+                rid = rel.attrib.get('Id')
+                if not rid or rid in ids:
+                    raise ValueError(f'Некорректный идентификатор связи: {name}')
+                ids.add(rid)
+                if rel.attrib.get('TargetMode', '').lower() == 'external':
+                    continue
+                target = rel.attrib.get('Target', '')
+                if not target or _resolve_part(parent, target.split('#',1)[0]) not in present:
+                    raise ValueError(f'Недостающая часть XLSX: {name} -> {target}')
