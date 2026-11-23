@@ -138,7 +138,10 @@ def evaluate_lsr_pair(os_path: Path, gsfx_path: Path, *, sheet_title: str) -> Ev
                 os_price = _num(os_item.base_price)
                 if source_total is not None and quantity is not None and os_price is not None and os_price > 0:
                     checked_prices += 1
-                    if abs(quantity * os_price - source_total) > max(Decimal('1'), abs(source_total) * Decimal('0.005')):
+                    # A displayed two-decimal unit price can incur <=0.005
+                    # rubles of rounding per OS unit, plus line rounding.
+                    tolerance = max(Decimal('0.10'), abs(quantity) * Decimal('0.005') + Decimal('0.05'))
+                    if abs(quantity * os_price - source_total) > tolerance:
                         item_issues.append('Цена × количество не соответствует проверенной стоимости ЛСР')
                 elif os_price is None or os_price <= 0:
                     item_issues.append('Цена ОС отсутствует или некорректна')

@@ -119,6 +119,7 @@ def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
     _ensure_column(connection, "tkp_items", "wor_schema", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "tkp_items", "quality_flags", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(connection, "processing_rows", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+    _ensure_column(connection, "lsr_learning_cases", "os_blob", "BLOB")
     connection.execute("UPDATE catalog_items SET price_original = price WHERE price_original IS NULL")
     connection.execute("UPDATE catalog_items SET price_zlvl = price WHERE price_zlvl IS NULL")
     connection.execute(

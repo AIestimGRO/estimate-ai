@@ -119,10 +119,12 @@ def test_lsr_evidence_is_quarantined_until_admin_approval(tmp_path, monkeypatch)
         catalog.active['D4'] = 'м3'
         catalog.active['G4'] = 100
         catalog.active['N4'] = CODE_A
+        uploaded_os = os_bytes()
+        uploaded_gsfx = gsfx_bytes()
         started = client.post('/run', files={
             'catalog': ('catalog.xlsx', _workbook_bytes(catalog)),
-            'estimate': ('os.xlsx', os_bytes()),
-            'lsr': ('source.gsfx', gsfx_bytes()),
+            'estimate': ('os.xlsx', uploaded_os),
+            'lsr': ('source.gsfx', uploaded_gsfx),
         })
         assert started.status_code == 200
         assert 'Структурная сверка пройдена' in started.text
@@ -141,20 +143,39 @@ def test_lsr_evidence_is_quarantined_until_admin_approval(tmp_path, monkeypatch)
             assert row['author_user_id'] == specialist_id
             assert row['quality'] == 'candidate'
             assert row['status'] == 'pending'
-            assert bytes(row['gsfx_blob']) == gsfx_bytes()
+            assert bytes(row['gsfx_blob']) == uploaded_gsfx
+            assert bytes(row['os_blob']) == uploaded_os
             assert len(json.loads(row['os_rows_json'])) == 2
             assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         # A specialist cannot view or approve the private evidence queue.
         assert client.get('/admin/lsr-learning', follow_redirects=False).status_code == 403
+        assert client.get('/admin/lsr-learning/export', follow_redirects=False).status_code == 403
         client.post('/login', data={'login': 'admin', 'password': 'verylongpassword'})
         response = client.get('/admin/lsr-learning')
         assert response.status_code == 200
         assert 'os.xlsx' in response.text
+        assert client.get('/admin/lsr-learning/export').status_code == 422  # pending cases excluded
         approved = client.post('/admin/lsr-learning/1/review', data={'action': 'approved'},
                                follow_redirects=False)
         assert approved.status_code == 303
+        assert client.get('/admin/lsr-learning/1/download-os').content == uploaded_os
+        downloaded = client.get('/admin/lsr-learning/export')
+        assert downloaded.status_code == 200
+        assert downloaded.headers['content-type'] == 'application/zip'
+        with ZipFile(BytesIO(downloaded.content)) as archive:
+            assert archive.testzip() is None
+            assert archive.read('pair_000001/original_lsr.gsfx') == uploaded_gsfx
+            assert archive.read('pair_000001/original_os.xlsx') == uploaded_os
+            metadata = json.loads(archive.read('pair_000001/verification.json'))
+            manifest = json.loads(archive.read('manifest.json'))
+        assert metadata['checked_prices'] == 2
+        assert metadata['os_filename'] == 'os.xlsx'
+        assert manifest['total_pairs'] == 1
+        assert manifest['pairs'][0]['review_status'] == 'approved_by_admin'
         with connect(db_path) as connection:
             assert connection.execute('SELECT status FROM lsr_learning_cases WHERE id=1').fetchone()[0] == 'approved'
+            connection.execute('UPDATE lsr_learning_cases SET os_blob=NULL WHERE id=1')
+            connection.commit()
         # Replaying a pairing cannot change the administrator's decision.
         with connect(db_path) as connection:
             from core.storage.lsr_learning import save_learning_case
@@ -166,6 +187,10 @@ def test_lsr_evidence_is_quarantined_until_admin_approval(tmp_path, monkeypatch)
                          report=record.evidence_report)
             assert (case_id, created) == (1, False)
             assert connection.execute('SELECT status FROM lsr_learning_cases WHERE id=1').fetchone()[0] == 'approved'
+            assert bytes(connection.execute('SELECT os_blob FROM lsr_learning_cases WHERE id=1').fetchone()[0]) == uploaded_os
+            connection.execute("UPDATE lsr_learning_cases SET os_blob = ? WHERE id=1", (b'tampered',))
+            connection.commit()
+        assert client.get('/admin/lsr-learning/export').status_code == 422  # hash mismatch blocks export
 
 
 def test_unrelated_files_cannot_be_approved(tmp_path, monkeypatch):
@@ -205,10 +230,27 @@ def test_schema_migration_adds_learning_without_touching_existing_catalog():
             connection.execute('DELETE FROM schema_migrations')
             connection.execute('INSERT INTO schema_migrations(version) VALUES (15)')
         init_database(connection, synchronize_corrections=False)
-        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 16
+        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 17
         assert connection.execute("SELECT COUNT(*) FROM catalog_sources WHERE name='main'").fetchone()[0] == 1
         assert connection.execute('SELECT COUNT(*) FROM lsr_learning_cases').fetchone()[0] == 0
         assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
+    finally:
+        connection.close()
+
+
+def test_v16_migration_preserves_existing_case_table_and_adds_original_os():
+    connection = connect(':memory:')
+    try:
+        init_database(connection, synchronize_corrections=False)
+        with connection:
+            connection.execute('ALTER TABLE lsr_learning_cases DROP COLUMN os_blob')
+            connection.execute('DELETE FROM schema_migrations')
+            connection.execute('INSERT INTO schema_migrations(version) VALUES (16)')
+        init_database(connection, synchronize_corrections=False)
+        cols = {row['name'] for row in connection.execute('PRAGMA table_info(lsr_learning_cases)')}
+        assert 'os_blob' in cols
+        assert connection.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 17
+        assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
     finally:
         connection.close()

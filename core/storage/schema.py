@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -455,6 +455,7 @@ CREATE TABLE IF NOT EXISTS lsr_learning_cases (
     gsfx_filename TEXT NOT NULL,
     os_filename TEXT NOT NULL,
     gsfx_blob BLOB NOT NULL,
+    os_blob BLOB,
     os_rows_json TEXT NOT NULL,
     issues_json TEXT NOT NULL,
     sheet_title TEXT NOT NULL,
