@@ -1,0 +1,1096 @@
+{
+  "edition": "FSNB-2022 supplement 19; recommended NR/SP mapping, 24.08.2026",
+  "provenance": "https://fgiscs.minstroyrf.ru/frsn/reference/letters",
+  "overhead_method": "Minstroy 812/pr (2020, amendments 636/pr and 611/pr)",
+  "profit_method": "Minstroy 774/pr (2020, amendment 317/pr)",
+  "groups": {
+    "001.1": {
+      "work_type": "механизированным способом",
+      "applicability": "раздел 1 подразделы 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7,\nраздел 2 подраздел 2.1",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 46
+    },
+    "001.2": {
+      "work_type": "ручным способом",
+      "applicability": "раздел 2 подраздел 2.5 табл. 01-02-055: 01-02-065",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 40
+    },
+    "001.3": {
+      "work_type": "с применением средств гидромеханизации",
+      "applicability": "раздел 1 подраздел 1.8",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 95,
+      "overhead_far_north": 99,
+      "profit": 44
+    },
+    "001.4": {
+      "work_type": "по другим видам работ (подготовительным, сопутствующим, укрепительным)",
+      "applicability": "раздел 2 подраздел 2.2, 2.3, 2.4, \nподраздел 2.5 табл.01-02-066, 01-02-067, 01-02-068, \nподразделы 2.6, 2.7, 2.8",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 41
+    },
+    "001.5": {
+      "work_type": "механизированное рыхление и разработка вечномерзлого грунта",
+      "applicability": "раздел 3",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 95,
+      "overhead_far_north": 99,
+      "profit": 44
+    },
+    "002.0": {
+      "work_type": "Горновскрышные работы",
+      "applicability": "   ГЭСН 81-02-02-... \nГорновскрышные работы ",
+      "overhead_ordinary": 99,
+      "overhead_equivalent_north": 100,
+      "overhead_far_north": 104,
+      "profit": 44
+    },
+    "003.0": {
+      "work_type": "Буровзрывные работы",
+      "applicability": " ГЭСН 81-02-03-…\nБуровзрывные работы ",
+      "overhead_ordinary": 106,
+      "overhead_equivalent_north": 107,
+      "overhead_far_north": 111,
+      "profit": 67
+    },
+    "004.0": {
+      "work_type": "Скважины",
+      "applicability": "ГЭСН 81-02-04-…\nСкважины",
+      "overhead_ordinary": 106,
+      "overhead_equivalent_north": 107,
+      "overhead_far_north": 111,
+      "profit": 45
+    },
+    "005.1": {
+      "work_type": "свайные работы",
+      "applicability": "раздел 1,\nза исключением раздела 1 подраздела 1.1 табл. 05-01-221, раздела 1 подраздела 1.3 табл. 05-01-117, 05-01-122, \n05-01-127",
+      "overhead_ordinary": 117,
+      "overhead_equivalent_north": 118,
+      "overhead_far_north": 123,
+      "profit": 70
+    },
+    "005.2": {
+      "work_type": "опускные колодцы",
+      "applicability": "раздел 2",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 95,
+      "overhead_far_north": 99,
+      "profit": 51
+    },
+    "005.3": {
+      "work_type": "закрепление грунтов",
+      "applicability": "раздел 3",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 95,
+      "overhead_far_north": 99,
+      "profit": 52
+    },
+    "006.0": {
+      "work_type": "Бетонные и железобетонные монолитные конструкции и работы в строительстве (за исключением пунктов 6.1, 6.2)",
+      "applicability": "ГЭСН 81-02-06-*****…\nБетонные и железобетонные конструкции монолитные\nза исключением раздела 3 табл. 06-03-010, 06-03-014, раздела 15 и норм, указанных в пунктах 6.1 и 6.2 настоящей таблицы",
+      "overhead_ordinary": 102,
+      "overhead_equivalent_north": 103,
+      "overhead_far_north": 107,
+      "profit": 58
+    },
+    "006.1": {
+      "work_type": "с применением индустриальных видов опалубки",
+      "applicability": "раздел 12, \nраздел 14 табл. 06-14-008, разделы 16:21, 23, 24",
+      "overhead_ordinary": 108,
+      "overhead_equivalent_north": 109,
+      "overhead_far_north": 113,
+      "profit": 55
+    },
+    "006.2": {
+      "work_type": "конструкции зданий атомных электростанций",
+      "applicability": "раздел 22 (за исключением норм 06-22-012-01:03, \n06-22-014*****)",
+      "overhead_ordinary": 132,
+      "overhead_equivalent_north": 133,
+      "overhead_far_north": 139,
+      "profit": 65
+    },
+    "007.0": {
+      "work_type": "Бетонные и железобетонные сборные конструкции и работы в строительстве (за исключением пунктов 7.1 и 7.2)",
+      "applicability": " ГЭСН 81-02-07-…\nБетонные и железобетонные конструкции сборные\nза исключением норм, указанных в пунктах 7.1 \nи 7.2 настоящей таблицы",
+      "overhead_ordinary": 110,
+      "overhead_equivalent_north": 111,
+      "overhead_far_north": 116,
+      "profit": 73
+    },
+    "007.1": {
+      "work_type": "жилых, общественных и административно-бытовых зданий промышленных предприятий",
+      "applicability": "раздел 5,\nраздел 8 подраздел 8.1 табл. 07-08-001, \nподраздел 8.2 табл. 07-08-006",
+      "overhead_ordinary": 116,
+      "overhead_equivalent_north": 117,
+      "overhead_far_north": 122,
+      "profit": 80
+    },
+    "007.2": {
+      "work_type": "конструкции зданий атомных электростанций",
+      "applicability": "раздел 9",
+      "overhead_ordinary": 148,
+      "overhead_equivalent_north": 149,
+      "overhead_far_north": 156,
+      "profit": 85
+    },
+    "008.0": {
+      "work_type": "Конструкции из кирпича и блоков",
+      "applicability": "ГЭСН 81-02-08-…\nКонструкции из кирпича и блоков\nза исключением раздела 7 табл. 08-07-003, \n08-07-004, 08-07-005",
+      "overhead_ordinary": 110,
+      "overhead_equivalent_north": 111,
+      "overhead_far_north": 116,
+      "profit": 69
+    },
+    "009.0": {
+      "work_type": "Строительные металлические конструкции (за исключением пункта 9.1)",
+      "applicability": "ГЭСН 81-02-09***-…\nСтроительные металлические конструкции\nза исключением раздела 5 подраздела 5.2 \nтабл. 09-05-019 и норм, указанных в пункте 9.1 настоящей таблицы",
+      "overhead_ordinary": 93,
+      "overhead_equivalent_north": 94,
+      "overhead_far_north": 98,
+      "profit": 62
+    },
+    "009.1": {
+      "work_type": "конструкции атомных электрических станций",
+      "applicability": "раздел 7",
+      "overhead_ordinary": 111,
+      "overhead_equivalent_north": 112,
+      "overhead_far_north": 117,
+      "profit": 85
+    },
+    "010.0": {
+      "work_type": "Деревянные конструкции",
+      "applicability": "ГЭСН 81-02-10-…\nДеревянные конструкции",
+      "overhead_ordinary": 108,
+      "overhead_equivalent_north": 109,
+      "overhead_far_north": 113,
+      "profit": 55
+    },
+    "011.0": {
+      "work_type": "Полы",
+      "applicability": "ГЭСН 81-02-11-…\nПолы",
+      "overhead_ordinary": 112,
+      "overhead_equivalent_north": 113,
+      "overhead_far_north": 118,
+      "profit": 65
+    },
+    "012.0": {
+      "work_type": "Кровли",
+      "applicability": "ГЭСН 81-02-12-…\nКровли\nза исключением табл. 12-01-019",
+      "overhead_ordinary": 109,
+      "overhead_equivalent_north": 110,
+      "overhead_far_north": 114,
+      "profit": 57
+    },
+    "013.0": {
+      "work_type": "Защита строительных конструкций и оборудования от коррозии",
+      "applicability": "ГЭСН 81-02-13-… \nЗащита строительных конструкций и оборудования от коррозии",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 95,
+      "overhead_far_north": 99,
+      "profit": 51
+    },
+    "014.0": {
+      "work_type": "Конструкции в сельском строительстве\n(за исключением пунктов 14.1, 14.2)",
+      "applicability": "ГЭСН 81-02-14-…\nКонструкции в сельском строительстве\nза исключением норм, указанных в пунктах 14.1 \nи 14.2 настоящей таблицы",
+      "overhead_ordinary": 95,
+      "overhead_equivalent_north": 96,
+      "overhead_far_north": 100,
+      "profit": 64
+    },
+    "014.1": {
+      "work_type": "здания и сооружения из бетонных и железобетонных конструкций",
+      "applicability": "раздел 1 табл. 14-01-005, 14-01-008, 14-01-009, 14-01-010, \n14-01-014, 14-01-016, 14-01-018",
+      "overhead_ordinary": 113,
+      "overhead_equivalent_north": 114,
+      "overhead_far_north": 119,
+      "profit": 62
+    },
+    "014.2": {
+      "work_type": "установка железобетонных конструкций при строительстве теплиц и овощехранилищ",
+      "applicability": "раздел 2 табл. 14-02-001, 14-02-002",
+      "overhead_ordinary": 99,
+      "overhead_equivalent_north": 100,
+      "overhead_far_north": 104,
+      "profit": 59
+    },
+    "015.0": {
+      "work_type": "Отделочные работы",
+      "applicability": "ГЭСН 81-02-15-…\nОтделочные работы",
+      "overhead_ordinary": 100,
+      "overhead_equivalent_north": 101,
+      "overhead_far_north": 105,
+      "profit": 49
+    },
+    "016.0": {
+      "work_type": "Сантехнические работы: внутренние (трубопроводы, внутренние устройства водопровода, канализации, отопления, газоснабжения, вентиляция и кондиционирование воздуха)",
+      "applicability": "ГЭСН 81-02-16*-…\nТрубопроводы внутренние\nза исключением раздела 2 табл. 16-02-010, \n16-02-012, 16-02-013",
+      "overhead_ordinary": 121,
+      "overhead_equivalent_north": 122,
+      "overhead_far_north": 127,
+      "profit": 72
+    },
+    "017.0": {
+      "work_type": "Временные сборно-разборные здания и сооружения",
+      "applicability": "ГЭСН 81-02-21-…\nВременные сборно-разборные здания и сооружения",
+      "overhead_ordinary": 96,
+      "overhead_equivalent_north": 97,
+      "overhead_far_north": 101,
+      "profit": 44
+    },
+    "018.0": {
+      "work_type": "Наружные сети водопровода, канализации, теплоснабжения, газопроводы",
+      "applicability": "ГЭСН 81-02-22-…\nВодопровод - наружные сети",
+      "overhead_ordinary": 117,
+      "overhead_equivalent_north": 118,
+      "overhead_far_north": 123,
+      "profit": 74
+    },
+    "019.0": {
+      "work_type": "Магистральные и промысловые трубопроводы",
+      "applicability": "ГЭСН 81-02-25-…\nМагистральные и промысловые трубопроводы",
+      "overhead_ordinary": 111,
+      "overhead_equivalent_north": 112,
+      "overhead_far_north": 117,
+      "profit": 60
+    },
+    "020.0": {
+      "work_type": "Теплоизоляционные работы",
+      "applicability": "ГЭСН 81-02-26-…\nТеплоизоляционные работы",
+      "overhead_ordinary": 97,
+      "overhead_equivalent_north": 98,
+      "overhead_far_north": 102,
+      "profit": 55
+    },
+    "021.0": {
+      "work_type": "Автомобильные дороги (за исключением пункта 21.1)",
+      "applicability": "ГЭСН 81-02-27**-…\nАвтомобильные дороги\nза исключением раздела 10 и норм, указанных в пункте 21.1 настоящей таблицы",
+      "overhead_ordinary": 147,
+      "overhead_equivalent_north": 148,
+      "overhead_far_north": 154,
+      "profit": 134
+    },
+    "021.1": {
+      "work_type": "устройство покрытий дорожек, тротуаров, мостовых и площадок и прочее",
+      "applicability": "раздел 2 нормы 27-02-010-08, 27-02-010-09,\n разделы 5, 7",
+      "overhead_ordinary": 113,
+      "overhead_equivalent_north": 114,
+      "overhead_far_north": 119,
+      "profit": 77
+    },
+    "022.0": {
+      "work_type": "Железные дороги",
+      "applicability": "ГЭСН 81-02-28-…\nЖелезные дороги",
+      "overhead_ordinary": 109,
+      "overhead_equivalent_north": 110,
+      "overhead_far_north": 114,
+      "profit": 65
+    },
+    "023.1": {
+      "work_type": "закрытый способ работ",
+      "applicability": "раздел 1, \nраздел 3 подраздел 3.1,\nраздел 4 подраздел 4.1, \nподраздел 4.2 табл. 29-04-012, \n подраздел 4.3 табл. 29-04-016, \nподразделы 4.4, 4.5,\nподраздел 4.6 табл. 29-04-024,\nнормы 29-04-025-01, 29-04-025-05, 29-04-026-01, 29-04-026-02, \n29-04-026-04: 29-04-026-08,\nподраздел 4.7 ",
+      "overhead_ordinary": 146,
+      "overhead_equivalent_north": 147,
+      "overhead_far_north": 153,
+      "profit": 75
+    },
+    "023.2": {
+      "work_type": "открытый способ работ",
+      "applicability": "раздел 2, \nраздел 3 подраздел 3.2, \nраздел 4 подраздел 4.6 нормы 29-04-025-02, 29-04-025-03, \n29-04-025-04, 29-04-026-03, 29-04-026-09",
+      "overhead_ordinary": 126,
+      "overhead_equivalent_north": 127,
+      "overhead_far_north": 132,
+      "profit": 60
+    },
+    "024.0": {
+      "work_type": "Мосты и трубы",
+      "applicability": "ГЭСН 81-02-30-9*…\nМосты и трубы",
+      "overhead_ordinary": 140,
+      "overhead_equivalent_north": 141,
+      "overhead_far_north": 147,
+      "profit": 93
+    },
+    "025.0": {
+      "work_type": "Аэродромы",
+      "applicability": "ГЭСН 81-02-31-9*…\nАэродромы",
+      "overhead_ordinary": 107,
+      "overhead_equivalent_north": 108,
+      "overhead_far_north": 112,
+      "profit": 69
+    },
+    "026.0": {
+      "work_type": "Трамвайные пути",
+      "applicability": "ГЭСН 81-02-32-…\nТрамвайные пути",
+      "overhead_ordinary": 106,
+      "overhead_equivalent_north": 107,
+      "overhead_far_north": 111,
+      "profit": 56
+    },
+    "027.0": {
+      "work_type": "Линии электропередачи",
+      "applicability": "ГЭСН 81-02-33-…\nЛинии электропередачи",
+      "overhead_ordinary": 103,
+      "overhead_equivalent_north": 104,
+      "overhead_far_north": 108,
+      "profit": 60
+    },
+    "028.0": {
+      "work_type": "Сооружения связи, радиовещания и телевидения",
+      "applicability": "ГЭСН 81-02-34-…\nСооружения связи, радиовещания и телевидения",
+      "overhead_ordinary": 98,
+      "overhead_equivalent_north": 99,
+      "overhead_far_north": 103,
+      "profit": 58
+    },
+    "029.1": {
+      "work_type": "прохождение горных выработок",
+      "applicability": "раздел 1 подразделы 1.1:1.33, 1.35, 1.40, 1.42, 1.46, 1.47, 1.48\nраздел 2",
+      "overhead_ordinary": 103,
+      "overhead_equivalent_north": 104,
+      "overhead_far_north": 108,
+      "profit": 41
+    },
+    "029.2": {
+      "work_type": "другие работы",
+      "applicability": "раздел 1 подразделы 1.34, 1.36, 1.39, 1.41, 1.43, 1.44, 1.45,\nраздел 3",
+      "overhead_ordinary": 97,
+      "overhead_equivalent_north": 98,
+      "overhead_far_north": 102,
+      "profit": 44
+    },
+    "030.0": {
+      "work_type": "Земляные конструкции гидротехнических сооружений",
+      "applicability": "ГЭСН 81-02-36-... \nЗемляные конструкции гидротехнических сооружений",
+      "overhead_ordinary": 97,
+      "overhead_equivalent_north": 98,
+      "overhead_far_north": 102,
+      "profit": 44
+    },
+    "031.0": {
+      "work_type": "Бетонные и железобетонные конструкции гидротехнических сооружений",
+      "applicability": "ГЭСН 81-02-3711*-…\nБетонные и железобетонные конструкции гидротехнических сооружений\nза исключением табл. 37-06-007",
+      "overhead_ordinary": 117,
+      "overhead_equivalent_north": 118,
+      "overhead_far_north": 123,
+      "profit": 49
+    },
+    "032.0": {
+      "work_type": "Каменные конструкции гидротехнических сооружений",
+      "applicability": "ГЭСН 81-02-38-…\nКаменные конструкции гидротехнических сооружений",
+      "overhead_ordinary": 108,
+      "overhead_equivalent_north": 109,
+      "overhead_far_north": 113,
+      "profit": 56
+    },
+    "033.0": {
+      "work_type": "Металлические конструкции гидротехнических сооружений",
+      "applicability": "ГЭСН 81-02-39-…\nМеталлические конструкции гидротехнических сооружений",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 95,
+      "overhead_far_north": 99,
+      "profit": 63
+    },
+    "034.0": {
+      "work_type": "Деревянные конструкции гидротехнических сооружений",
+      "applicability": "ГЭСН 81-02-40-…\nДеревянные конструкции гидротехнических сооружений",
+      "overhead_ordinary": 109,
+      "overhead_equivalent_north": 110,
+      "overhead_far_north": 114,
+      "profit": 49
+    },
+    "035.0": {
+      "work_type": "Гидроизоляционные работы в гидротехнических сооружениях",
+      "applicability": "ГЭСН 81-02-41-…\nГидроизоляционные работы в гидротехнических сооружениях\nза исключением подраздела 1.5 раздела 1 ",
+      "overhead_ordinary": 102,
+      "overhead_equivalent_north": 103,
+      "overhead_far_north": 107,
+      "profit": 58
+    },
+    "036.0": {
+      "work_type": "Берегоукрепительные работы",
+      "applicability": "ГЭСН 81-02-42-…\nБерегоукрепительные работы",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 95,
+      "overhead_far_north": 99,
+      "profit": 51
+    },
+    "037.0": {
+      "work_type": "Судовозные пути стапелей и слипов",
+      "applicability": "ГЭСН 81-02-43-…\nСудовозные пути стапелей и слипов",
+      "overhead_ordinary": 97,
+      "overhead_equivalent_north": 98,
+      "overhead_far_north": 102,
+      "profit": 56
+    },
+    "038.0": {
+      "work_type": "Подводно-строительные (водолазные) работы",
+      "applicability": "ГЭСН 81-02-44-…\nПодводно-строительные (водолазные) работы",
+      "overhead_ordinary": 108,
+      "overhead_equivalent_north": 109,
+      "overhead_far_north": 113,
+      "profit": 55
+    },
+    "039.0": {
+      "work_type": "Промышленные печи и трубы",
+      "applicability": "ГЭСН 81-02-45-…\nПромышленные печи и трубы\nза исключением табл. 45-10-001",
+      "overhead_ordinary": 102,
+      "overhead_equivalent_north": 103,
+      "overhead_far_north": 107,
+      "profit": 62
+    },
+    "040.1": {
+      "work_type": "усиление и замена существующих конструкций, возведение отдельных конструктивных элементов (за исключением работ по приготовлению материалов в построечных условиях)",
+      "applicability": "раздел 1, \nраздел 2 табл. 46-02-001, 46-02-002, 46-02-005: 46-02-008, \nразделы 3, 5, 7, \nраздел 8 (за исключением табл. 46-08-003), \nраздел 9 (за исключением норм 46-09-001-01: 46-09-001-07 и норм, указанных в пункте 40.2 настоящей таблицы )",
+      "overhead_ordinary": 103,
+      "overhead_equivalent_north": 104,
+      "overhead_far_north": 108,
+      "profit": 59
+    },
+    "040.2": {
+      "work_type": "разборка отдельных конструктивных элементов здания (сооружения), а также зданий (сооружений) в целом",
+      "applicability": "раздел 2 табл. 46-02-004, 46-02-009,\nразделы 4, 6, \nраздел 9 табл. 46-09-005, 46-09-010",
+      "overhead_ordinary": 91,
+      "overhead_equivalent_north": 92,
+      "overhead_far_north": 96,
+      "profit": 52
+    },
+    "041.0": {
+      "work_type": "Озеленение. Защитные лесонасаждения",
+      "applicability": "ГЭСН 81-02-47-…\nОзеленение, защитные лесонасаждения\nза исключением табл. 47-01-096",
+      "overhead_ordinary": 103,
+      "overhead_equivalent_north": 104,
+      "overhead_far_north": 108,
+      "profit": 72
+    },
+    "042.0": {
+      "work_type": "Металлообрабатывающее оборудование",
+      "applicability": "ГЭСНм 81-03-01-…\nМеталлообрабатывающее оборудование",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "043.0": {
+      "work_type": "Деревообрабатывающее оборудование",
+      "applicability": "ГЭСНм 81-03-02-…\nДеревообрабатывающее оборудование",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 45
+    },
+    "044.0": {
+      "work_type": "Подъемно-транспортное оборудование",
+      "applicability": "ГЭСНм 81-03-03-…\nПодъемно-транспортное оборудование",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 49
+    },
+    "045.0": {
+      "work_type": "Дробильно-размольное, обогатительное и агломерационное оборудование",
+      "applicability": "ГЭСНм 81-03-04-…\nДробильно-размольное, обогатительное и агломерационное оборудование",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 49
+    },
+    "046.0": {
+      "work_type": "Весовое оборудование",
+      "applicability": "ГЭСНм 81-03-05-…\nВесовое оборудование",
+      "overhead_ordinary": 91,
+      "overhead_equivalent_north": 92,
+      "overhead_far_north": 96,
+      "profit": 47
+    },
+    "047.0": {
+      "work_type": "Теплосиловое оборудование",
+      "applicability": "ГЭСНм 81-03-06-…\nТеплосиловое оборудование",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 45
+    },
+    "048.0": {
+      "work_type": "Компрессорные установки, насосы и вентиляторы",
+      "applicability": "ГЭСНм 81-03-07-…\nКомпрессорные установки насосы и вентиляторы",
+      "overhead_ordinary": 91,
+      "overhead_equivalent_north": 92,
+      "overhead_far_north": 96,
+      "profit": 47
+    },
+    "049.1": {
+      "work_type": "на атомных электростанциях",
+      "applicability": "ГЭСНм 81-03-08-…\nЭлектротехнические установки",
+      "overhead_ordinary": 126,
+      "overhead_equivalent_north": 127,
+      "overhead_far_north": 133,
+      "profit": 68
+    },
+    "049.2": {
+      "work_type": "на горнорудных объектах",
+      "applicability": "ГЭСНм 81-03-08-…\nЭлектротехнические установки",
+      "overhead_ordinary": 97,
+      "overhead_equivalent_north": 98,
+      "overhead_far_north": 102,
+      "profit": 56
+    },
+    "049.3": {
+      "work_type": "на других объектах",
+      "applicability": "ГЭСНм 81-03-08-…\nЭлектротехнические установки",
+      "overhead_ordinary": 97,
+      "overhead_equivalent_north": 98,
+      "overhead_far_north": 102,
+      "profit": 51
+    },
+    "050.0": {
+      "work_type": "Электрические печи",
+      "applicability": "ГЭСНм 81-03-09-… \nЭлектрические печи",
+      "overhead_ordinary": 91,
+      "overhead_equivalent_north": 92,
+      "overhead_far_north": 96,
+      "profit": 48
+    },
+    "051.1": {
+      "work_type": "прокладка и монтаж сетей связи",
+      "applicability": "отделы 1, 2, 3, \nотдел 6 раздел 2,\nотделы 8, 9, 10",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "051.2": {
+      "work_type": "монтаж радиотелевизионного и электронного оборудования",
+      "applicability": "отделы 4, 5, 11",
+      "overhead_ordinary": 95,
+      "overhead_equivalent_north": 96,
+      "overhead_far_north": 100,
+      "profit": 53
+    },
+    "051.3": {
+      "work_type": "прокладка и монтаж междугородных линий связи",
+      "applicability": "отдел 6 раздел 1",
+      "overhead_ordinary": 111,
+      "overhead_equivalent_north": 112,
+      "overhead_far_north": 117,
+      "profit": 52
+    },
+    "051.4": {
+      "work_type": "устройство сигнализации, централизации, блокировки и связи на железных дорогах",
+      "applicability": "отдел 7",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 95,
+      "overhead_far_north": 99,
+      "profit": 45
+    },
+    "052.0": {
+      "work_type": "Устройство средств посадки самолетов и систем управления воздушным движением на аэродромах",
+      "applicability": "ГЭСНм 81-03-08-…\nЭлектротехнические установки\nГЭСНм 81-03-10-....\nОборудование связи\nГЭСНм 81-03-11-…\nПриборы, средства автоматизации и вычислительной техники",
+      "overhead_ordinary": 96,
+      "overhead_equivalent_north": 97,
+      "overhead_far_north": 101,
+      "profit": 48
+    },
+    "053.0": {
+      "work_type": "Приборы, средства автоматизации и вычислительной техники (за исключением пункта 52)",
+      "applicability": "ГЭСНм 81-03-11-…\nПриборы, средства автоматизации и вычислительной техники",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "054.0": {
+      "work_type": "Технологические трубопроводы",
+      "applicability": "ГЭСНм 81-03-12-…\nТехнологические трубопроводы",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "055.0": {
+      "work_type": "Оборудование атомных электрических станций",
+      "applicability": "ГЭСНм 81-03-13-…\nОборудование атомных электрических станций",
+      "overhead_ordinary": 122,
+      "overhead_equivalent_north": 123,
+      "overhead_far_north": 128,
+      "profit": 60
+    },
+    "056.0": {
+      "work_type": "Оборудование прокатных производств",
+      "applicability": "ГЭСНм 81-03-14-…\nОборудование прокатных производств",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "057.0": {
+      "work_type": "Оборудование для очистки газов",
+      "applicability": "ГЭСНм 81-03-15-…\nОборудование для очистки газов",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "058.0": {
+      "work_type": "Оборудование предприятий черной металлургии",
+      "applicability": "ГЭСНм 81-03-16-…\nОборудование предприятий черной металлургии",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 49
+    },
+    "059.0": {
+      "work_type": "Оборудование предприятий цветной металлургии",
+      "applicability": "ГЭСНм 81-03-17-…\nОборудование предприятий цветной металлургии",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "060.0": {
+      "work_type": "Оборудование предприятий химической и нефтеперерабатывающей промышленности",
+      "applicability": "ГЭСНм 81-03-18-…\nОборудование предприятий химической и нефтеперерабатывающей промышленности",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "061.0": {
+      "work_type": "Оборудование предприятий угольной и торфяной промышленности",
+      "applicability": "ГЭСНм 81-03-19-…\nОборудование предприятий угольной и торфяной промышленности",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "062.0": {
+      "work_type": "Оборудование сигнализации, централизации, блокировки и контактной сети на железнодорожном транспорте",
+      "applicability": "ГЭСНм 81-03-20-…\nОборудование сигнализации, централизации, блокировки и контактной сети на железнодорожном транспорте",
+      "overhead_ordinary": 95,
+      "overhead_equivalent_north": 96,
+      "overhead_far_north": 100,
+      "profit": 45
+    },
+    "063.0": {
+      "work_type": "Оборудование метрополитенов и тоннелей",
+      "applicability": "ГЭСНм 81-03-21-…\nОборудование метрополитенов и тоннелей",
+      "overhead_ordinary": 96,
+      "overhead_equivalent_north": 97,
+      "overhead_far_north": 101,
+      "profit": 60
+    },
+    "064.0": {
+      "work_type": "Оборудование гидроэлектрических станций и гидротехнических сооружений",
+      "applicability": "ГЭСНм 81-03-22-…\nОборудование гидроэлектрических станций и гидротехнических сооружений",
+      "overhead_ordinary": 91,
+      "overhead_equivalent_north": 92,
+      "overhead_far_north": 96,
+      "profit": 47
+    },
+    "065.0": {
+      "work_type": "Оборудование предприятий электротехнической промышленности",
+      "applicability": "ГЭСНм 81-03-23-…\nОборудование предприятий электротехнической промышленности",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 45
+    },
+    "066.0": {
+      "work_type": "Оборудование предприятий промышленности строительных материалов",
+      "applicability": "ГЭСНм 81-03-24-…\nОборудование предприятий промышленности строительных материалов",
+      "overhead_ordinary": 91,
+      "overhead_equivalent_north": 92,
+      "overhead_far_north": 96,
+      "profit": 47
+    },
+    "067.0": {
+      "work_type": "Оборудование предприятий целлюлозно-бумажной промышленности",
+      "applicability": "ГЭСНм 81-03-25-…\nОборудование предприятий целлюлозно-бумажной промышленности",
+      "overhead_ordinary": 91,
+      "overhead_equivalent_north": 92,
+      "overhead_far_north": 96,
+      "profit": 47
+    },
+    "068.0": {
+      "work_type": "Оборудование предприятий текстильной промышленности",
+      "applicability": "ГЭСНм 81-03-26-…\nОборудование предприятий текстильной промышленности",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "069.0": {
+      "work_type": "Оборудование предприятий полиграфической промышленности",
+      "applicability": "ГЭСНм 81-03-27-…\nОборудование предприятий полиграфической промышленности",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "070.0": {
+      "work_type": "Оборудование предприятий пищевой промышленности",
+      "applicability": "ГЭСНм 81-03-28-…\nОборудование предприятий пищевой промышленности",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "071.0": {
+      "work_type": "Оборудование театрально-зрелищных предприятий",
+      "applicability": "ГЭСНм 81-03-29-…\nОборудование театрально-зрелищных предприятий",
+      "overhead_ordinary": 87,
+      "overhead_equivalent_north": 88,
+      "overhead_far_north": 91,
+      "profit": 44
+    },
+    "072.0": {
+      "work_type": "Оборудование зернохранилищ и предприятий по переработке зерна",
+      "applicability": "ГЭСНм 81-03-30-…\nОборудование зернохранилищ и предприятий по переработке зерна",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 45
+    },
+    "073.0": {
+      "work_type": "Оборудование предприятий кинематографии",
+      "applicability": "ГЭСНм 81-03-31-…\nОборудование предприятий кинематографии",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "074.0": {
+      "work_type": "Оборудование предприятий электронной промышленности и промышленности средств связи",
+      "applicability": "ГЭСНм 81-03-32-…\nОборудование предприятий электронной промышленности и промышленности средств связи",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 45
+    },
+    "075.0": {
+      "work_type": "Оборудование предприятий легкой промышленности",
+      "applicability": "ГЭСНм 81-03-33-…\nОборудование предприятий легкой промышленности",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "076.0": {
+      "work_type": "Оборудование учреждений здравоохранения и предприятий медицинской промышленности",
+      "applicability": "ГЭСНм 81-03-34-…\nОборудование учреждений здравоохранения и предприятий медицинской промышленности",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "077.0": {
+      "work_type": "Оборудование сельскохозяйственных производств",
+      "applicability": "ГЭСНм 81-03-35-…\nОборудование сельскохозяйственных производств",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 45
+    },
+    "078.0": {
+      "work_type": "Оборудование предприятий бытового обслуживания и коммунального хозяйства",
+      "applicability": "ГЭСНм 81-03-36-…\nОборудование предприятий бытового обслуживания и коммунального хозяйства",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 45
+    },
+    "079.0": {
+      "work_type": "Оборудование общего назначения",
+      "applicability": "ГЭСНм 81-03-37-…\nОборудование общего назначения",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 49
+    },
+    "080.0": {
+      "work_type": "Изготовление технологических металлических конструкций в условиях производственных баз",
+      "applicability": "ГЭСНм 81-03-38-…\nИзготовление технологических металлических конструкций в условиях производственных баз",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 45
+    },
+    "081.0": {
+      "work_type": "Контроль монтажных сварных соединений",
+      "applicability": "ГЭСНм 81-03-39-…\nКонтроль монтажных сварных соединений",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 45
+    },
+    "082.0": {
+      "work_type": "Дополнительное перемещение оборудования и материальных ресурсов, сверх предусмотренного государственными элементными сметными нормами на монтаж оборудования",
+      "applicability": "ГЭСНм 81-03-40-…\nДополнительное перемещение оборудования и материальных ресурсов, сверх предусмотренного государственными элементными сметными нормами на монтаж оборудования",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "083.0": {
+      "work_type": "Пусконаладочные работы (за исключением технологического оборудования АЭС)",
+      "applicability": "ГЭСНп 81-05-01-…\nЭлектротехнические устройства\nГЭСНп 81-05-02-…\nАвтоматизированные системы управления\nГЭСНп 81-05-03-...\nСистемы вентиляции и кондиционирования воздуха\nГЭСНп 81-05-04-…\nПодъемно-транспортное оборудование\nГЭСНп 81-05-05-...\nМеталлообрабатывающее оборудование\nГЭСНп 81-05-06-...\nХолодильные и компрессорные установки\nГЭСНп 81-05-07-...\nТеплоэнергетическое оборудование\nГЭСНп 81-05-08-...\nДеревообрабатывающее оборудование\nГЭСНп 81-05-09-...\nСооружения водоснабжения и канализации\nГЭСНп 81-05-16-...\nУстройства автоматики и телемеханики на железнодорожном транспорте",
+      "overhead_ordinary": 74,
+      "overhead_equivalent_north": 75,
+      "overhead_far_north": 78,
+      "profit": 36
+    },
+    "084.0": {
+      "work_type": "Пусконаладочные работы технологического оборудования АЭС",
+      "applicability": "",
+      "overhead_ordinary": 83,
+      "overhead_equivalent_north": 84,
+      "overhead_far_north": 87,
+      "profit": 40
+    },
+    "085.1": {
+      "work_type": "механизированным способом",
+      "applicability": "раздел 1 табл. 51-01-005, 51-01-007",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 41
+    },
+    "085.2": {
+      "work_type": "вручную",
+      "applicability": "раздел 1 табл. 51-01-001, 51-01-002, 51-01-003, \n51-01-004, 51-01-006",
+      "overhead_ordinary": 87,
+      "overhead_equivalent_north": 88,
+      "overhead_far_north": 91,
+      "profit": 40
+    },
+    "086.0": {
+      "work_type": "Фундаменты",
+      "applicability": "ГЭСНр 81-02-52-…\nФундаменты",
+      "overhead_ordinary": 93,
+      "overhead_equivalent_north": 94,
+      "overhead_far_north": 98,
+      "profit": 55
+    },
+    "087.0": {
+      "work_type": "Стены",
+      "applicability": "ГЭСНр 81-02-53-…\nСтены",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 52
+    },
+    "088.0": {
+      "work_type": "Перекрытия",
+      "applicability": "ГЭСНр 81-02-54-... \nПерекрытия",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 59
+    },
+    "089.0": {
+      "work_type": "Перегородки",
+      "applicability": "ГЭСНр 81-02-55-…\nПерегородки",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 49
+    },
+    "090.0": {
+      "work_type": "Проемы",
+      "applicability": "ГЭСНр 81-02-56-…\nПроемы",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 47
+    },
+    "091.0": {
+      "work_type": "Полы",
+      "applicability": "ГЭСНр 81-02-57-…\nПолы",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 49
+    },
+    "092.0": {
+      "work_type": "Крыши, кровли",
+      "applicability": "ГЭСНр 81-02-58-…\nКрыши, кровли",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "093.0": {
+      "work_type": "Лестницы, крыльца",
+      "applicability": "ГЭСНр 81-02-59-…\nЛестницы, крыльца",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 45
+    },
+    "094.0": {
+      "work_type": "Печные работы",
+      "applicability": "ГЭСНр 81-02-60-…\nПечные работы",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "095.0": {
+      "work_type": "Штукатурные работы",
+      "applicability": "ГЭСНр 81-02-61-…\nШтукатурные работы",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "096.0": {
+      "work_type": "Малярные работы",
+      "applicability": "ГЭСНр 81-02-62-…\nМалярные работы",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "097.0": {
+      "work_type": "Стекольные, обойные и облицовочные работы",
+      "applicability": "ГЭСНр 81-02-63-…\nСтекольные, обойные и облицовочные работы",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 45
+    },
+    "098.0": {
+      "work_type": "Лепные работы",
+      "applicability": "ГЭСНр 81-02-64-…\n Лепные работы",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 43
+    },
+    "099.1": {
+      "work_type": "демонтаж и разборка",
+      "applicability": "раздел 1 табл. 65-01-001: 65-01-004,\nраздел 2 табл. (норм) 65-02-001, 65-02-002, 65-02-003, 65-02-008, 65-02-010-03, 65-02-010-04, 65-02-010-07, 65-02-010-08, 65-02-015, \n65-02-016, 65-02-022 ,\nраздел 3 табл. 65-03-001: 65-03-005,\nраздел 4 табл. 65-04-001, 65-04-002,\nраздел 5 табл. 65-05-003, 65-05-004, 65-05-005",
+      "overhead_ordinary": 87,
+      "overhead_equivalent_north": 88,
+      "overhead_far_north": 91,
+      "profit": 44
+    },
+    "099.2": {
+      "work_type": "смена труб, санприборов, запорной арматуры и другое",
+      "applicability": "раздел 1 табл. 65-01-005: 65-01-014,\nраздел 2 табл. (норм) 65-02-004: 65-02-007, 65-02-009, \n65-02-010-01, 65-02-010-02, 65-02-010-05, 65-02-010-06, \n65-02-011: 65-02-014, 65-02-017: 65-02-021, 65-02-023: 65-02-026,\nраздел 3 табл. 65-03-006, 65-03-007, 65-03-008,\nраздел 4 табл. 65-04-003, 65-04-004, 65-04-005, 65-04-006,\nраздел 5 табл. 65-05-001, 65-05-002, 65-05-006: 65-05-014",
+      "overhead_ordinary": 103,
+      "overhead_equivalent_north": 104,
+      "overhead_far_north": 108,
+      "profit": 52
+    },
+    "100.1": {
+      "work_type": "демонтаж, разборка, очистка;",
+      "applicability": "раздел 1 табл. 66-01-001, 66-01-002, 66-01-003, \n66-01-008, 66-01-010, 66-01-011, 66-01-012, \n66-01-016: 66-01-019, 66-01-024: 66-01-28, 66-01-030, \n66-01-031, 66-01-032, 66-01-047,\nраздел 2 табл. 66-02-001,\nраздел 3 табл. (норм) 66-03-003, 66-03-011, 66-03-020, 66-03-025,\n66-03-032-05: 66-03-032-09, 66-03-032-11, 66-03-034-02, \n66-03-034-03, 66-03-038, 66-03-043",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "100.2": {
+      "work_type": "замена участков трубопроводов, восстановление и замена изделий и другое",
+      "applicability": "раздел 1 табл. 66-01-004: 66-01-007, 66-01-009, \n66-01-013, 66-01-014, 66-01-015, 66-01-020: 66-01-023, 66-01-029, 66-01-034:  66-01-046,\nраздел 2 табл. 66-02-002: 66-02-006,\nраздел 3 табл. (норм) 66-03-001, 66-03-002, 66-03-004: 66-03-010, 66-03-012: 66-03-019, 66-03-021: 66-03-024, 66-03-026: 66-03-031, \n66-03-032-01: 66-03-032-04, 66-03-032-10, \n66-03-032-12: 66-03-032-15, 66-03-033, 66-03-034-01, \n66-03-035, 66-03-036, 66-03-034-37, \n66-03-039: 66-03-042, 66-03-044, 66-03-45, 66-03-46",
+      "overhead_ordinary": 104,
+      "overhead_equivalent_north": 105,
+      "overhead_far_north": 109,
+      "profit": 60
+    },
+    "101.0": {
+      "work_type": "Электромонтажные работы",
+      "applicability": "ГЭСНр 81-02-67-…\nЭлектромонтажные работы",
+      "overhead_ordinary": 91,
+      "overhead_equivalent_north": 92,
+      "overhead_far_north": 96,
+      "profit": 48
+    },
+    "102.0": {
+      "work_type": "Благоустройство",
+      "applicability": "ГЭСНр 81-02-68-…\nБлагоустройство",
+      "overhead_ordinary": 102,
+      "overhead_equivalent_north": 103,
+      "overhead_far_north": 107,
+      "profit": 54
+    },
+    "103.0": {
+      "work_type": "Прочие ремонтно-строительные работы",
+      "applicability": "ГЭСНр 81-02-69-…\nПрочие ремонтно-строительные работы\nза исключением табл. 69-01-11: 69-01-014",
+      "overhead_ordinary": 92,
+      "overhead_equivalent_north": 93,
+      "overhead_far_north": 97,
+      "profit": 44
+    },
+    "104.1": {
+      "work_type": "Капитальный ремонт и модернизация оборудования лифтов",
+      "applicability": "ГЭСНмр 81-06-01-…\nКапитальный ремонт и модернизация оборудования лифтов\nотделы 1, 2, 3, 4",
+      "overhead_ordinary": 89,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 93,
+      "profit": 44
+    },
+    "104.2": {
+      "work_type": "",
+      "applicability": "отделы 5, 6",
+      "overhead_ordinary": 74,
+      "overhead_equivalent_north": 75,
+      "overhead_far_north": 78,
+      "profit": 36
+    },
+    "105.0": {
+      "work_type": "Ревизия трубопроводной арматуры",
+      "applicability": "ГЭСНмр 81-06-02-…\nРевизия трубопроводной арматуры",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 91,
+      "overhead_far_north": 95,
+      "profit": 46
+    },
+    "106.0": {
+      "work_type": "Погрузочно-разгрузочные работы",
+      "applicability": " Сметные цены услуг на погрузочно-разгрузочные работы при перевозке грузов для строительства автомобильным транспортом ",
+      "overhead_ordinary": 90,
+      "overhead_equivalent_north": 90,
+      "overhead_far_north": 90,
+      "profit": 42
+    },
+    "107.0": {
+      "work_type": "Перевозка строительных грузов автомобильным транспортом",
+      "applicability": "Сметные цены услуг на перевозку грузов для строительства железнодорожным транспортом \nСметные цены услуг на перевозку грузов для строительства автомобильным транспортом",
+      "overhead_ordinary": 94,
+      "overhead_equivalent_north": 94,
+      "overhead_far_north": 94,
+      "profit": 61
+    },
+    "108.0": {
+      "work_type": "Изготовление в построечных условиях материалов, полуфабрикатов, металлических заготовок",
+      "applicability": "Сметные нормы сборников на строительные и ремонтно-строительные работы 11*\nГЭСН 81-02-05-... раздел 1 подраздел 1.1 \nтабл. 05-01-221, раздел 1 подраздел 1.3 табл. 05-01-117, \n05-01-122, 05-01-127;\nГЭСН 81-02-06-... раздел 15, раздел 3 табл. 06-03-010, 06-03-014, раздел 22 нормы 06-22-012-01:03, 06-22-014*****;\nГЭСН 81-02-08-... раздел 7 табл. 08-07-003, \n08-07-004, 08-07-005;\nГЭСН 81-02-12-... табл. 12-01-019;\nГЭСН 81-02-09***... раздел 5 подраздел 5.2 табл. 09-05-019\nГЭСН 81-02-16*... раздел 2 табл. 16-02-010, \n16-02-012, 16-02-013;\nГЭСН 81-02-27-... раздел 10; \nГЭСН 81-02-3711*… табл. 37-06-007;\nГЭСН 81-02-41-... подраздел 1.5 раздела 1; \nГЭСН 81-02-45-... табл. 45-10-001;\nГЭСН 81-02-46-... табл. 46-08-003, \nнормы 46-09-001-01: 46-09-001-07; \nГЭСН 81-02-47-... табл. 47-01-096;\nГЭСНр 81-02-69-... табл. 69-01-11: 69-01-014",
+      "overhead_ordinary": 73,
+      "overhead_equivalent_north": 73,
+      "overhead_far_north": 73,
+      "profit": 34
+    },
+    "109.0": {
+      "work_type": "Получение электроэнергии от передвижных источников снабжения",
+      "applicability": "Сметные цены на эксплуатацию машин и механизмов",
+      "overhead_ordinary": 78,
+      "overhead_equivalent_north": 78,
+      "overhead_far_north": 78,
+      "profit": 57
+    },
+    "110.0": {
+      "work_type": "Перевозка работников автомобильным транспортом",
+      "applicability": "Сметные цены на эксплуатацию машин и механизмов",
+      "overhead_ordinary": 100,
+      "overhead_equivalent_north": 100,
+      "overhead_far_north": 100,
+      "profit": 88
+    }
+  }
+}

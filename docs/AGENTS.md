@@ -1,14 +1,14 @@
 # Estimate AI — binding instructions for AI developers
 
-> Updated 2026-10-28. Read the root `AGENTS.md` and `docs/AI_HANDOFF.md` first.
+> Updated 2026-11-23. Read the root `AGENTS.md` and `docs/AI_HANDOFF.md` first.
 > The former "Phase 0, no web server/database" rule is obsolete: the current
 > source ZIP includes production-shaped FastAPI, SQLite and admin functions.
 
 ## Non-negotiable requirements
 
-1. **Source precedence:** work from the user's uploaded ZIP; GitHub
-   `AIestimGRO/estimate-ai`, branch `feature/admin-ui`, is for verification
-   when necessary. A snapshot without `.git` cannot verify repository HEAD.
+1. **Source precedence:** current GitHub `AIestimGRO/estimate-ai`, branch
+   `feature/admin-ui`, is the source of truth. User ZIPs are references unless
+   the user explicitly requests another code source.
 2. **Data integrity:** never invent prices or confuse RNMC and TKP sources.
    Retain source file, task number, row, unit, winner identity, and uncertainty.
    Preserve Excel content outside the exact requested cells/areas.
@@ -26,11 +26,13 @@
    ordinary source ZIP. Treat runtime data as sensitive.
 7. **Tests:** run `python -m pytest -q` before and after edits; write a failing
    regression case before fixing a bug. Record the actual test totals.
-8. **Deliverables:** no patches; return a ZIP with updated files and a clear
-   inventory of changed files. Do not modify unrelated files. For spreadsheet
-   requests, strictly preserve untouched columns/styles/formulas/sheets.
-9. **Git:** use `work/...` for independent changes, avoid force push and
-   destructive operations; only merge after green CI and approval.
+8. **Deliverables:** push verified changes to GitHub, integrate into
+   `feature/admin-ui`, provide deployment commands for the Windows CMD or
+   PowerShell environment. Do not issue ZIPs or patches unless requested.
+   For spreadsheets, preserve untouched columns/styles/formulas/sheets.
+9. **Git:** use `work/...` for independent changes; avoid force push and
+   destructive operations. Do not present partially implemented pricing as
+   production-ready.
 10. **Server:** never overwrite a running SQLite database or assume a local
     snapshot contains the newest production transactions. Follow
     `docs/SERVER_RUNBOOK.md`; prefer `sqlite3.Connection.backup`, tested
@@ -38,12 +40,13 @@
 
 ## Before starting a new task
 
-- Confirm which artifact is authoritative (uploaded source ZIP vs live DB vs
-  incoming original KL/RNMC workbooks). Ask for current source when absent.
+- Fetch current `feature/admin-ui` first. Treat the live production DB and
+  client KL/RNMC workbooks as separate data sources, not code snapshots.
 - Read `docs/AI_HANDOFF.md` and the targeted modules/tests; run full baseline.
 - Make the smallest consistent change with a regression test or verification
   script. Validate source provenance and downstream implications.
-- Re-run full tests, summarize remaining risks, and return a ZIP.
+- Re-run full tests, push tested changes to GitHub, and provide deployment
+  commands only when the release is ready.
 
 ## Product boundaries
 

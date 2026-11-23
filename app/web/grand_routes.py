@@ -17,6 +17,7 @@ from openpyxl import Workbook
 
 from app.services.grand_rim_report import RimReportError, read_filled_rim_report, attach_verified_rim_prices
 from app.services.grand_os_export import export_grand_os
+from app.services.grand_rim_calculator import calculate_gsfx_prices
 from app.services.grand_normalization import (
     load_catalog_index, normalize_rows, NormalizationSummary, CatalogIndex,
 )
@@ -55,8 +56,29 @@ def install_grand_routes(app: FastAPI, *, record_type, preview, db_path,
         rows = [{"number": p.number, "chapter": p.chapter,
                  "code": p.code, "name": p.name, "unit": p.unit,
                  "quantity": str(p.quantity) if p.quantity is not None else "",
-                 "price": "", "source_id": p.source_id, "include": True}
+                 "price": format(p.unit_work_price, 'f') if p.unit_work_price is not None else "",
+                 "price_origin": "Явная цена позиции GSFX" if p.unit_work_price is not None else "",
+                 "source_id": p.source_id, "include": True}
                 for p in parsed.positions]
+        calculations = calculate_gsfx_prices(source)
+        if len(calculations) != len(rows):
+            return HTMLResponse(render_error('Ошибка расчёта GSFX', 'Количество расчётных позиций не совпадает с исходной сметой'), status_code=422)
+        for row, position, calculated in zip(rows, parsed.positions, calculations):
+            if calculated is None or row['price']:
+                continue
+            row.update({
+                'price': format(calculated.unit_price, 'f'),
+                'rim_total': format(calculated.total, 'f'),
+                'labor_unit': format(calculated.labor_per_norm_unit, 'f'),
+                'machinist_labor_unit': format(calculated.machinist_labor_per_norm_unit, 'f'),
+                'labor_total': format(calculated.labor_per_norm_unit * position.quantity, 'f'),
+                'machinist_labor_total': format(calculated.machinist_labor_per_norm_unit * position.quantity, 'f'),
+                'price_origin': (
+                    f'Расчёт РИМ из GSFX, НР/СП {calculated.nr_sp_code} (ФСНБ-2022, доп.19)'
+                    + (f'; материалы без цены не учтены: {calculated.unpriced_materials}'
+                       if calculated.unpriced_materials else '')
+                ),
+            })
         report_result = None
         if rim_export is not None and rim_export.filename:
             if not rim_export.filename.lower().endswith(".xlsx"):
@@ -211,7 +233,10 @@ def _grand_preview_html(token: str, rows: list[dict], region: str, error: str = 
     missing_prices = sum(1 for row in rows if row.get('include', True) and _grand_positive_price(row.get('price', '')) is None)
     result = f'<p class="muted">Позиций: {len(rows)} · Без проверенной цены: {missing_prices} · Регион: {h(region)}</p>'
     if rim_result is None:
-        result += '<p class="warn">GSFX не содержит готовую цену работы. Для автоматического заполнения нужен рассчитанный Excel-отчёт формы РИМ, экспортированный ГРАНД-Сметой. Стоимость ресурсов не подменяет цену позиции.</p>'
+        if missing_prices:
+            result += '<p class="warn">Не для всех позиций удалось подтвердить расчёт РИМ по GSFX. Неподтверждённые цены оставлены пустыми и требуют проверки — стоимость отдельного ресурса не подменяет цену работы.</p>'
+        else:
+            result += '<p class="muted">Цены сформированы из GSFX по проверенным нормативам РИМ или указаны непосредственно в GSFX; отдельный Excel-отчёт не требуется.</p>'
     else:
         result += f'<p>Сверка с заполненным отчётом РИМ: цены для {rim_result[0]} позиций; без цены {rim_result[1]}. Неподтверждённые позиции остаются для проверки.</p>'
     if summary and summary.available:

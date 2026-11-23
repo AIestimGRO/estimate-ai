@@ -207,6 +207,10 @@ def normalize_rows(rows: list[dict], catalog: CatalogIndex) -> NormalizationSumm
                     row['quantity'] = _decimal_text(old_qty * factor)
                     if old_price is not None:
                         row['price'] = _decimal_text(old_price / factor)
+                    for labor_key in ('labor_unit', 'machinist_labor_unit'):
+                        labor_value = _decimal(row.get(labor_key)) if row.get(labor_key) not in (None, '') else None
+                        if labor_value is not None:
+                            row[labor_key] = _decimal_text(labor_value / factor)
                     did_change = True
                     notes.append(f'Масштаб: ×{_decimal_text(factor)} к количеству, ÷{_decimal_text(factor)} к цене')
         else:

@@ -1,11 +1,14 @@
 """GSFX upload/edit/export and position 163 regression checks."""
 from io import BytesIO
+from decimal import Decimal
+from xml.etree import ElementTree as ET
 import pytest
 from zipfile import ZipFile
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from app.web.app import create_app
 from app.services.read_estimate import load_estimate
+from core.grand_smeta import _explicit_work_price
 
 @pytest.fixture(autouse=True)
 def isolated_auth_database(tmp_path, monkeypatch):
@@ -30,6 +33,54 @@ def _gsfx():
         z.writestr('Properties.txt', 'GSFX')
         z.writestr('Data.xml', XML)
     return out.getvalue()
+
+
+def _gsfx_with_direct_work_prices():
+    """Directly priced loading and transport work in real GSFX documents."""
+    xml = '''<Document Generator="GrandSmeta"><Properties LocNum="L-1"/><Chapters>
+    <Chapter Caption="Раздел">
+      <Position Number="163" Code="43-1" Caption="Погрузка в автотранспортное средство"
+                Units="1т груза"><Quantity Result="1225"/><PriceCurr MT="103,54"/></Position>
+      <Position Number="164" Code="02-15-1" Caption="Перевозка"
+                Units="1т груза"><Quantity Result="1225"/><PriceCurr EM="900,82"/></Position>
+      <Position Number="165" Code="ГЭСН01-01-016-01" Caption="Работа на отвале"
+                Units="1000 м3"><Quantity Result="0,6125"/>
+                <Resources><Mch Code="91.01.05-087" Units="маш.-ч" Quantity="13">
+                <PriceCurr Value="2728,89"/></Mch></Resources></Position>
+    </Chapter></Chapters></Document>'''
+    out = BytesIO()
+    with ZipFile(out, 'w') as archive:
+        archive.writestr('Properties.txt', 'GSFX')
+        archive.writestr('Data.xml', xml)
+    return out.getvalue()
+
+
+def test_grand_direct_work_prices_do_not_require_a_second_file(tmp_path):
+    with TestClient(create_app(base_dir=tmp_path)) as client:
+        response = client.post('/grand/import', files={
+            'estimate': ('realistic.gsfx', _gsfx_with_direct_work_prices()),
+        })
+        assert response.status_code == 200
+        token = next(iter(client.app.state.app_state.grand_drafts))
+        rows = client.app.state.app_state.grand_drafts[token]['rows']
+        assert [row['price'] for row in rows] == ['103.54', '900.82', '']
+        assert 'GSFX' in rows[0]['price_origin']
+        assert 'GSFX' in rows[1]['price_origin']
+        # Resource unit rates are not the calculated price of a work item.
+        assert not rows[2].get('price_origin', '').startswith('Расценка позиции GSFX')
+
+
+@pytest.mark.parametrize('position_xml, expected', [
+    ('<Position><PriceCurr EM="900,82" Comment="Источник"/></Position>', Decimal('900.82')),
+    ('<Position><PriceCurr MT="103,54"/></Position>', Decimal('103.54')),
+    ('<Position><PriceCurr EM="900,82" MT="103,54"/></Position>', None),
+    ('<Position><PriceCurr Value="2728,89"/></Position>', None),
+    ('<Position><PriceCurr EM="900,82"/><Resources><Mch/></Resources></Position>', None),
+    ('<Position><PriceCurr EM="-10"/></Position>', None),
+    ('<Position><PriceCurr EM="Infinity"/></Position>', None),
+])
+def test_direct_gsfx_price_requires_unambiguous_standalone_rate(position_xml, expected):
+    assert _explicit_work_price(ET.fromstring(position_xml)) == expected
 
 def _form(token, rows, *, price='103,54', action='xlsx'):
     data = {'token': token, 'action': action}

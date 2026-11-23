@@ -1,4 +1,4 @@
-# Estimate AI — agent entry point (updated 2026-10-28)
+# Estimate AI — agent entry point (updated 2026-11-23)
 
 **Start with `docs/AI_HANDOFF.md`.** It is the dated, source-checked handoff,
 including what is known only from the October 2026 production session. Then
@@ -7,10 +7,10 @@ read `docs/AGENTS.md`, `docs/DOMAIN_RULES.md`, `docs/RNMC_IMPORT.md`,
 
 ## Authority and freshness
 
-1. The ZIP supplied by the user for **this task** is the source of truth for
-   code. The canonical GitHub project is `AIestimGRO/estimate-ai`, working
-   branch `feature/admin-ui`, but inspect GitHub only for verification when
-   necessary. A ZIP without `.git` cannot prove its branch or commit hash.
+1. The canonical source of truth for code is GitHub
+   `AIestimGRO/estimate-ai`, branch `feature/admin-ui`. Start from its current
+   HEAD in a temporary `work/...` branch. User ZIPs are reference material
+   unless the user explicitly requests a different code source.
 2. A live production database and server are **different** from the source ZIP.
    Never infer their contents from GitHub, a local development database, or
    documentation. Verify production state before any change.
@@ -18,8 +18,7 @@ read `docs/AGENTS.md`, `docs/DOMAIN_RULES.md`, `docs/RNMC_IMPORT.md`,
    user-confirmed rules for desired behavior, and real production checks for
    production state. Explicitly flag contradictions rather than assuming.
 4. Read-only investigation first. Never place real pricing/client databases,
-   backups, workbooks, private keys, models, or runtime artifacts in the
-   deliverable ZIP or a commit.
+   backups, workbooks, private keys, models, or runtime artifacts in a commit.
 
 ## Mandatory working protocol
 
@@ -30,11 +29,13 @@ read `docs/AGENTS.md`, `docs/DOMAIN_RULES.md`, `docs/RNMC_IMPORT.md`,
   reproducing failing test for a bug.
 - Keep changes targeted, deterministic, auditable, and minimally invasive.
   Do not alter price or matching policy silently; do not invent analog prices.
-- Return a ZIP with the updated files, **not a patch**; give a precise file
-  list and test results. Preserve all unrelated files and workbook content.
-- For Git changes, prefer a temporary `work/...` branch; do not force-push,
-  destructively reset, or silently update `feature/admin-ui`. Integrate only
-  after green tests/CI and explicit permission.
+- Publish tested code to GitHub and integrate green changes into
+  `feature/admin-ui` without force push. Do not substitute ZIP/patch delivery
+  unless the user specifically requests it. Include changed files, tests and
+  Windows CMD/PowerShell deployment commands for completed releases.
+- Use a temporary `work/...` branch; do not force-push or destructively reset.
+- The user runs deployment commands on the Windows server. Never update the
+  server directly; preserve the live database and unrelated workflows.
 - The original VBA under `reference/vba_original/` documents legacy behavior.
   Check `docs/DOMAIN_RULES.md` and tests before changing a ported rule.
 - No unreviewed LLM/embedding prices in the live RNMC matching path. Semantic
@@ -61,5 +62,5 @@ python -m app.web --no-browser  # local development only; port 8000 by default
 
 **Warning:** some older docs and `.cursor` instructions used to describe the
 project as "Phase 0, no web/db". That is obsolete. The current ZIP contains a
-FastAPI app and SQLite persistence. The Windows server wrapper scripts from
-production are NOT in this supplied source snapshot; do not fabricate them.
+FastAPI app and SQLite persistence. Historical October 2026 ZIP handoffs may
+also omit newer GrandSmeta modules or deployment scripts: use current Git HEAD.

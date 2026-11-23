@@ -34,7 +34,7 @@ def export_grand_os(rows: list[dict], target: Path, *, metadata: dict | None = N
     alert_fill = PatternFill('solid', fgColor='FFF0C2')
     sheet.sheet_view.showGridLines = False
     sheet['M2'] = 'УТВЕРЖДЕНО:'
-    sheet['M3'] = 'Оценка стоимости (по заполненной форме РИМ)'
+    sheet['M3'] = 'Оценка стоимости (РИМ / данные ГРАНД-Сметы)'
     task_no = str(info.get('task_number') or '').strip()
     sheet['M9'] = '№ задачи: ' + (task_no or 'не указан — заполните')
     if not task_no:

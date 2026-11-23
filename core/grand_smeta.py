@@ -1,7 +1,7 @@
 """Read-only import of GrandSmeta GSFX source records.
 
-This is an extraction boundary, not an estimate price calculator. Per-unit
-work prices must be provided by a verified calculation/export before matching.
+This is an extraction boundary, not a RIM estimate calculator. Only explicit,
+unambiguous unit prices on a position can be used without a calculation report.
 """
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -33,7 +33,7 @@ class GrandPosition:
     unit: str
     quantity: Decimal | None
     resources: tuple[GrandResource, ...]
-    unit_work_price: None = None
+    unit_work_price: Decimal | None = None
 
 @dataclass(frozen=True)
 class GrandEstimate:
@@ -55,6 +55,32 @@ def _decimal(value: str | None) -> Decimal | None:
 def _price(node: ET.Element, kind: str) -> Decimal | None:
     price_node = node.find(kind)
     return _decimal(price_node.get('Value')) if price_node is not None else None
+
+
+def _explicit_work_price(position: ET.Element) -> Decimal | None:
+    """Read an explicit standalone work rate, never infer it from resources.
+
+    Loading and hauling positions can carry a single current unit rate in
+    PriceCurr.MT/EM. Ordinary RIM positions need a separate calculation and
+    their resource-level prices must not be mistaken for work unit rates.
+    """
+    resources = position.find('Resources')
+    if resources is not None and len(resources):
+        return None
+    current = position.find('PriceCurr')
+    if current is None:
+        return None
+    amounts = []
+    for key, value in current.attrib.items():
+        if key == 'Comment':
+            continue
+        if key not in ('MT', 'EM'):
+            return None
+        amount = _decimal(value)
+        if amount is None or amount <= 0:
+            return None
+        amounts.append(amount)
+    return amounts[0] if len(amounts) == 1 else None
 
 def read_gsfx(path: str | Path) -> GrandEstimate:
     """Extract all chapter positions and nested resources, without pricing guesses."""
@@ -110,6 +136,7 @@ def read_gsfx(path: str | Path) -> GrandEstimate:
                 unit=pos.get('Units', ''),
                 quantity=quantity,
                 resources=tuple(resources),
+                unit_work_price=_explicit_work_price(pos),
             ))
     return GrandEstimate(
         local_number=properties.get('LocNum', '') if properties is not None else '',
