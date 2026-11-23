@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -447,4 +447,33 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_job
     ON audit_events(job_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_actor
     ON audit_events(actor_user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS lsr_learning_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gsfx_sha256 TEXT NOT NULL,
+    os_sha256 TEXT NOT NULL,
+    gsfx_filename TEXT NOT NULL,
+    os_filename TEXT NOT NULL,
+    gsfx_blob BLOB NOT NULL,
+    os_rows_json TEXT NOT NULL,
+    issues_json TEXT NOT NULL,
+    sheet_title TEXT NOT NULL,
+    author_user_id INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+    job_token TEXT NOT NULL DEFAULT '',
+    quality TEXT NOT NULL CHECK(quality IN ('candidate', 'review')),
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending', 'approved', 'rejected')),
+    os_count INTEGER NOT NULL,
+    gsfx_count INTEGER NOT NULL,
+    matched_count INTEGER NOT NULL,
+    checked_prices INTEGER NOT NULL,
+    reviewed_by INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+    review_comment TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(gsfx_sha256, os_sha256, sheet_title)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lsr_learning_cases_status
+    ON lsr_learning_cases(status, quality, created_at);
 """

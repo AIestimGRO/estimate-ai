@@ -26,6 +26,7 @@ from core.storage.accounts import (
     user_from_session,
 )
 from core.storage.connection import connect, default_database_path, init_database
+from core.storage.lsr_learning import get_learning_case_for_job
 from core.storage.rules import upsert_task_color_entry
 from core.storage.workspace import (
     REQUEST_ANALOG_CHANGE,
@@ -279,9 +280,16 @@ def install_workspace_routes(app: FastAPI) -> None:
                     status_code=404,
                 )
             touch_job(connection, job.id)
+            evidence_case = get_learning_case_for_job(connection, job.id)
         finally:
             connection.close()
-        return HTMLResponse(_render_workspace(job, user))
+        evidence_summary = ''
+        if evidence_case is not None:
+            status = ('ожидает проверки администратором' if evidence_case['status'] == 'pending'
+                      else 'одобрена' if evidence_case['status'] == 'approved' else 'отклонена')
+            evidence_summary = (f'ЛСР № {evidence_case["id"]}: сохранена отдельно от базы аналогов, '
+                                f'{evidence_case["matched_count"]}/{evidence_case["os_count"]} строк сопоставлено; {status}.')
+        return HTMLResponse(_render_workspace(job, user, evidence_summary=evidence_summary))
 
     @app.get("/api/jobs/{job_id}/grid")
     def workspace_grid(request: Request, job_id: str):
@@ -952,7 +960,7 @@ def _render_jobs(jobs, user) -> str:
     return _page(title, body, user)
 
 
-def _render_workspace(job, user) -> str:
+def _render_workspace(job, user, *, evidence_summary: str = '') -> str:
     labels = json.dumps(TEXT, ensure_ascii=True)
     job_id = json.dumps(job.id)
     body = f"""<main style="max-width:none">
@@ -966,6 +974,7 @@ def _render_workspace(job, user) -> str:
 <div class="metric"><strong>{job.flagged_rows}</strong><span>{_escape(TEXT["risks"])}</span></div>
 <div class="metric"><strong>{job.tkp_matched_rows}</strong><span>TKP</span></div>
 </div>
+{('<p class="notice">' + _escape(evidence_summary) + '</p>') if evidence_summary else ''}
 <div class="toolbar">
 <input id="globalSearch" type="search" placeholder="{_escape(TEXT["search"])}">
 <button class="ghost" id="columnsButton" type="button">{_escape(TEXT["columns"])}</button>

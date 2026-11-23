@@ -69,6 +69,12 @@ COEFFICIENT_METHOD_LABELS = {
 
 ADMIN_SECTIONS = [
     {
+        "slug": "lsr-learning",
+        "title": "ЛСР ↔ ОС: обучающие примеры",
+        "description": "Сверка исходных GSFX и ОС специалистов, очередь на проверку и согласование материалов без влияния на действующий подбор.",
+        "status": "Новые примеры не попадают в базу аналогов автоматически.",
+    },
+    {
         "slug": "users",
         "title": "Пользователи",
         "description": "Учетные записи специалистов и администраторов: ФИО, логин, роль, блокировка и сброс пароля.",
@@ -619,6 +625,7 @@ def render_confirm(
     unit_filter_enabled: bool = True,
     demontazh_filter_enabled: bool = True,
     error: str | None = None,
+    evidence_message: str | None = None,
 ) -> str:
     """Region/coefficient confirmation screen shown before the real run."""
     region_source = (
@@ -642,6 +649,8 @@ def render_confirm(
         )
     if error:
         warning += f'<p class="notice">{html.escape(error)}</p>'
+    if evidence_message:
+        warning += f'<p class="notice">{html.escape(evidence_message)}</p>'
 
     return render(
         "confirm.html",

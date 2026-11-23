@@ -139,7 +139,7 @@ def test_v14_database_is_upgraded_with_auth_workspace_tables() -> None:
     finally:
         connection.close()
 
-    assert int(version) == 15
+    assert int(version) == 16
     assert "app_users" in tables
     assert "processing_jobs" in tables
     assert "specialist_change_requests" in tables

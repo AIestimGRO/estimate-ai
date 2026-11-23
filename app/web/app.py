@@ -20,6 +20,8 @@ Flow:
 """
 
 import shutil
+import sqlite3
+from html import escape
 import sys
 import tempfile
 import uuid
@@ -35,6 +37,8 @@ from starlette.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.web.grand_routes import install_grand_routes
+from app.web.lsr_learning_routes import install_lsr_learning_routes
+from app.services.lsr_evidence import EvidenceReport, evaluate_lsr_pair
 from app.services.catalog_source import CatalogNotAvailableError, database_has_catalog
 from app.services.read_estimate import (
     EstimateReadError,
@@ -127,6 +131,8 @@ from core.storage.rules import (
     upsert_task_highlight_reason,
 )
 from core.storage.connection import connect, default_database_path, init_database
+from core.storage.lsr_learning import save_learning_case
+from core.grand_smeta import read_gsfx, GrandSmetaFormatError
 from core.excel_io import read_catalog_rows_with_positions
 from app.web.workspace import install_workspace_routes
 from app.web.rendering import (
@@ -180,6 +186,11 @@ class UploadRecord:
     output_path: Path | None = None
     output_name: str = ""
     owner_user_id: int | None = None
+    lsr_path: Path | None = None
+    lsr_name: str = ""
+    evidence_sheet: str = ""
+    evidence_report: EvidenceReport | None = None
+    evidence_message: str = ""
 
 
 @dataclass
@@ -264,6 +275,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
     app = FastAPI(title="Estimate AI", docs_url=None, redoc_url=None)
     app.state.app_state = AppState(base_dir=resolved_base)
     install_workspace_routes(app)
+    install_lsr_learning_routes(app)
     install_grand_routes(
         app, record_type=UploadRecord, preview=_preview,
         db_path=default_database_path, db_available=database_has_catalog,
@@ -2159,6 +2171,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         request: Request,
         catalog: UploadFile | None = File(None),
         estimate: UploadFile | None = File(None),
+        lsr: UploadFile | None = File(None),
     ) -> HTMLResponse:
         state: AppState = app.state.app_state
         current_user = getattr(request.state, "user", None)
@@ -2179,6 +2192,16 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         catalog_bytes = b""
         if catalog is not None:
             catalog_bytes = await catalog.read()
+
+        lsr_bytes = b""
+        if lsr is not None and lsr.filename:
+            if current_user is None:
+                return HTMLResponse(render_index("Для сохранения обучающих примеров войдите под своей учётной записью."), status_code=403)
+            if not lsr.filename.lower().endswith('.gsfx'):
+                return HTMLResponse(render_index('Дополнительная ЛСР должна иметь расширение .gsfx.'), status_code=400)
+            lsr_bytes = await lsr.read(12 * 1024 * 1024 + 1)
+            if not lsr_bytes or len(lsr_bytes) > 12 * 1024 * 1024:
+                return HTMLResponse(render_index('ЛСР пустая или больше 12 МБ.'), status_code=400)
 
         use_database_catalog = False
         catalog_path: Path | None = None
@@ -2202,6 +2225,15 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             catalog_path = _save(directory, "catalog.xlsx", catalog_bytes)
         estimate_name = _safe_name(estimate.filename) or "estimate.xlsx"
         estimate_path = _save(directory, estimate_name, estimate_bytes)
+        lsr_path = _save(directory, 'evidence.gsfx', lsr_bytes) if lsr_bytes else None
+        if lsr_path is not None:
+            try:
+                parsed_lsr = read_gsfx(lsr_path)
+                if len(parsed_lsr.positions) > 10000:
+                    raise GrandSmetaFormatError('Слишком много позиций ЛСР')
+            except GrandSmetaFormatError as error:
+                lsr_path.unlink(missing_ok=True)
+                return HTMLResponse(render_index('Ошибка дополнительной ЛСР: ' + str(error)), status_code=422)
 
         state.store[token] = UploadRecord(
             directory=directory,
@@ -2210,6 +2242,8 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             estimate_name=estimate_name,
             use_database_catalog=use_database_catalog,
             owner_user_id=(int(current_user.id) if current_user is not None else None),
+            lsr_path=lsr_path,
+            lsr_name=_safe_name(lsr.filename) if lsr_path is not None and lsr is not None else '',
         )
         return _preview(state, token, selected_sheet=None)
 
@@ -2398,6 +2432,7 @@ def _preview(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             status_code=400,
         )
 
+    evidence_message = _evidence_report_message(record, preview.sheet_title)
     return HTMLResponse(
         render_confirm(
             token,
@@ -2406,8 +2441,28 @@ def _preview(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             region_method=preview.region_text,
             coefficient_value=preview.coefficient_value,
             coefficient_method=preview.coefficient_method,
+            evidence_message=evidence_message,
         )
     )
+
+
+def _evidence_report_message(record: UploadRecord, sheet_title: str) -> str:
+    if record.lsr_path is None:
+        return ''
+    if record.evidence_sheet == sheet_title:
+        return record.evidence_message
+    record.evidence_sheet = sheet_title
+    record.evidence_report = None
+    try:
+        report = evaluate_lsr_pair(record.estimate_path, record.lsr_path,
+                                   sheet_title=sheet_title)
+    except (ValueError, OSError, KeyError, EstimateReadError, GrandSmetaFormatError) as error:
+        record.evidence_message = 'Сверка ЛСР не выполнена; пример не будет сохранён: ' + str(error)
+    else:
+        record.evidence_report = report
+        record.evidence_message = (report.message if report.matched else
+            report.message + ' Нет общих позиций: пример не будет сохранён.')
+    return record.evidence_message
 
 
 def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLResponse:
@@ -2500,6 +2555,8 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
     record.output_path = outcome.output_path
     record.output_name = _wa_name(record.estimate_name)
 
+    _evidence_report_message(record, selected_sheet or outcome.sheet_title)
+
     if record.owner_user_id is not None:
         connection = connect(default_database_path())
         try:
@@ -2514,6 +2571,18 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
                 region=record.target_region or "",
                 use_tkp_analogs=record.use_tkp_analogs,
             )
+            if record.lsr_path is not None and record.evidence_report is not None and record.evidence_report.matched:
+                try:
+                    case_id, created = save_learning_case(
+                        connection, gsfx_path=record.lsr_path, os_path=record.estimate_path,
+                        gsfx_filename=record.lsr_name, os_filename=record.estimate_name,
+                        sheet_title=record.evidence_sheet, author_user_id=record.owner_user_id,
+                        job_token=token, report=record.evidence_report,
+                    )
+                    record.evidence_message += (f' Пример № {case_id} '
+                                                + ('сохранён на проверку.' if created else 'уже был загружен.'))
+                except (sqlite3.DatabaseError, OSError, ValueError) as error:
+                    record.evidence_message += ' Не удалось сохранить пример: ' + str(error)
         except (OSError, ValueError) as error:
             return HTMLResponse(
                 render_error(
@@ -2526,7 +2595,11 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
             connection.close()
         return RedirectResponse(f"/jobs/{token}", status_code=303)
 
-    return HTMLResponse(render_result(token, record.output_name, outcome))
+    result_html = render_result(token, record.output_name, outcome)
+    if record.evidence_message:
+        result_html = result_html.replace('</main>',
+            '<p class="notice">' + escape(record.evidence_message) + '</p></main>')
+    return HTMLResponse(result_html)
 
 
 

@@ -236,6 +236,7 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
         "specialist_change_requests",
         "user_preferences",
         "audit_events",
+        "lsr_learning_cases",
     }
     existing_tables = {
         str(row["name"])
