@@ -1,6 +1,6 @@
 """SQLite schema for Estimate AI."""
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 DDL = """
 PRAGMA foreign_keys = ON;
@@ -477,4 +477,15 @@ CREATE TABLE IF NOT EXISTS lsr_learning_cases (
 
 CREATE INDEX IF NOT EXISTS idx_lsr_learning_cases_status
     ON lsr_learning_cases(status, quality, created_at);
+
+-- The first GSFX stays in lsr_learning_cases for compatibility with existing
+-- examples. Additional files are stored as numbered members of the same OS.
+CREATE TABLE IF NOT EXISTS lsr_learning_sources (
+    case_id INTEGER NOT NULL REFERENCES lsr_learning_cases(id) ON DELETE CASCADE,
+    source_index INTEGER NOT NULL CHECK(source_index >= 2),
+    filename TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    gsfx_blob BLOB NOT NULL,
+    PRIMARY KEY(case_id, source_index)
+);
 """

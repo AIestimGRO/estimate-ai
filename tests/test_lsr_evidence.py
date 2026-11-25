@@ -1,5 +1,6 @@
 """Optional source-LSR upload never trains from unverified specialist data."""
 from io import BytesIO
+import hashlib
 import json
 from pathlib import Path
 from zipfile import ZipFile
@@ -68,6 +69,199 @@ def gsfx_bytes(*, different_code=False, no_direct_price=False):
         zipf.writestr('Properties.txt', 'GSFX')
         zipf.writestr('Data.xml', xml)
     return data.getvalue()
+
+
+def _single_gsfx(*, number: str, code: str, name: str, unit: str,
+                 quantity: str, unit_price: str) -> bytes:
+    xml = (f'<Document Generator="GrandSmeta"><Properties LocNum="TEST-2"/>'
+           f'<Chapters><Chapter Caption="Раздел"><Position Number="{number}" '
+           f'Code="{code}" Caption="{name}" Units="{unit}">'
+           f'<Quantity Result="{quantity}"/><PriceCurr MT="{unit_price}"/>'
+           '</Position></Chapter></Chapters></Document>')
+    data = BytesIO()
+    with ZipFile(data, 'w') as archive:
+        archive.writestr('Properties.txt', 'GSFX')
+        archive.writestr('Data.xml', xml)
+    return data.getvalue()
+
+
+def test_multiple_gsfx_are_one_verifiable_source_set(tmp_path):
+    os = tmp_path / 'os.xlsx'
+    os.write_bytes(os_bytes())
+    first = tmp_path / 'first.gsfx'
+    second = tmp_path / 'second.gsfx'
+    first.write_bytes(_single_gsfx(number='162', code=CODE_A, name='Разработка грунта',
+                                  unit='1000 м3', quantity='0,6125', unit_price='100000'))
+    second.write_bytes(_single_gsfx(number='163', code='43-1',
+                                   name='Погрузка в автотранспортное средство',
+                                   unit='1т груза', quantity='10', unit_price='50'))
+
+    from app.services.lsr_evidence import evaluate_lsr_sources
+    report = evaluate_lsr_sources(os, (first, second), sheet_title='ОС ГРАНД')
+    assert report.quality == 'candidate'
+    assert report.os_count == report.lsr_count == report.matched == report.checked_prices == 2
+    assert {row['source_filename'] for row in report.rows} == {'first.gsfx', 'second.gsfx'}
+
+    # GrandSmeta positions can be renumbered when several separate LSRs
+    # are combined into an OS. A unique technical match remains verifiable.
+    second.write_bytes(_single_gsfx(number='162', code='43-1',
+                                   name='Погрузка в автотранспортное средство',
+                                   unit='1т груза', quantity='10', unit_price='50'))
+    renumbered = evaluate_lsr_sources(os, (first, second), sheet_title='ОС ГРАНД')
+    assert renumbered.quality == 'candidate'
+    assert renumbered.matched == 2
+
+
+def test_multiple_gsfx_upload_admin_review_and_archive(tmp_path, monkeypatch):
+    db_path = tmp_path / 'many.sqlite'
+    monkeypatch.setenv('ESTIMATE_AI_DB_PATH', str(db_path))
+    with TestClient(create_app(base_dir=tmp_path / 'sessions')) as client:
+        client.post('/setup', data={'full_name': 'Admin', 'login': 'admin',
+                                    'password': 'verylongpassword'})
+        with connect(db_path) as connection:
+            create_user(connection, full_name='Specialist', login='specialist',
+                        password='verylongpassword', role=ROLE_SPECIALIST)
+        client.post('/login', data={'login': 'specialist', 'password': 'verylongpassword'})
+        assert 'multiple' in client.get('/').text
+        first = _single_gsfx(number='162', code=CODE_A, name='Разработка грунта',
+                             unit='1000 м3', quantity='0,6125', unit_price='100000')
+        second = _single_gsfx(number='163', code='43-1',
+                              name='Погрузка в автотранспортное средство',
+                              unit='1т груза', quantity='10', unit_price='50')
+        os = os_bytes()
+        catalog = Workbook()
+        catalog.active.title = 'Каталог'
+        catalog.active['B4'] = 'T-1'
+        catalog.active['C4'] = 'Разработка грунта'
+        catalog.active['D4'] = 'м3'
+        catalog.active['G4'] = 100
+        catalog.active['N4'] = CODE_A
+        response = client.post('/run', files=[
+            ('catalog', ('catalog.xlsx', _workbook_bytes(catalog))),
+            ('estimate', ('os.xlsx', os)),
+            ('lsr', ('first.gsfx', first)),
+            ('lsr', ('second.gsfx', second)),
+        ])
+        assert response.status_code == 200
+        assert 'Структурная сверка пройдена' in response.text
+        import re
+        token = re.search(r'name="token" value="([a-f0-9]+)"', response.text).group(1)
+        sheet = re.search(r'name="sheet" value="([^"]+)"', response.text).group(1)
+        assert client.post('/confirm', data={'token': token, 'sheet': sheet,
+                                              'region': '', 'coefficient': '1'},
+                           follow_redirects=False).status_code == 303
+        assert '2 ЛСР' in client.get(f'/jobs/{token}').text
+        with connect(db_path) as connection:
+            cases = connection.execute('SELECT * FROM lsr_learning_cases').fetchall()
+            assert len(cases) == 1
+            assert cases[0]['status'] == 'pending'
+            assert cases[0]['quality'] == 'candidate'
+            assert connection.execute('SELECT COUNT(*) FROM lsr_learning_sources').fetchone()[0] == 1
+            assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+
+        assert client.get('/admin/lsr-learning/export').status_code == 403
+        assert client.get('/admin/lsr-learning/1/download/2').status_code == 403
+        client.post('/login', data={'login': 'admin', 'password': 'verylongpassword'})
+        assert 'second.gsfx' in client.get('/admin/lsr-learning').text
+        assert client.get('/admin/lsr-learning/1/download').content == first
+        assert client.get('/admin/lsr-learning/1/download/2').content == second
+        assert client.post('/admin/lsr-learning/1/review', data={'action': 'approved'},
+                           follow_redirects=False).status_code == 303
+        exported = client.get('/admin/lsr-learning/export')
+        assert exported.status_code == 200
+        with ZipFile(BytesIO(exported.content)) as archive:
+            assert archive.testzip() is None
+            assert archive.read('pair_000001/original_lsr_01.gsfx') == first
+            assert archive.read('pair_000001/original_lsr_02.gsfx') == second
+            assert archive.read('pair_000001/original_os.xlsx') == os
+            info = json.loads(archive.read('pair_000001/verification.json'))
+            assert [item['filename'] for item in info['gsfx_sources']] == [
+                'first.gsfx', 'second.gsfx']
+            assert json.loads(archive.read('manifest.json'))['total_pairs'] == 1
+
+        # Replaying a different source set must not overwrite prior approval.
+        from core.storage.lsr_learning import save_learning_case
+        record = client.app.state.app_state.store[token]
+        with connect(db_path) as connection:
+            case_id, created = save_learning_case(connection,
+                gsfx_paths=record.lsr_paths[:1], gsfx_filenames=record.lsr_names[:1],
+                os_path=record.estimate_path, os_filename='os.xlsx',
+                sheet_title='ОС ГРАНД', author_user_id=1, job_token='different',
+                report=record.evidence_report)
+            assert created and case_id != 1
+            assert connection.execute('SELECT status FROM lsr_learning_cases WHERE id=1').fetchone()[0] == 'approved'
+            connection.execute('''UPDATE lsr_learning_sources SET gsfx_blob=?
+                                  WHERE case_id=1 AND source_index=2''', (b'altered',))
+            connection.commit()
+        assert client.get('/admin/lsr-learning/export').status_code == 422
+
+
+def test_multiple_gsfx_ambiguous_sources_stay_unapproved(tmp_path):
+    from app.services.lsr_evidence import evaluate_lsr_sources
+    os = tmp_path / 'os.xlsx'
+    os.write_bytes(os_bytes())
+    paths = (tmp_path / 'a.gsfx', tmp_path / 'b.gsfx')
+    duplicate = _single_gsfx(number='162', code=CODE_A, name='Разработка грунта',
+                             unit='1000 м3', quantity='0,6125', unit_price='100000')
+    for path in paths:
+        path.write_bytes(duplicate)
+    report = evaluate_lsr_sources(os, paths, sheet_title='ОС ГРАНД')
+    assert report.quality == 'review'
+    assert report.matched < report.os_count
+
+
+def test_one_invalid_gsfx_rejects_entire_upload(tmp_path, monkeypatch):
+    db_path = tmp_path / 'invalid.sqlite'
+    monkeypatch.setenv('ESTIMATE_AI_DB_PATH', str(db_path))
+    with TestClient(create_app(base_dir=tmp_path / 'sessions')) as client:
+        client.post('/setup', data={'full_name': 'Admin', 'login': 'admin',
+                                    'password': 'verylongpassword'})
+        client.post('/login', data={'login': 'admin', 'password': 'verylongpassword'})
+        catalog = Workbook()
+        catalog.active.title = 'Каталог'
+        catalog.active['B4'] = 'T-1'
+        catalog.active['C4'] = 'Разработка грунта'
+        catalog.active['D4'] = 'м3'
+        catalog.active['G4'] = 100
+        catalog.active['N4'] = CODE_A
+        response = client.post('/run', files=[
+            ('catalog', ('catalog.xlsx', _workbook_bytes(catalog))),
+            ('estimate', ('os.xlsx', os_bytes())),
+            ('lsr', ('valid.gsfx', gsfx_bytes())),
+            ('lsr', ('invalid.gsfx', b'not a zip')),
+        ])
+        assert response.status_code == 422
+        assert 'invalid.gsfx' in response.text
+        with connect(db_path) as connection:
+            assert connection.execute('SELECT COUNT(*) FROM lsr_learning_cases').fetchone()[0] == 0
+
+
+def test_schema_v17_upgrades_without_changing_legacy_source(tmp_path):
+    from core.storage.lsr_learning import get_learning_source, list_learning_sources
+    db = tmp_path / 'old.sqlite'
+    old_gsfx = gsfx_bytes()
+    old_os = os_bytes()
+    with connect(db) as connection:
+        init_database(connection, synchronize_corrections=False)
+        with connection:
+            connection.execute('DELETE FROM schema_migrations')
+            connection.execute('INSERT INTO schema_migrations(version) VALUES (17)')
+            connection.execute('DROP TABLE lsr_learning_sources')
+            connection.execute('''
+                INSERT INTO lsr_learning_cases (
+                    gsfx_sha256, os_sha256, gsfx_filename, os_filename, gsfx_blob, os_blob,
+                    os_rows_json, issues_json, sheet_title, quality, os_count, gsfx_count,
+                    matched_count, checked_prices, status
+                ) VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?, 'candidate', 2, 2, 2, 2, 'approved')
+            ''', (hashlib.sha256(old_gsfx).hexdigest(), hashlib.sha256(old_os).hexdigest(),
+                  'old.gsfx', 'old.xlsx', old_gsfx, old_os, 'ОС ГРАНД'))
+        init_database(connection, synchronize_corrections=False)
+        assert connection.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 18
+        assert get_learning_source(connection, 1) == old_gsfx
+        assert len(list_learning_sources(connection, 1)) == 1
+        assert connection.execute('SELECT status FROM lsr_learning_cases WHERE id=1').fetchone()[0] == 'approved'
+        assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+        assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
 
 
 def test_pair_checks_code_quantity_unit_price_and_missing_price(tmp_path):
@@ -230,7 +424,7 @@ def test_schema_migration_adds_learning_without_touching_existing_catalog():
             connection.execute('DELETE FROM schema_migrations')
             connection.execute('INSERT INTO schema_migrations(version) VALUES (15)')
         init_database(connection, synchronize_corrections=False)
-        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 17
+        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 18
         assert connection.execute("SELECT COUNT(*) FROM catalog_sources WHERE name='main'").fetchone()[0] == 1
         assert connection.execute('SELECT COUNT(*) FROM lsr_learning_cases').fetchone()[0] == 0
         assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
@@ -250,7 +444,7 @@ def test_v16_migration_preserves_existing_case_table_and_adds_original_os():
         init_database(connection, synchronize_corrections=False)
         cols = {row['name'] for row in connection.execute('PRAGMA table_info(lsr_learning_cases)')}
         assert 'os_blob' in cols
-        assert connection.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 17
+        assert connection.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 18
         assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
     finally:
         connection.close()

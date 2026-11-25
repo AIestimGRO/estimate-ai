@@ -287,7 +287,9 @@ def install_workspace_routes(app: FastAPI) -> None:
         if evidence_case is not None:
             status = ('ожидает проверки администратором' if evidence_case['status'] == 'pending'
                       else 'одобрена' if evidence_case['status'] == 'approved' else 'отклонена')
-            evidence_summary = (f'ЛСР № {evidence_case["id"]}: сохранена отдельно от базы аналогов, '
+            label = (f'Комплект из {evidence_case["source_count"]} ЛСР № {evidence_case["id"]}'
+                     if evidence_case['source_count'] > 1 else f'ЛСР № {evidence_case["id"]}')
+            evidence_summary = (f'{label}: сохранена отдельно от базы аналогов, '
                                 f'{evidence_case["matched_count"]}/{evidence_case["os_count"]} строк сопоставлено; {status}.')
         return HTMLResponse(_render_workspace(job, user, evidence_summary=evidence_summary))
 

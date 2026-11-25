@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from collections import defaultdict
+from collections.abc import Sequence
 
 from openpyxl import load_workbook
 
@@ -60,29 +62,60 @@ def _column_for(sheet, header: int, patterns: tuple[str, ...]) -> int | None:
     return None
 
 
+def _strict_source_match(source, os_item, quantity: Decimal | None) -> bool:
+    """Match renumbered rows only when all independently testable fields agree."""
+    left = parse_unit(source.unit)
+    right = parse_unit(str(os_item.unit))
+    if (left is None or right is None or left.base != right.base or
+            source.quantity is None or quantity is None or quantity <= 0):
+        return False
+    measured = source.quantity * left.scale
+    if abs(measured - quantity * right.scale) > max(
+            Decimal('0.00001'), abs(measured) * Decimal('0.0001')):
+        return False
+    return (_name_score(source.name, str(os_item.work_name)) >= .90 and
+            _same_technical_values(source.name, str(os_item.work_name)))
+
+
 def evaluate_lsr_pair(os_path: Path, gsfx_path: Path, *, sheet_title: str) -> EvidenceReport:
-    """Fail closed on missing structural fields or unverifiable prices.
+    """Backward-compatible single-source evidence evaluation."""
+    return evaluate_lsr_sources(os_path, (gsfx_path,), sheet_title=sheet_title)
+
+
+def evaluate_lsr_sources(os_path: Path, gsfx_paths: Sequence[Path], *,
+                         sheet_title: str,
+                         source_filenames: Sequence[str] | None = None) -> EvidenceReport:
+    """Fail closed while comparing an OS with the union of its source LSRs.
 
     The workbook is read-only; the original spreadsheet and analog database
     never receive writes during this comparison.
     """
+    if not gsfx_paths:
+        raise ValueError('At least one GSFX is required for comparison')
+    if source_filenames is None:
+        source_filenames = [path.name for path in gsfx_paths]
+    if len(source_filenames) != len(gsfx_paths):
+        raise ValueError('The source file names do not match the GSFX set')
     estimate = load_estimate(os_path, selected_sheet_title=sheet_title)
-    source = read_gsfx(gsfx_path)
-    calculated = calculate_gsfx_prices(gsfx_path)
-    sources = {}
-    duplicates: set[tuple[str, str]] = set()
-    for position, price in zip(source.positions, calculated):
-        key = (position.number.strip(), NormCode(position.code))
-        if key in sources:
-            duplicates.add(key)
-        sources[key] = (position, price)
+    sources: dict[tuple[str, str], list[tuple]] = defaultdict(list)
+    by_code: dict[str, list[tuple]] = defaultdict(list)
+    total_positions = 0
+    for source_path, source_filename in zip(gsfx_paths, source_filenames):
+        source = read_gsfx(source_path)
+        calculated = calculate_gsfx_prices(source_path)
+        for position, price in zip(source.positions, calculated):
+            code = NormCode(position.code)
+            entry = (total_positions, position, price, source_filename)
+            sources[(position.number.strip(), code)].append(entry)
+            by_code[code].append(entry)
+            total_positions += 1
     issues: list[str] = []
-    if duplicates:
+    if len(gsfx_paths) == 1 and any(len(values) > 1 for values in sources.values()):
         issues.append('В ЛСР повторяются номера позиций с одинаковыми шифрами')
 
     book = load_workbook(os_path, read_only=True, data_only=True)
     matched = checked_prices = 0
-    used: set[tuple[str, str]] = set()
+    used: set[int] = set()
     snapshots: list[dict] = []
     try:
         sheet = book[sheet_title]
@@ -98,11 +131,25 @@ def evaluate_lsr_pair(os_path: Path, gsfx_path: Path, *, sheet_title: str) -> Ev
             code = NormCode(os_item.code)
             key = (number, code)
             item_issues = []
-            original, calculated_price = sources.get(key, (None, None))
-            if original is None or key in used or key in duplicates:
+            exact = [item for item in sources.get(key, ()) if item[0] not in used]
+            selected = exact[0] if len(exact) == 1 and len(sources.get(key, ())) == 1 else None
+            if selected is None and len(gsfx_paths) > 1:
+                # Multiple LSRs may restart line numbering. Never infer a
+                # mapping unless code, unit, physical quantity and technical
+                # name identify exactly one unconsumed source position.
+                candidates = exact if exact else [item for item in by_code.get(code, ())
+                                                   if item[0] not in used]
+                suitable = [item for item in candidates
+                            if _strict_source_match(item[1], os_item, quantity)]
+                if len(suitable) == 1:
+                    selected = suitable[0]
+            original = calculated_price = None
+            source_filename = ''
+            if selected is None:
                 item_issues.append('Нет однозначной позиции ЛСР с тем же номером и шифром')
             else:
-                used.add(key)
+                source_id, original, calculated_price, source_filename = selected
+                used.add(source_id)
                 matched += 1
                 left = parse_unit(original.unit)
                 right = parse_unit(str(os_item.unit))
@@ -151,15 +198,16 @@ def evaluate_lsr_pair(os_path: Path, gsfx_path: Path, *, sheet_title: str) -> Ev
                 'excel_row': excel_row, 'number': number, 'code': code,
                 'name': str(os_item.work_name or ''), 'unit': str(os_item.unit or ''),
                 'quantity': str(quantity) if quantity is not None else '',
-                'price': str(os_item.base_price or ''), 'issues': item_issues,
+                'price': str(os_item.base_price or ''), 'source_filename': source_filename,
+                'issues': item_issues,
             })
     finally:
         book.close()
-    missing = len(source.positions) - len(used)
+    missing = total_positions - len(used)
     if missing:
-        issues.append(f'В ОС отсутствуют {missing} из {len(source.positions)} позиций ЛСР')
+        issues.append(f'В ОС отсутствуют {missing} из {total_positions} позиций ЛСР')
     if checked_prices < matched:
         issues.append(f'Не все цены подтверждены GSFX: {checked_prices} из {matched}')
     quality = ('candidate' if not issues and matched and checked_prices == matched else 'review')
-    return EvidenceReport(quality, len(snapshots), len(source.positions),
+    return EvidenceReport(quality, len(snapshots), total_positions,
                           matched, checked_prices, tuple(issues[:150]), tuple(snapshots))

@@ -9,6 +9,8 @@ import json
 import sqlite3
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from core.storage.lsr_learning import list_learning_sources, source_set_sha256
+
 
 @dataclass(frozen=True)
 class VerifiedPairExport:
@@ -40,21 +42,37 @@ def export_verified_pairs(connection: sqlite3.Connection, *, after_id: int = 0,
     output = BytesIO()
     manifest = []
     raw_bytes = 0
+    includes_multi_source = False
     with ZipFile(output, 'w', compression=ZIP_DEFLATED, compresslevel=6) as archive:
         for row in cursor:
-            gsfx, os_book = bytes(row['gsfx_blob']), bytes(row['os_blob'])
-            raw_bytes += len(gsfx) + len(os_book)
+            sources = list_learning_sources(connection, int(row['id']))
+            os_book = bytes(row['os_blob'])
+            raw_bytes += sum(len(source['content']) for source in sources) + len(os_book)
             if raw_bytes > max_raw_bytes:
                 raise ValueError('Export exceeds 128 MB. Download a smaller batch.')
-            if (hashlib.sha256(gsfx).hexdigest() != row['gsfx_sha256'] or
+            actual = [(source['filename'], hashlib.sha256(source['content']).hexdigest())
+                      for source in sources]
+            if (not actual or source_set_sha256(actual) != row['gsfx_sha256'] or
+                    any(source.get('sha256', checksum) != checksum
+                        for source, (_, checksum) in zip(sources, actual)) or
                     hashlib.sha256(os_book).hexdigest() != row['os_sha256']):
                 raise ValueError(f'Hash mismatch in approved pair #{row["id"]}')
             prefix = f'pair_{int(row["id"]):06d}/'
-            archive.writestr(prefix + 'original_lsr.gsfx', gsfx)
+            multiple = len(sources) > 1
+            includes_multi_source |= multiple
+            source_info = []
+            for source, (_, checksum) in zip(sources, actual):
+                filename = (f'original_lsr_{source["source_index"]:02}.gsfx' if multiple
+                            else 'original_lsr.gsfx')
+                archive.writestr(prefix + filename, source['content'])
+                source_info.append({'filename': source['filename'], 'sha256': checksum,
+                                    'archive_path': prefix + filename})
             archive.writestr(prefix + 'original_os.xlsx', os_book)
             metadata = {
                 'id': int(row['id']),
                 'gsfx_filename': row['gsfx_filename'],
+                'gsfx_sources': source_info,
+                'source_count': len(sources),
                 'os_filename': row['os_filename'],
                 'sheet_title': row['sheet_title'],
                 'gsfx_sha256': row['gsfx_sha256'],
@@ -73,12 +91,13 @@ def export_verified_pairs(connection: sqlite3.Connection, *, after_id: int = 0,
             manifest.append({key: metadata[key] for key in (
                 'id', 'gsfx_filename', 'os_filename', 'sheet_title',
                 'gsfx_sha256', 'os_sha256', 'matched_count', 'os_count',
-                'checked_prices', 'review_status',
+                'checked_prices', 'review_status', 'source_count',
             )})
         if not manifest:
             raise ValueError('There are no approved pairs with both original files.')
         archive.writestr('manifest.json', json.dumps({
-            'format': 'estimate-ai-verified-gsfx-os-pairs-v1',
+            'format': ('estimate-ai-verified-gsfx-os-pairs-v2' if includes_multi_source
+                       else 'estimate-ai-verified-gsfx-os-pairs-v1'),
             'exported_at_utc': datetime.now(timezone.utc).isoformat(),
             'total_pairs': len(manifest),
             'last_id': manifest[-1]['id'],

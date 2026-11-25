@@ -38,7 +38,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.web.grand_routes import install_grand_routes
 from app.web.lsr_learning_routes import install_lsr_learning_routes
-from app.services.lsr_evidence import EvidenceReport, evaluate_lsr_pair
+from app.services.lsr_evidence import EvidenceReport, evaluate_lsr_sources
 from app.services.catalog_source import CatalogNotAvailableError, database_has_catalog
 from app.services.read_estimate import (
     EstimateReadError,
@@ -186,11 +186,19 @@ class UploadRecord:
     output_path: Path | None = None
     output_name: str = ""
     owner_user_id: int | None = None
-    lsr_path: Path | None = None
-    lsr_name: str = ""
+    lsr_paths: tuple[Path, ...] = ()
+    lsr_names: tuple[str, ...] = ()
     evidence_sheet: str = ""
     evidence_report: EvidenceReport | None = None
     evidence_message: str = ""
+
+    @property
+    def lsr_path(self) -> Path | None:
+        return self.lsr_paths[0] if self.lsr_paths else None
+
+    @property
+    def lsr_name(self) -> str:
+        return self.lsr_names[0] if self.lsr_names else ''
 
 
 @dataclass
@@ -2171,7 +2179,7 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         request: Request,
         catalog: UploadFile | None = File(None),
         estimate: UploadFile | None = File(None),
-        lsr: UploadFile | None = File(None),
+        lsr: list[UploadFile] | None = File(None),
     ) -> HTMLResponse:
         state: AppState = app.state.app_state
         current_user = getattr(request.state, "user", None)
@@ -2193,15 +2201,24 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
         if catalog is not None:
             catalog_bytes = await catalog.read()
 
-        lsr_bytes = b""
-        if lsr is not None and lsr.filename:
+        lsr_uploads = [item for item in (lsr or []) if item.filename]
+        if lsr_uploads:
             if current_user is None:
                 return HTMLResponse(render_index("Для сохранения обучающих примеров войдите под своей учётной записью."), status_code=403)
-            if not lsr.filename.lower().endswith('.gsfx'):
-                return HTMLResponse(render_index('Дополнительная ЛСР должна иметь расширение .gsfx.'), status_code=400)
-            lsr_bytes = await lsr.read(12 * 1024 * 1024 + 1)
-            if not lsr_bytes or len(lsr_bytes) > 12 * 1024 * 1024:
+            if len(lsr_uploads) > 20:
+                return HTMLResponse(render_index('Можно приложить не более 20 ЛСР.'), status_code=400)
+        lsr_inputs: list[tuple[str, bytes]] = []
+        lsr_total_bytes = 0
+        for upload in lsr_uploads:
+            if not upload.filename.lower().endswith('.gsfx'):
+                return HTMLResponse(render_index('Все дополнительные ЛСР должны иметь расширение .gsfx.'), status_code=400)
+            content = await upload.read(12 * 1024 * 1024 + 1)
+            if not content or len(content) > 12 * 1024 * 1024:
                 return HTMLResponse(render_index('ЛСР пустая или больше 12 МБ.'), status_code=400)
+            lsr_total_bytes += len(content)
+            if lsr_total_bytes > 64 * 1024 * 1024:
+                return HTMLResponse(render_index('Общий размер ЛСР превышает 64 МБ.'), status_code=400)
+            lsr_inputs.append((_safe_name(upload.filename), content))
 
         use_database_catalog = False
         catalog_path: Path | None = None
@@ -2225,14 +2242,22 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             catalog_path = _save(directory, "catalog.xlsx", catalog_bytes)
         estimate_name = _safe_name(estimate.filename) or "estimate.xlsx"
         estimate_path = _save(directory, estimate_name, estimate_bytes)
-        lsr_path = _save(directory, 'evidence.gsfx', lsr_bytes) if lsr_bytes else None
-        if lsr_path is not None:
+        lsr_paths: list[Path] = []
+        for index, (_, content) in enumerate(lsr_inputs, 1):
+            lsr_paths.append(_save(directory, f'evidence_{index:02}.gsfx', content))
+        if lsr_paths:
             try:
-                parsed_lsr = read_gsfx(lsr_path)
-                if len(parsed_lsr.positions) > 10000:
-                    raise GrandSmetaFormatError('Слишком много позиций ЛСР')
+                total_positions = 0
+                for index, source_path in enumerate(lsr_paths):
+                    try:
+                        total_positions += len(read_gsfx(source_path).positions)
+                    except GrandSmetaFormatError as error:
+                        raise GrandSmetaFormatError(f'{lsr_inputs[index][0]}: {error}') from error
+                if total_positions > 10000:
+                    raise GrandSmetaFormatError('Слишком много позиций во всех ЛСР (более 10000)')
             except GrandSmetaFormatError as error:
-                lsr_path.unlink(missing_ok=True)
+                for source_path in lsr_paths:
+                    source_path.unlink(missing_ok=True)
                 return HTMLResponse(render_index('Ошибка дополнительной ЛСР: ' + str(error)), status_code=422)
 
         state.store[token] = UploadRecord(
@@ -2242,8 +2267,8 @@ def create_app(base_dir: str | Path | None = None) -> FastAPI:
             estimate_name=estimate_name,
             use_database_catalog=use_database_catalog,
             owner_user_id=(int(current_user.id) if current_user is not None else None),
-            lsr_path=lsr_path,
-            lsr_name=_safe_name(lsr.filename) if lsr_path is not None and lsr is not None else '',
+            lsr_paths=tuple(lsr_paths),
+            lsr_names=tuple(name for name, _ in lsr_inputs),
         )
         return _preview(state, token, selected_sheet=None)
 
@@ -2447,15 +2472,16 @@ def _preview(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
 
 
 def _evidence_report_message(record: UploadRecord, sheet_title: str) -> str:
-    if record.lsr_path is None:
+    if not record.lsr_paths:
         return ''
     if record.evidence_sheet == sheet_title:
         return record.evidence_message
     record.evidence_sheet = sheet_title
     record.evidence_report = None
     try:
-        report = evaluate_lsr_pair(record.estimate_path, record.lsr_path,
-                                   sheet_title=sheet_title)
+        report = evaluate_lsr_sources(record.estimate_path, record.lsr_paths,
+                                      sheet_title=sheet_title,
+                                      source_filenames=record.lsr_names)
     except (ValueError, OSError, KeyError, EstimateReadError, GrandSmetaFormatError) as error:
         record.evidence_message = 'Сверка ЛСР не выполнена; пример не будет сохранён: ' + str(error)
     else:
@@ -2571,11 +2597,11 @@ def _process(state: AppState, token: str, selected_sheet: str | None) -> HTMLRes
                 region=record.target_region or "",
                 use_tkp_analogs=record.use_tkp_analogs,
             )
-            if record.lsr_path is not None and record.evidence_report is not None and record.evidence_report.matched:
+            if record.lsr_paths and record.evidence_report is not None and record.evidence_report.matched:
                 try:
                     case_id, created = save_learning_case(
-                        connection, gsfx_path=record.lsr_path, os_path=record.estimate_path,
-                        gsfx_filename=record.lsr_name, os_filename=record.estimate_name,
+                        connection, gsfx_paths=record.lsr_paths, os_path=record.estimate_path,
+                        gsfx_filenames=record.lsr_names, os_filename=record.estimate_name,
                         sheet_title=record.evidence_sheet, author_user_id=record.owner_user_id,
                         job_token=token, report=record.evidence_report,
                     )

@@ -38,6 +38,11 @@ Implemented product flows:
   the catalog toolbar.
 - Compare the live TKP result with strict deterministic filtering and optional
   local Qwen3/BGE-M3 embedding models in an isolated shadow panel.
+- Optionally attach up to 20 original GrandSmeta `.gsfx` files to one OS `.xlsx`
+  during analog matching. The service verifies the combined set of source
+  positions against the OS and stores the original files together as one
+  quarantined evidence case. Only administrators can approve and export vetted
+  cases; this does not train the model or change live matching.
 
 Matching/pricing remains deterministic. No LLM or semantic matching is used
 inside the matching/pricing path. Shadow TKP comparisons are read-only and
@@ -75,6 +80,10 @@ Main web routes:
   import, and a full grid with filters, sorting, pagination, configurable
   columns, and resizable widths.
 - `/admin/settings` — database/settings diagnostics.
+- `/admin/lsr-learning` — administrator-only review and export of verified
+  one-OS-to-many-GSFX evidence sets. Schema v18 adds `lsr_learning_sources`
+  without replacing legacy single-GSFX cases. Back up the live database before
+  deployment; the normal Windows update script performs a backup.
 
 ## Project docs and AI handoff (2026-10-28)
 
